@@ -233,3 +233,85 @@ def test_app_emits_greeting_and_summary(make_client: Callable[..., TestClient]) 
     assert "ai" in state.stat_providers
     stats = client.get("/stats", headers={"Authorization": f"Bearer {TOKEN}"}).json()
     assert stats["ai"]["mode"] == "fake" and stats["ai"]["calls"]["fake"] >= 2
+
+
+# ---- review fixes ---------------------------------------------------------------------------------
+
+def _record_discards(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    discarded: list[str | None] = []
+
+    async def discard(reply: gemini.Reply) -> None:
+        discarded.append(reply.text)
+
+    monkeypatch.setattr(gemini, "discard", discard)
+    return discarded
+
+
+async def test_rejected_ai_answers_are_discarded_from_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    discarded = _record_discards(monkeypatch)
+    gemini.register_fake("greeting", lambda m, t: gemini.Reply(text="You have a torn ligament, Maya."))
+    bad_summary = json.dumps({"spoken": "Great set! You did 14 reps.", "therapist_note": "14 reps."})
+    gemini.register_fake("summary", lambda m, t: gemini.Reply(text=bad_summary))
+    voice, hub, session = await _setup()
+    voice.prepare_greeting(session)
+    await voice.on_event({"type": "arrived", "session_id": session.session_id})
+    await _play_set(voice, session.session_id)
+    assert discarded == ["You have a torn ligament, Maya.", bad_summary]
+
+
+async def test_only_unparseable_first_answer_discarded_after_good_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    discarded = _record_discards(monkeypatch)
+    good = json.dumps({"spoken": "Nice set!", "therapist_note": "Steady set."})
+    answers = iter(["not json", good])
+    gemini.register_fake("summary", lambda m, t: gemini.Reply(text=next(answers)))
+    voice, hub, session = await _setup()
+    await _play_set(voice, session.session_id)
+    assert discarded == ["not json"] and hub.of("summary_ready")[0]["source"] == "ai"
+
+
+async def test_greeting_still_emitted_when_preparation_crashes(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def boom(text: str, cache_key: str) -> str | None:
+        raise RuntimeError("tts bug")
+
+    monkeypatch.setattr(eleven, "tts", boom)
+    voice, hub, session = await _setup()
+    voice.prepare_greeting(session)
+    await voice.on_event({"type": "arrived", "session_id": session.session_id})
+    await voice.drain()
+    [greeting] = hub.of("greeting")
+    assert greeting["source"] == "template" and greeting["text"].startswith("Hi Maya!")
+
+
+async def test_tts_write_failure_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ELEVEN_API_KEY", "test-eleven-key")
+    monkeypatch.setenv("ELEVEN_VOICE_ID", "voice")
+    reload_config()
+    monkeypatch.setattr(eleven, "transport", httpx.MockTransport(lambda r: httpx.Response(200, content=b"mp3")))
+
+    def no_disk(dest: Path, data: bytes) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(eleven, "_write_atomic", no_disk)
+    assert await eleven.tts("Hello", "k") is None
+
+
+def test_mock_run_emits_greeting_and_enriched_cue(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    from server.state import get_state
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        state = get_state()
+        client.portal.call(lambda: _inject_cue(state))  # type: ignore[union-attr]
+        got: dict[str, dict[str, Any]] = {}
+        deadline = time.monotonic() + 10
+        while len(got) < 2 and time.monotonic() < deadline:
+            msg = ws.receive_json()
+            if msg["type"] == "greeting" or (msg["type"] == "cue" and msg["id"] == "knees_out"):
+                got[msg["type"]] = msg
+    assert "Maya" in got["greeting"]["text"]  # from the mock's own `arrived`, nothing injected
+    lines = [e["text"] for e in cue_library.library().entries["knees_out"]]
+    assert got["cue"]["text"] in lines and "audio_url" in got["cue"]
+
+
+async def _inject_cue(state: Any) -> None:
+    state.bridge.inject({"type": "cue", "id": "knees_out"})

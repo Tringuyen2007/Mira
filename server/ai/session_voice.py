@@ -194,6 +194,10 @@ class SessionVoice:
             text, audio_url, source = await asyncio.wait_for(asyncio.shield(self._greetings[sid]), GREETING_WAIT_S)
         except (asyncio.TimeoutError, TimeoutError):
             text, audio_url, source = self._fallback_greeting(self._greeting_data(session))
+        except Exception as exc:  # noqa: BLE001 - a failed preparation still greets with the template
+            log.warning("greeting preparation failed", extra={"session_id": sid, "error": repr(exc)})
+            self._greetings.pop(sid, None)
+            text, audio_url, source = template_greeting(self._greeting_data(session)), None, "template"
         self.hub.emit("greeting", {"session_id": sid, "t": round(time.time(), 3), "text": text,
                                    "audio_url": audio_url, "source": source})
 
@@ -212,6 +216,8 @@ class SessionVoice:
             reply = await gemini.ask("greeting", gemini.models.fast(), load_prompt("greeting"), [_data_message(data)],
                                      timeout_s=AI_TIMEOUT_S)
             text = validate_text(reply.text, "greeting", _numbers(data))
+            if text is None:
+                await gemini.discard(reply)
         except gemini.AIUnavailable as exc:
             log.info("greeting fallback", extra={"session_id": session.session_id, "reason": str(exc)})
         if text is None:
@@ -261,10 +267,14 @@ class SessionVoice:
         allowed = _numbers(data)
         spoken: str | None = None
         note: str | None = None
-        parsed = await self._ask_summary(sid, data)
+        parsed, replies = await self._ask_summary(sid, data)
         if parsed is not None:
             spoken = validate_text(parsed.spoken, "spoken", allowed)
             note = validate_text(parsed.therapist_note, "note", allowed)
+        # Never replay a rejected answer from the cache: keep only the reply that was fully accepted.
+        rejected = replies if spoken is None or note is None else replies[:-1]
+        for reply in rejected:
+            await gemini.discard(reply)
         source = "ai" if spoken is not None else "template"
         spoken = spoken or template_spoken(data)
         note = label_note(note) if note is not None else template_note(data)
@@ -274,7 +284,8 @@ class SessionVoice:
                                         "spoken": spoken, "therapist_note": note, "audio_url": audio_url,
                                         "source": source})
 
-    async def _ask_summary(self, sid: str, data: dict[str, Any]) -> SummaryOut | None:
+    async def _ask_summary(self, sid: str, data: dict[str, Any]) -> tuple[SummaryOut | None, list[gemini.Reply]]:
+        """The parsed answer (or None) and every reply received, so rejected ones can be discarded."""
         messages = [_data_message(data)]
         system = load_prompt("summary")
         try:
@@ -282,7 +293,8 @@ class SessionVoice:
                                      json_mode=True)
         except gemini.AIUnavailable as exc:
             log.info("summary fallback", extra={"session_id": sid, "reason": str(exc)})
-            return None
+            return None, []
+        replies = [reply]
 
         async def retry(error: str) -> str | None:
             fix = {"role": "user", "content": f"Your answer was rejected ({error}). Return only the JSON object "
@@ -292,9 +304,10 @@ class SessionVoice:
                                          [*messages, reply.as_message(), fix], timeout_s=AI_TIMEOUT_S, json_mode=True)
             except gemini.AIUnavailable:
                 return None
+            replies.append(again)
             return again.text
 
-        return await validate_json(reply.text, SummaryOut, retry)
+        return await validate_json(reply.text, SummaryOut, retry), replies
 
     async def _store(self, sid: str, spoken: str, note: str) -> None:
         """Persist to sessions.ai_summary / ai_note through server.db.writes when available (best effort)."""

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,11 @@ async def synthesize_to(text: str, dest: Path) -> bool:
     audio = await _request(text)
     if audio is None:
         return False
-    await asyncio.to_thread(_write_atomic, dest, audio)
+    try:
+        await asyncio.to_thread(_write_atomic, dest, audio)
+    except OSError as exc:
+        log.warning("tts file write failed", extra={"error": repr(exc)})
+        return False
     return True
 
 
@@ -81,7 +86,7 @@ async def _request(text: str) -> bytes | None:
 
 def _write_atomic(dest: Path, data: bytes) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".part")
+    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.{threading.get_ident()}.part")
     tmp.write_bytes(data)
     os.replace(tmp, dest)
 
