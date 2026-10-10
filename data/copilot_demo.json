@@ -1,0 +1,155 @@
+{
+  "question": "Which of my patients are compensating?",
+  "generated_at": "2026-10-10T16:18:59-05:00",
+  "generated_for_local_date": "2026-10-10",
+  "gemini_mode": "fake",
+  "source": "the real tool loop: guarded SQL on copilot_ro over the simulated history",
+  "answer": {
+    "answer": "Three patients are compensating over the last 21 days (depth improving while load on the affected leg drops), most first:\n1. Maya Ellis (right side): squat depth 61.3\u00b0 \u2192 85.3\u00b0, load on the affected leg 47.9% \u2192 36.8%.\n2. Daniel Reyes (left side): squat depth 70\u00b0 \u2192 82.1\u00b0, load on the affected leg 48% \u2192 41.9%.\n3. Grace Kim (right side): squat depth 64.9\u00b0 \u2192 71.9\u00b0, load on the affected leg 48.8% \u2192 44.8%.\nMaya Ellis's pain after back-to-back training days averaged 6/10, versus 2.3/10 otherwise.\nI drafted a plan proposal for you to review: a rest day between squat days and a weight-shift drill.",
+    "charts": [
+      {
+        "type": "line",
+        "title": "Maya Ellis: squat depth vs load on the affected leg",
+        "x_label": "day",
+        "y_label": "degrees / % body weight",
+        "series": [
+          {
+            "name": "p95 knee depth (\u00b0)",
+            "points": [
+              [
+                "2026-09-19",
+                57.7
+              ],
+              [
+                "2026-09-21",
+                62.6
+              ],
+              [
+                "2026-09-22",
+                63.6
+              ],
+              [
+                "2026-09-24",
+                65.6
+              ],
+              [
+                "2026-09-25",
+                65.6
+              ],
+              [
+                "2026-09-26",
+                68.9
+              ],
+              [
+                "2026-09-29",
+                72.2
+              ],
+              [
+                "2026-10-01",
+                75.8
+              ],
+              [
+                "2026-10-02",
+                77.0
+              ],
+              [
+                "2026-10-05",
+                80.8
+              ],
+              [
+                "2026-10-06",
+                82.1
+              ],
+              [
+                "2026-10-08",
+                84.8
+              ],
+              [
+                "2026-10-09",
+                88.9
+              ]
+            ]
+          },
+          {
+            "name": "affected-leg load (%)",
+            "points": [
+              [
+                "2026-09-19",
+                48.2
+              ],
+              [
+                "2026-09-21",
+                48.7
+              ],
+              [
+                "2026-09-22",
+                46.8
+              ],
+              [
+                "2026-09-24",
+                44.6
+              ],
+              [
+                "2026-09-25",
+                45.3
+              ],
+              [
+                "2026-09-26",
+                44.3
+              ],
+              [
+                "2026-09-29",
+                43.0
+              ],
+              [
+                "2026-10-01",
+                41.2
+              ],
+              [
+                "2026-10-02",
+                40.4
+              ],
+              [
+                "2026-10-05",
+                38.3
+              ],
+              [
+                "2026-10-06",
+                38.0
+              ],
+              [
+                "2026-10-08",
+                36.1
+              ],
+              [
+                "2026-10-09",
+                36.4
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence": [
+      "progress_v (squat, last 21 days): mean of the first vs last 3 session days of p95_knee and affected_load_pct",
+      "sessions.pain_post for Maya Ellis: 6 after a training day (6 days) vs 2.3 (6 days)"
+    ],
+    "sql": [
+      {
+        "query": "WITH w AS (SELECT v.patient_id, p.name, p.affected_side, v.day, v.p95_knee, v.affected_load_pct, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day) AS first_n, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day DESC) AS last_n, COUNT(*) OVER (PARTITION BY v.patient_id) AS days FROM progress_v AS v JOIN patients AS p ON p.id = v.patient_id WHERE v.exercise_id = 'squat' AND v.affected_load_pct IS NOT NULL AND v.day >= CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 21) SELECT patient_id, name, affected_side, MAX(days) AS days, ROUND(CAST(AVG(p95_knee) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS depth_from, ROUND(CAST(AVG(p95_knee) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS depth_to, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS load_from, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS load_to, ROUND(CAST((AVG(affected_load_pct) FILTER(WHERE first_n <= 3) - AVG(affected_load_pct) FILTER(WHERE last_n <= 3)) AS DECIMAL), 1) AS load_drop FROM w WHERE days >= 6 GROUP BY patient_id, name, affected_side HAVING AVG(p95_knee) FILTER(WHERE last_n <= 3) - AVG(p95_knee) FILTER(WHERE first_n <= 3) > 5 AND AVG(affected_load_pct) FILTER(WHERE first_n <= 3) - AVG(affected_load_pct) FILTER(WHERE last_n <= 3) > 2 ORDER BY load_drop DESC NULLS LAST LIMIT 200",
+        "rows": 3,
+        "ms": 13
+      },
+      {
+        "query": "SELECT CAST(day AS DATE) AS day, ROUND(CAST(p95_knee AS DECIMAL), 1) AS p95_knee, ROUND(CAST(affected_load_pct AS DECIMAL), 1) AS affected_load_pct FROM progress_v WHERE patient_id = 'maya' AND exercise_id = 'squat' AND day >= CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 21 ORDER BY day LIMIT 200",
+        "rows": 13,
+        "ms": 2
+      },
+      {
+        "query": "WITH d AS (SELECT CAST((started_at AT TIME ZONE 'America/Chicago') AS DATE) AS day, MAX(pain_post) AS pain_post FROM sessions WHERE patient_id = 'maya' AND exercise_id = 'squat' AND started_at >= CURRENT_TIMESTAMP - INTERVAL '21 DAYS' GROUP BY 1), t AS (SELECT day, pain_post, COALESCE(day - LAG(day) OVER (ORDER BY day) = 1, FALSE) AS after_training_day FROM d) SELECT after_training_day, COUNT(*) AS days, ROUND(CAST(AVG(pain_post) AS DECIMAL), 1) AS avg_pain_post FROM t GROUP BY after_training_day ORDER BY after_training_day LIMIT 200",
+        "rows": 2,
+        "ms": 1
+      }
+    ]
+  }
+}
