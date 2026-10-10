@@ -6,6 +6,7 @@ engine and the WebSockets never wait on the database (TRI.md §5.16, §10 H4).
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections import deque
@@ -47,7 +48,8 @@ def frame_row(frame: dict[str, Any], patient_id: str) -> tuple[Any, ...]:
 
 class FrameWriter:
     def __init__(self, dsn: str, *, patient_provider: Callable[[], str | None] | None = None,
-                 max_queue: int = MAX_QUEUE, flush_interval_s: float = FLUSH_INTERVAL_S) -> None:
+                 max_queue: int = MAX_QUEUE, flush_interval_s: float = FLUSH_INTERVAL_S,
+                 backoff_max_s: float = BACKOFF_MAX_S) -> None:
         self._dsn = dsn
         self._patient_provider = patient_provider
         self._max_queue = max_queue
@@ -58,6 +60,7 @@ class FrameWriter:
         self._thread: threading.Thread | None = None
         self._conn: psycopg.Connection[Any] | None = None
         self._backoff = BACKOFF_MIN_S
+        self._backoff_max = backoff_max_s
         self._retry_at = 0.0
         self._written: deque[tuple[float, int]] = deque()
         self.written_total = 0
@@ -109,13 +112,22 @@ class FrameWriter:
     # ---- writer thread ------------------------------------------------------------------------------------
 
     def _run(self) -> None:
+        """Flush every interval until stopped. Retries forever (capped backoff); nothing ends the thread early."""
         while not self._stop.wait(self._interval):
-            self._flush()
+            self._flush_guarded()
         self._retry_at = 0.0
-        self._flush()
+        self._flush_guarded()
         if self._conn is not None:
-            self._conn.close()
+            with contextlib.suppress(Exception):
+                self._conn.close()
             self._conn = None
+
+    def _flush_guarded(self) -> None:
+        try:
+            self._flush()
+        except Exception as exc:  # noqa: BLE001 - an unexpected bug must not kill the writer thread
+            log.exception("frame writer: unexpected error, batch dropped", extra={"error": _short(exc)})
+            self._failed(exc)
 
     def _take(self) -> list[tuple[dict[str, Any], str]]:
         with self._lock:
@@ -178,15 +190,13 @@ class FrameWriter:
     def _failed(self, exc: Exception) -> None:
         self.errors += 1
         if self._conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._conn.close()
-            except psycopg.Error:
-                pass
             self._conn = None
         self._retry_at = time.monotonic() + self._backoff
         log.warning("frame writer: database unreachable, retrying", extra={"retry_in_s": self._backoff,
                                                                            "error": _short(exc)})
-        self._backoff = min(self._backoff * 2, BACKOFF_MAX_S)
+        self._backoff = min(self._backoff * 2, self._backoff_max)
 
 
 def _short(exc: BaseException) -> str:
