@@ -13,8 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.agents import copilot_fake
-from server.agents.copilot import (DEMO_QUESTION, MAX_STEPS, NUDGE, Copilot, PlanChange, cached_demo_answer,
-                                   is_demo_question)
+from server.agents.copilot import (DEMO_QUESTION, FINAL_ONLY, MAX_STEPS, NUDGE, REVIEW_CLOSE, Copilot, PlanChange,
+                                   allowed_tools_for, cached_demo_answer, is_demo_question)
 from server.ai import gemini
 from server.ai.gemini import FunctionCall, Reply
 from server.ai.validators import extract_numbers
@@ -48,14 +48,24 @@ async def db(sim: tuple[str, dict[str, Any]]) -> AsyncIterator[Database]:
     await database.close()
 
 
-@pytest.fixture
-def script() -> Iterator[Callable[[Callable[[list[dict[str, Any]]], Reply]], list[list[dict[str, Any]]]]]:
-    """Replace the copilot fake with a scripted one; returns the list of message lists it was called with."""
-    def install(fn: Callable[[list[dict[str, Any]]], Reply]) -> list[list[dict[str, Any]]]:
-        seen: list[list[dict[str, Any]]] = []
+class Seen(list[list[dict[str, Any]]]):
+    """The message lists the scripted fake was called with; `.allowed` = the allowed_tools of each call."""
 
-        def fake(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> Reply:
+    def __init__(self) -> None:
+        super().__init__()
+        self.allowed: list[list[str] | None] = []
+
+
+@pytest.fixture
+def script() -> Iterator[Callable[[Callable[[list[dict[str, Any]]], Reply]], Seen]]:
+    """Replace the copilot fake with a scripted one; returns the list of message lists it was called with."""
+    def install(fn: Callable[[list[dict[str, Any]]], Reply]) -> Seen:
+        seen = Seen()
+
+        def fake(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, *,
+                 allowed_tools: list[str] | None = None) -> Reply:
             seen.append(json.loads(json.dumps(messages)))
+            seen.allowed.append(allowed_tools)
             return fn(messages)
         gemini.register_fake("copilot", fake)
         return seen
@@ -224,6 +234,7 @@ async def test_invented_number_gets_one_fix_then_falls_back(db: Database, script
     seen = script(fn)
     out = await Copilot(db).ask("How many patients do I have?")
     assert len(seen) == 3  # query, answer, answer again after the fix request
+    assert seen.allowed == [None, None, FINAL_ONLY]  # the fix attempt must be a final_answer
     fix = _tools(seen[2])[-1]
     assert fix["name"] == "final_answer" and "4321" in fix["content"]["error"]
     assert out["fallback"].startswith("final answer rejected twice") and "4321" not in out["answer"]
@@ -253,6 +264,56 @@ async def test_step_cap_and_text_replies(db: Database, script: Any) -> None:
     assert len(seen) == MAX_STEPS
     assert seen[1][-1] == {"role": "user", "content": NUDGE}
     assert out["fallback"] == "step limit" and len(out["sql"]) == MAX_STEPS - 1
+    assert seen.allowed == [None] * (MAX_STEPS - 1) + [FINAL_ONLY]  # the last step must answer
+
+
+def test_allowed_tools_per_step() -> None:
+    assert [allowed_tools_for(s, "ask", False) for s in range(MAX_STEPS)] == [None] * (MAX_STEPS - 1) + [FINAL_ONLY]
+    review = [allowed_tools_for(s, "weekly_review", False) for s in range(MAX_STEPS)]
+    assert review == [None] * (MAX_STEPS - 2) + [REVIEW_CLOSE, FINAL_ONLY]
+    assert allowed_tools_for(MAX_STEPS - 2, "weekly_review", True) == FINAL_ONLY  # proposal made: just finish
+    assert allowed_tools_for(1, "ask", False, fixing=True) == FINAL_ONLY
+
+
+async def test_last_step_is_forced_to_final_answer(db: Database, script: Any) -> None:
+    def fn(messages: list[dict[str, Any]]) -> Reply:
+        if len(_tools(messages)) < MAX_STEPS - 1:
+            return _call("run_sql", query="SELECT count(*) AS n FROM patients")
+        return _call("final_answer", answer="Only 1 session day so far: there isn't enough data for a trend.")
+    seen = script(fn)
+    out = await Copilot(db).ask("How is Chloe's depth trending?")
+    assert seen.allowed[-1] == ["final_answer"] and all(a is None for a in seen.allowed[:-1])
+    assert out["fallback"] is None and "enough data" in out["answer"] and len(out["sql"]) == MAX_STEPS - 1
+
+
+async def test_weekly_review_forces_proposal_or_answer_then_answer(db: Database, script: Any) -> None:
+    def fn(messages: list[dict[str, Any]]) -> Reply:
+        n = len(_tools(messages))
+        if n == 0:
+            return _call("get_patient_summary", patient_id="maya")
+        if n < MAX_STEPS - 2:
+            return _call("run_sql", query="SELECT count(*) AS n FROM sessions WHERE patient_id = 'maya'")
+        if n == MAX_STEPS - 2:
+            return _call("create_plan_proposal", patient_id="maya", rationale="Load on the affected leg dropped.",
+                         evidence=[], change={"exercise_id": "squat", "rest_days_between": 1})
+        return _call("final_answer", answer="Proposal left for your review.")
+    seen = script(fn)
+    out = await Copilot(db).review_patient("maya")
+    assert seen.allowed == [None] * (MAX_STEPS - 2) + [REVIEW_CLOSE, FINAL_ONLY]
+    assert len(out["proposals"]) == 1 and out["fallback"] is None
+
+    def early(messages: list[dict[str, Any]]) -> Reply:  # proposal made early: the step before last just finishes
+        n = len(_tools(messages))
+        if n == 0:
+            return _call("create_plan_proposal", patient_id="maya", rationale="Load on the affected leg dropped.",
+                         evidence=[], change={"exercise_id": "squat", "rest_days_between": 1})
+        if n < MAX_STEPS - 2:
+            return _call("get_patient_summary", patient_id="maya")
+        return _call("final_answer", answer="Proposal left for your review.")
+    seen = script(early)
+    out = await Copilot(db).review_patient("maya")
+    assert seen.allowed == [None] * (MAX_STEPS - 2) + [FINAL_ONLY]
+    assert out["fallback"] is None
 
 
 async def test_ai_unavailable_falls_back_and_demo_uses_the_cache(

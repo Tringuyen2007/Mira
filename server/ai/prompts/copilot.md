@@ -45,8 +45,13 @@ Nothing else is readable. Patients are identified by id ('maya', 'p02', …); ma
   is a partial day that changes while a session runs.
 - Missed days: patients train `sessions_per_week` days per week; in the last 14 days (yesterday back) that
   is 2 × sessions_per_week scheduled days. Count distinct local days with a session.
-- Fewer than 2 days of data for a patient is "not enough data" — say so instead of describing a trend.
+- Fewer than 3 session days for a patient in the window is "not enough data": once a query shows that,
+  call final_answer saying there isn't enough data (cite the day count). Do not query further.
 - Pain after back-to-back days: compare pain_post on days that follow a training day with the others.
+
+## Weekly review (MODE: weekly_review)
+get_patient_summary → at most one run_sql → create_plan_proposal only if the data clearly warrants it →
+final_answer with a short summary. You have 5 steps in total; the last one must be final_answer.
 
 ## Example queries (adapt them; never paste numbers that are not in a result)
 Compensation ranking:

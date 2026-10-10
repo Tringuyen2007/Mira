@@ -1,7 +1,9 @@
 """Care Copilot (TRI §7.5): answers the therapist's questions from real data and suggests plan changes as
 proposal cards the therapist approves.
 
-The loop: Gemini (smart model, 8 s per call, ≤ 5 steps) picks tools; the server validates every call. SQL goes
+The loop: Gemini (smart model, 8 s per call, ≤ 5 steps) picks tools; the server validates every call. The last step
+(and the fix attempt after a rejected answer) is forced to final_answer; in weekly review the step before it may
+only create the proposal or finish. SQL goes
 through `sql_guard` to the read-only copilot_ro pool; proposals and drafts are inserted only by fixed functions in
 `server.db.writes`. Tool results go back labelled as data, with phone numbers removed. Every number in the final
 answer must appear in a tool result: the model gets one chance to fix it, then the answer falls back.
@@ -320,6 +322,29 @@ def fallback_answer(sql_log: list[dict[str, Any]], reason: str) -> dict[str, Any
     return {"answer": text, "charts": [], "evidence": [], "sql": sql_log, "cached": False, "fallback": reason}
 
 
+# ---- step forcing (TRI row "agent loops without answering") ------------------------------------------------
+
+FINAL_ONLY = ["final_answer"]
+REVIEW_CLOSE = ["create_plan_proposal", "final_answer"]
+
+
+def allowed_tools_for(step: int, mode: str, has_proposal: bool, *, fixing: bool = False) -> list[str] | None:
+    """Tools the model may call at `step` (0-based); None = free choice (text or any tool).
+
+    The last step and the fix attempt after a rejected final answer must call final_answer. In weekly review the
+    step before the last may only create the proposal (if none exists yet) or finish."""
+    if fixing or step >= MAX_STEPS - 1:
+        return FINAL_ONLY
+    if mode == "weekly_review" and step == MAX_STEPS - 2:
+        return FINAL_ONLY if has_proposal else REVIEW_CLOSE
+    return None
+
+
+def _last_was_rejected(msgs: list[dict[str, Any]]) -> bool:
+    last = msgs[-1]
+    return last.get("role") == "tool" and last.get("name") == "final_answer"
+
+
 # ---- the agent ---------------------------------------------------------------------------------------------
 
 class Copilot:
@@ -343,10 +368,12 @@ class Copilot:
         proposals: list[int] = []
         fix_asked = False
         reason = "step limit"
-        for _ in range(MAX_STEPS):
+        for step in range(MAX_STEPS):
+            allowed = allowed_tools_for(step, mode, bool(proposals), fixing=fix_asked and _last_was_rejected(msgs))
             try:
                 reply = await gemini.ask(AGENT, gemini.models.smart(), self.system, msgs, TOOLS,
-                                         timeout_s=GEMINI_TIMEOUT_S, background=self.background)
+                                         timeout_s=GEMINI_TIMEOUT_S, background=self.background,
+                                         allowed_tools=allowed)
             except gemini.AIUnavailable as exc:
                 reason = f"ai unavailable: {exc}"
                 break
@@ -362,6 +389,9 @@ class Copilot:
                 await gemini.discard(reply)
                 if fix_asked:
                     reason = f"final answer rejected twice: {problem}"
+                    break
+                if step == MAX_STEPS - 1:
+                    reason = f"final answer rejected on the last step: {problem}"
                     break
                 fix_asked = True
                 msgs += [reply.as_message(), tool_message(call, {"error": problem})]

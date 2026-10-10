@@ -9,6 +9,9 @@ function call, so callers should append `reply.as_message()` unchanged.
 
 Modes (GEMINI_MODE): fake = registered fake per agent; replay = saved answers from DATA_DIR/ai_cache, else fake;
 live = cache, else the real API. Any failure raises AIUnavailable and the caller uses its fallback.
+
+`allowed_tools` forces a function call restricted to those tool names (function calling mode ANY); None = the
+model may answer with text or any tool. Fakes see it only if they take an `allowed_tools` keyword.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -112,13 +116,19 @@ class Reply:
                    cached=cached, thought_signature=data.get("thought_signature"), model=data.get("model"))
 
 
-FakeFn = Callable[[list[dict[str, Any]], list[dict[str, Any]] | None], Reply]
+FakeFn = Callable[..., Reply]
 _fakes: dict[str, FakeFn] = {}
+_fake_takes_allowed: dict[str, bool] = {}
 
 
 def register_fake(agent: str, fn: FakeFn) -> None:
-    """Fake-mode (and replay-miss) behaviour for `agent`: fn(messages, tools) -> Reply."""
+    """Fake-mode (and replay-miss) behaviour for `agent`: fn(messages, tools[, allowed_tools=...]) -> Reply."""
     _fakes[agent] = fn
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        params = []  # type: ignore[assignment]
+    _fake_takes_allowed[agent] = any(p.name == "allowed_tools" or p.kind is p.VAR_KEYWORD for p in params)
 
 
 def fast_model() -> str:
@@ -253,9 +263,12 @@ def model_chain(model: str) -> list[str]:
 # ---- cache ----------------------------------------------------------------------------------------
 
 def cache_key(model: str, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
-              json_mode: bool = False) -> str:
-    blob = json.dumps({"model": model, "system": system, "messages": messages, "tools": tools or [],
-                       "json": json_mode}, sort_keys=True, ensure_ascii=False, default=str)
+              json_mode: bool = False, allowed_tools: list[str] | None = None) -> str:
+    data: dict[str, Any] = {"model": model, "system": system, "messages": messages, "tools": tools or [],
+                            "json": json_mode}
+    if allowed_tools is not None:  # absent when unused, so existing recordings keep their keys
+        data["allowed_tools"] = list(allowed_tools)
+    blob = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -318,17 +331,23 @@ def to_sdk_contents(messages: list[dict[str, Any]]) -> list[types.Content]:
 
 
 def to_sdk_config(system: str, tools: list[dict[str, Any]] | None, json_mode: bool,
-                  thinking_config: types.ThinkingConfig | None = None) -> types.GenerateContentConfig:
+                  thinking_config: types.ThinkingConfig | None = None,
+                  allowed_tools: list[str] | None = None) -> types.GenerateContentConfig:
     sdk_tools = None
+    tool_config = None
     if tools:
         sdk_tools = [types.Tool(function_declarations=[
             types.FunctionDeclaration(name=t["name"], description=t.get("description", ""),
                                       parameters_json_schema=t.get("parameters") or {"type": "object",
                                                                                      "properties": {}})
             for t in tools])]
+        if allowed_tools:
+            tool_config = types.ToolConfig(function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY, allowed_function_names=list(allowed_tools)))
     return types.GenerateContentConfig(
         system_instruction=system or None,
         tools=sdk_tools,
+        tool_config=tool_config,
         response_mime_type="application/json" if json_mode else None,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         thinking_config=thinking_config,
@@ -448,11 +467,11 @@ def _classify(exc: BaseException) -> Exception:
 
 
 async def _call_sdk(model: str, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
-                    json_mode: bool) -> Reply:
+                    json_mode: bool, allowed_tools: list[str] | None = None) -> Reply:
     contents = to_sdk_contents(messages)
     thinking = _thinking_config(model)
     try:
-        resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, thinking))
+        resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, thinking, allowed_tools))
         return from_sdk_response(resp)
     except asyncio.CancelledError:
         raise
@@ -464,7 +483,7 @@ async def _call_sdk(model: str, system: str, messages: list[dict[str, Any]], too
             log.info("gemini thinking_level rejected, retrying without it",
                      extra={"model": model, "level": cfg.GEMINI_THINKING_LEVEL})
             try:
-                resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, None))
+                resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, None, allowed_tools))
                 return from_sdk_response(resp)
             except asyncio.CancelledError:
                 raise
@@ -536,13 +555,17 @@ def stats() -> dict[str, Any]:
 
 # ---- ask ------------------------------------------------------------------------------------------
 
-def _fake(agent: str, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> Reply:
+def _fake(agent: str, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
+          allowed_tools: list[str] | None = None) -> Reply:
     fn = _fakes.get(agent)
     if fn is None:
         _counters["unavailable"] += 1
         raise AIUnavailable(f"no fake registered for agent {agent!r}")
     try:
-        reply = fn(messages, tools)
+        if _fake_takes_allowed.get(agent):
+            reply = fn(messages, tools, allowed_tools=allowed_tools)
+        else:
+            reply = fn(messages, tools)
     except Exception as exc:  # noqa: BLE001 - ask() only ever raises AIUnavailable
         _counters["unavailable"] += 1
         raise AIUnavailable(f"fake for {agent!r} failed: {exc!r}") from None
@@ -554,15 +577,19 @@ def _fake(agent: str, model: str, messages: list[dict[str, Any]], tools: list[di
 
 async def ask(agent: str, model: str, system: str, messages: list[dict[str, Any]],
               tools: list[dict[str, Any]] | None = None, timeout_s: float = 4.0, background: bool = False,
-              json_mode: bool = False) -> Reply:
-    """One model turn. `json_mode` asks for a JSON response. Raises AIUnavailable; never anything else."""
+              json_mode: bool = False, allowed_tools: list[str] | None = None) -> Reply:
+    """One model turn. `json_mode` asks for a JSON response; `allowed_tools` forces a call to one of those tools
+    (names not in `tools` are dropped; none left = no restriction). Raises AIUnavailable; never anything else."""
     if cfg.GEMINI_DISABLED:
         _counters["unavailable"] += 1
         raise AIUnavailable("disabled")
+    if allowed_tools is not None:
+        names = {t["name"] for t in tools or []}
+        allowed_tools = [n for n in allowed_tools if n in names] or None
     mode = cfg.GEMINI_MODE
     if mode == "fake":
-        return _fake(agent, model, messages, tools)
-    key = cache_key(model, system, messages, tools, json_mode)
+        return _fake(agent, model, messages, tools, allowed_tools)
+    key = cache_key(model, system, messages, tools, json_mode, allowed_tools)
     hit = await asyncio.to_thread(_read_cache, key)
     if hit is not None:
         hit.cache_key = key
@@ -570,14 +597,15 @@ async def ask(agent: str, model: str, system: str, messages: list[dict[str, Any]
         _record(agent, hit.model or model, 0, True, True, None)
         return hit
     if mode == "replay":
-        return _fake(agent, model, messages, tools)
+        return _fake(agent, model, messages, tools, allowed_tools)
     if mode != "live":
         _counters["unavailable"] += 1
         raise AIUnavailable(f"unknown GEMINI_MODE {mode!r}")
     if not cfg.GEMINI_API_KEY:
         _counters["unavailable"] += 1
         raise AIUnavailable("no api key")
-    reply = await _ask_live(agent, model, system, messages, tools, timeout_s, background, json_mode)
+    reply = await _ask_live(agent, model, system, messages, tools, timeout_s, background, json_mode,
+                            allowed_tools)
     try:
         await asyncio.to_thread(_write_cache, key, agent, model, reply)
         reply.cache_key = key
@@ -600,7 +628,7 @@ async def discard(reply: Reply) -> None:
 
 async def _ask_live(agent: str, model: str, system: str, messages: list[dict[str, Any]],
                     tools: list[dict[str, Any]] | None, timeout_s: float, background: bool,
-                    json_mode: bool) -> Reply:
+                    json_mode: bool, allowed_tools: list[str] | None = None) -> Reply:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s * DEADLINE_FACTOR
     last_error = "unavailable"
@@ -621,7 +649,7 @@ async def _ask_live(agent: str, model: str, system: str, messages: list[dict[str
             budget.count(m)
             started = loop.time()
             try:
-                reply = await asyncio.wait_for(_call_sdk(m, system, messages, tools, json_mode),
+                reply = await asyncio.wait_for(_call_sdk(m, system, messages, tools, json_mode, allowed_tools),
                                                min(timeout_s, remaining))
             except (asyncio.TimeoutError, TimeoutError):
                 _counters["live_failed"] += 1

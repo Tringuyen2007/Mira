@@ -497,3 +497,61 @@ def test_text_part_thought_signature_is_kept() -> None:
     assert reply.thought_signature == base64.b64encode(b"txt-sig").decode()
     [content] = gemini.to_sdk_contents([reply.as_message()])
     assert content.parts[0].thought_signature == b"txt-sig"
+
+
+# ---- allowed_tools (forced function calls) -------------------------------------------------------
+
+TOOLS = [{"name": "run_sql", "description": "", "parameters": {"type": "object", "properties": {}}},
+         {"name": "final_answer", "description": "", "parameters": {"type": "object", "properties": {}}}]
+
+
+def test_cache_key_depends_on_allowed_tools() -> None:
+    base = gemini.cache_key("m", "s", USER, TOOLS)
+    assert base == gemini.cache_key("m", "s", USER, TOOLS, allowed_tools=None)  # old recordings keep their keys
+    forced = gemini.cache_key("m", "s", USER, TOOLS, allowed_tools=["final_answer"])
+    assert forced != base and forced != gemini.cache_key("m", "s", USER, TOOLS, allowed_tools=["run_sql"])
+
+
+def test_allowed_tools_to_sdk_config() -> None:
+    assert gemini.to_sdk_config("s", TOOLS, json_mode=False).tool_config is None
+    config = gemini.to_sdk_config("s", TOOLS, json_mode=False, allowed_tools=["final_answer"])
+    fcc = config.tool_config.function_calling_config
+    assert fcc.mode == types.FunctionCallingConfigMode.ANY and fcc.allowed_function_names == ["final_answer"]
+
+
+async def test_live_ask_sends_allowed_tools_and_caches_separately(monkeypatch: pytest.MonkeyPatch) -> None:
+    call = types.GenerateContentResponse.model_validate({"candidates": [{"content": {"role": "model", "parts": [
+        {"functionCall": {"name": "final_answer", "args": {"answer": "ok"}}}]}, "finishReason": "STOP"}]})
+    send = FakeSend(_text_response("free"), call)
+    _live(monkeypatch, send)
+    free = await gemini.ask("a", "m", "sys", USER, TOOLS)
+    forced = await gemini.ask("a", "m", "sys", USER, TOOLS, allowed_tools=["final_answer", "not_a_tool"])
+    assert free.text == "free" and forced.function_call is not None and not forced.cached
+    assert send.requests[0][1].tool_config is None
+    fcc = send.requests[1][1].tool_config.function_calling_config
+    assert fcc.mode == types.FunctionCallingConfigMode.ANY and fcc.allowed_function_names == ["final_answer"]
+    again = await gemini.ask("a", "m", "sys", USER, TOOLS, allowed_tools=["final_answer"])
+    assert again.cached and again.function_call.name == "final_answer" and len(send.models) == 2
+
+
+async def test_fake_and_replay_modes_accept_allowed_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    old_style: list[Any] = []
+    gemini.register_fake("old", lambda m, t: old_style.append(t) or gemini.Reply(text="old"))
+    assert (await gemini.ask("old", "m", "s", USER, TOOLS, allowed_tools=["final_answer"])).text == "old"
+    assert old_style == [TOOLS]  # a fake without the keyword is called exactly as before
+
+    seen: list[Any] = []
+
+    def new_style(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, *,
+                  allowed_tools: list[str] | None = None) -> gemini.Reply:
+        seen.append(allowed_tools)
+        return gemini.Reply(text="new")
+
+    gemini.register_fake("new", new_style)
+    await gemini.ask("new", "m", "s", USER, TOOLS)
+    await gemini.ask("new", "m", "s", USER, TOOLS, allowed_tools=["final_answer"])
+    await gemini.ask("new", "m", "s", USER, TOOLS, allowed_tools=["nope"])  # nothing valid left: no restriction
+    monkeypatch.setenv("GEMINI_MODE", "replay")
+    reload_config()
+    await gemini.ask("new", "m", "s", USER, TOOLS, allowed_tools=["run_sql"])
+    assert seen == [None, ["final_answer"], None, ["run_sql"]]
