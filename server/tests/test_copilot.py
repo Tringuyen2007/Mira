@@ -252,8 +252,8 @@ async def test_cached_demo_flag_skips_gemini(db: Database, script: Any, monkeypa
     assert is_demo_question("Which of my patients are compensating?") and not is_demo_question("Who missed days?")
 
 
-def test_committed_demo_cache_is_real_data() -> None:
-    cached = cached_demo_answer()
+async def test_committed_demo_cache_is_real_data() -> None:
+    cached = await cached_demo_answer()
     assert cached is not None and cached["cached"] is True
     assert cached["sql"] and all("progress_v" in e["query"] or "sessions" in e["query"] for e in cached["sql"])
     assert "Maya" in cached["answer"]

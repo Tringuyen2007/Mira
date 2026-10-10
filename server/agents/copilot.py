@@ -149,7 +149,8 @@ _CHANGE_SCHEMA = {
         "sets": {"type": "integer", "minimum": 1, "maximum": 10},
         "reps": {"type": "integer", "minimum": 1, "maximum": 30},
         "rest_days_between": {"type": "integer", "minimum": 0, "maximum": 3},
-        "add": {"type": "array", "items": {"type": "string"}, "description": "drill ids to add, e.g. weight_shift_drill"},
+        "add": {"type": "array", "items": {"type": "string"},
+                "description": "drill ids to add, e.g. weight_shift_drill"},
         "remove": {"type": "array", "items": {"type": "string"}},
         "targets": {"type": "object", "description": "target name → value, e.g. {\"knee_deg\": 80}"},
     },
@@ -283,7 +284,12 @@ def demo_cache_paths() -> list[Path]:
     return [Path(cfg.DATA_DIR) / DEMO_CACHE_NAME, REPO_ROOT / "data" / DEMO_CACHE_NAME]
 
 
-def cached_demo_answer() -> dict[str, Any] | None:
+async def cached_demo_answer() -> dict[str, Any] | None:
+    """The cached answer to the demo question (read off the event loop), or None."""
+    return await asyncio.to_thread(_read_demo_cache)
+
+
+def _read_demo_cache() -> dict[str, Any] | None:
     for path in demo_cache_paths():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -317,7 +323,7 @@ class Copilot:
                   use_cache: bool = True) -> dict[str, Any]:
         demo = use_cache and is_demo_question(question)
         if demo and cfg.COPILOT_CACHED_DEMO:
-            cached = cached_demo_answer()
+            cached = await cached_demo_answer()
             if cached is not None:
                 return cached
         msgs: list[dict[str, Any]] = [user_message(question, patient_id, mode)]
@@ -356,7 +362,7 @@ class Copilot:
             msgs += [reply.as_message(), tool_message(call, content)]
         log.warning("copilot fell back", extra={"reason": reason[:200]})
         if demo:
-            cached = cached_demo_answer()
+            cached = await cached_demo_answer()
             if cached is not None:
                 return cached
         return {**fallback_answer(sql_log, reason), "proposals": proposals}
@@ -467,9 +473,12 @@ class Copilot:
             raise Rejected("rationale/evidence cite numbers not found in any tool result: "
                            + ", ".join(_fmt(n) for n in bad))
         change = args.change.model_dump(exclude_none=True)
-        existing = await self.db.fetchrow(
-            "SELECT id FROM plan_proposals WHERE patient_id = %s AND status = 'pending' AND change = %s",
-            (args.patient_id, Jsonb(change)))
+        try:
+            existing = await self.db.fetchrow(
+                "SELECT id FROM plan_proposals WHERE patient_id = %s AND status = 'pending' AND change = %s",
+                (args.patient_id, Jsonb(change)))
+        except DBError as exc:
+            raise Rejected(f"the proposal could not be saved (database unavailable: {exc})") from None
         if existing is not None:
             return int(existing["id"])
         evidence = {"items": args.evidence, "sql": [e["query"] for e in sql_log if "error" not in e]}

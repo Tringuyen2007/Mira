@@ -151,8 +151,11 @@ def _num(v: Any) -> str:
     return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
 
+_COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
+
+
 def _count_word(n: int) -> str:
-    return ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"][n] if n <= 10 else str(n)
+    return _COUNT_WORDS[n] if n < len(_COUNT_WORDS) else str(n)
 
 
 def _could_not(ctx: Ctx) -> Reply:

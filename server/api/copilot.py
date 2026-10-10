@@ -26,7 +26,7 @@ async def ask(body: AskIn) -> dict[str, Any]:
     state = get_state()
     db = state.db
     if db is None or not db.has_ro:
-        cached = cached_demo_answer() if cfg.COPILOT_CACHED_DEMO and is_demo_question(body.question) else None
+        cached = await cached_demo_answer() if cfg.COPILOT_CACHED_DEMO and is_demo_question(body.question) else None
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=NO_DB_DETAIL)
