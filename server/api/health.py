@@ -56,14 +56,26 @@ async def health_data() -> dict[str, Any]:
         out["scheduler"] = state.scheduler.stats().get("data_guard")
     if state.db is None:
         return {**out, "reason": "no database (TIGER_DSN unset or DB_DISABLED=1)"}
+    grant_problems: list[str] = []
+    if state.db.has_ro:
+        try:
+            grant_problems = await queries.copilot_ro_grant_problems(state.db)
+        except DBError as exc:
+            out["copilot_ro_grants"] = {"ok": None, "error": str(exc)}
+        else:
+            out["copilot_ro_grants"] = {"ok": not grant_problems, "problems": grant_problems}
+            if grant_problems:
+                out["copilot_ro_grants"]["fix"] = queries.ROLES_FIX
     try:
         rows = await queries.latest_data_checks(state.db)
     except DBError as exc:
         return {**out, "reason": str(exc)}
+    if grant_problems:
+        out.update(status="failing", reason="copilot_ro grants are stale: " + "; ".join(grant_problems))
     if not rows:
-        return {**out, "reason": "the Data Guard has not run yet"}
+        return {"reason": "the Data Guard has not run yet", **out}
     checks = [{"check_name": r["check_name"], "status": r["status"], "details": r["details"],
                "time": r["time"].isoformat()} for r in rows]
-    failing = any(c["status"] in FAILING_STATUSES for c in checks)
+    failing = bool(grant_problems) or any(c["status"] in FAILING_STATUSES for c in checks)
     return {**out, "status": "failing" if failing else "ok", "checks": checks,
             "last_run": max(r["time"] for r in rows).isoformat()}

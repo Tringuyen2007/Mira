@@ -28,6 +28,7 @@ from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
+from server.db import queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if cfg.TIGER_DSN and not cfg.DB_DISABLED:
         db = Database(cfg.TIGER_DSN, cfg.COPILOT_DSN)
         await db.open()
+        await _warn_on_stale_grants(db)
         persistence = SessionPersistence(db)
     sessions = SessionRegistry(store=persistence)
     if persistence is not None:
@@ -147,6 +149,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         set_state(None)
         log.info("stopped")
         shutdown_logging()
+
+
+async def _warn_on_stale_grants(db: Database) -> None:
+    """One clear WARNING when copilot_ro's grants don't match roles.sql (the Data Guard would only report
+    "permission denied" errors)."""
+    if not (db.available and db.has_ro):
+        return
+    try:
+        problems = await queries.copilot_ro_grant_problems(db)
+    except DBError as exc:
+        log.warning("could not check copilot_ro grants", extra={"error": str(exc)})
+        return
+    if problems:
+        log.warning("copilot_ro grants are stale", extra={"problems": problems, "fix": queries.ROLES_FIX})
 
 
 def _client_event_handler() -> Callable[[dict[str, Any]], None]:

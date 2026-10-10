@@ -261,6 +261,41 @@ async def notification_counts(db: Database, therapist_id: str | None = None) -> 
     return {"unread": int(row.get("unread") or 0), "urgent_unacked": int(row.get("urgent_unacked") or 0)}
 
 
+# ---- copilot_ro grants (roles.sql) --------------------------------------------------------------------
+
+ROLES_FIX = ("re-apply server/db/roles.sql as the owner: make db-setup DSN=\"<owner DSN>\" (Tiger) or "
+             "make db-local (local)")
+# Relations the agents and the Data Guard read as copilot_ro (roles.sql), checked by name.
+RO_TABLES = ("progress_v", "sessions", "reps", "form_events", "memory_events", "prescriptions", "pose_frames",
+             "daily_progress_archive", "data_checks")
+
+
+async def copilot_ro_grant_problems(db: Database) -> list[str]:
+    """What is wrong with copilot_ro's grants on this database ([] = matches roles.sql). Run on the owner pool;
+    a stale role shows up here by name instead of as Data Guard "permission denied" errors."""
+    role = await db.fetchrow("SELECT 1 AS ok FROM pg_roles WHERE rolname = 'copilot_ro'", timeout_s=2)
+    if role is None:
+        return ["role copilot_ro does not exist"]
+    selects = ", ".join(f"has_table_privilege('copilot_ro', '{t}', 'SELECT') AS \"{t}\"" for t in RO_TABLES)
+    row = await db.fetchrow(f"""
+        SELECT {selects},
+               has_column_privilege('copilot_ro', 'patients', 'therapist_id', 'SELECT') AS patients_therapist_id,
+               has_column_privilege('copilot_ro', 'patients', 'emergency_contact_phone', 'SELECT') AS contact_phone,
+               (SELECT bool_and(has_table_privilege('copilot_ro', format('%I.%I', materialization_hypertable_schema,
+                                materialization_hypertable_name), 'SELECT'))
+                FROM timescaledb_information.continuous_aggregates WHERE view_name = 'daily_progress') AS rollup
+        """, timeout_s=2)
+    assert row is not None
+    problems = [f"copilot_ro is missing SELECT on {t}" for t in RO_TABLES if not row[t]]
+    if not row["patients_therapist_id"]:
+        problems.append("copilot_ro is missing SELECT on patients.therapist_id")
+    if row["rollup"] is False:
+        problems.append("copilot_ro is missing SELECT on daily_progress's materialization hypertable")
+    if row["contact_phone"]:
+        problems.append("copilot_ro can read patients.emergency_contact_phone (pre-F5 grants)")
+    return problems
+
+
 # ---- /stats (§5.13) ----------------------------------------------------------------------------------------
 
 async def total_rows(db: Database) -> int | None:

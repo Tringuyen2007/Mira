@@ -372,7 +372,7 @@ def test_health_data_reports_latest_check_per_name(make_client: Callable[..., Te
                         ("raw_vs_summary", "ok", {"mismatches": 0}, 10),
                         ("refresh_ran", "ok", {}, 10)]))
     body = client.get("/health/data", headers=AUTH).json()
-    assert body["status"] == "ok"
+    assert body["status"] == "ok" and body["copilot_ro_grants"] == {"ok": True, "problems": []}
     assert {c["check_name"]: c["status"] for c in body["checks"]} == {"raw_vs_summary": "ok", "refresh_ran": "ok"}
     assert body["checks"][0]["details"] == {"mismatches": 0} and body["last_run"]
 
@@ -382,3 +382,31 @@ def test_health_data_reports_latest_check_per_name(make_client: Callable[..., Te
     run = client.post("/insight/run", headers=AUTH)
     assert run.status_code == 200 and run.json()["errors"] == [] and run.json()["candidates"] == 0
     assert client.get("/stats", headers=AUTH).json()["scheduler"]["insight"]["runs"] == 1
+
+
+def test_stale_copilot_ro_grants_are_named_at_startup_and_in_health_data(
+        make_client: Callable[..., TestClient]) -> None:
+    """C1: a database whose roles.sql predates F5 (no pose_frames grant, contact phone readable)."""
+    import json as _json
+
+    import psycopg
+
+    from server.config import cfg
+
+    with fresh_database() as url:
+        prepare(url)
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("REVOKE SELECT ON pose_frames FROM copilot_ro")
+            conn.execute("GRANT SELECT (emergency_contact_phone) ON patients TO copilot_ro")
+        client = make_client(TIGER_DSN=url, COPILOT_DSN=ro_dsn(url))
+        body = client.get("/health/data", headers=AUTH).json()
+        assert body["status"] == "failing"
+        assert body["copilot_ro_grants"]["ok"] is False
+        assert body["copilot_ro_grants"]["problems"] == [
+            "copilot_ro is missing SELECT on pose_frames",
+            "copilot_ro can read patients.emergency_contact_phone (pre-F5 grants)"]
+        assert "make db-setup" in body["copilot_ro_grants"]["fix"] and "pose_frames" in body["reason"]
+        client.__exit__(None, None, None)  # flush the log
+        lines = [_json.loads(x) for x in (Path(cfg.LOG_DIR) / "server.log").read_text().splitlines()]
+        [warning] = [x for x in lines if x["msg"] == "copilot_ro grants are stale"]
+        assert warning["level"] == "WARNING" and "copilot_ro is missing SELECT on pose_frames" in warning["problems"]
