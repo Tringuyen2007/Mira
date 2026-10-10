@@ -158,9 +158,12 @@ async def test_live_updates_are_throttled_merged_and_never_repeated(setup: Any) 
     inc = await escalated(guardian, sid, notifier)
     await guardian.on_event(ev(sid, "hr", bpm=150))  # baseline is None → first reading sets it
     await guardian.on_event(ev(sid, "gesture", name="thumbs_up"))
+    assert notifier.pushes == []  # event intake never waits on the network: pushes run in the background
+    await until(lambda: len(notifier.pushes) == 1)
     await guardian.on_event(ev(sid, "gesture", name="thumbs_up"))  # same fact: never twice
     await guardian.on_event(ev(sid, "fall_status", posture="sitting", moving=True, still_s=0.0, on_mat=True))
     await guardian.on_event(ev(sid, "command", name="im_ok", payload={}))
+    await asyncio.sleep(INTERVAL_S / 3)
     assert len(notifier.pushes) == 1  # thumbs up went out; the rest waits for the throttle
     await until(lambda: len(notifier.pushes) == 2)
     await asyncio.sleep(INTERVAL_S * 1.5)
@@ -176,6 +179,7 @@ async def test_status_changes_while_still_unresponsive_become_updates(setup: Any
     guardian, _, _, notifier, sid, _ = setup
     await escalated(guardian, sid, notifier)  # no frames yet: position unknown at escalation
     await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=2.0, on_mat=True))
+    await until(lambda: len(notifier.pushes) == 1)
     await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=33.0, on_mat=True))
     await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=35.0, on_mat=True))
     await until(lambda: len(notifier.pushes) == 2)
@@ -196,7 +200,8 @@ async def test_updates_wait_until_the_call_is_ongoing(setup: Any) -> None:
     await guardian.on_event(ev(sid, "gesture", name="raised_hand"))
     assert notifier.pushes == [] and inc.pending
     inc.call_state = "ongoing"
-    await guardian.flush_updates(inc)  # the notifier does this when the call connects
+    guardian.flush_updates(inc)  # the notifier does this when the call connects
+    await until(lambda: len(notifier.pushes) == 1)
     assert [p[0] for p in notifier.pushes] == ["Maya just raised her hand."]
 
 
@@ -281,3 +286,61 @@ async def test_events_without_a_session_still_use_a_profile(setup: Any) -> None:
     await guardian.on_event({"type": "fall", "stage": "confirmed", "t": time.time(), "session_id": None})
     assert guardian.incidents[""].first_name == "Maya"
     assert hub.of("alert")[-1]["patient_id"] == "maya"
+
+
+async def test_failed_escalation_without_a_response_still_closes_after_the_hold(setup: Any) -> None:
+    # Regression: with no call placed, nothing ever closed the incident, so later falls were ignored forever.
+    guardian, _, bridge, notifier, sid, steps = setup
+    guardian.no_call_hold_s = 0.1
+    notifier.call = False
+    inc = await escalated(guardian, sid, notifier)
+    assert inc.state == "escalated"
+    await until(lambda: sid not in guardian.incidents)
+    assert inc.state == "closed" and step_names(steps)[-1] == "closed"
+    assert bridge.to_engine == [{"type": "incident_closed"}]
+    await guardian.on_event(fall(sid))
+    assert guardian.incidents[sid] is not inc
+
+
+async def test_a_response_during_a_failed_escalation_closes_right_away(setup: Any) -> None:
+    guardian, _, _, notifier, sid, steps = setup
+    notifier.call = False
+    gate = asyncio.Event()
+    original = notifier.escalate
+
+    async def slow_escalate(inc: Incident) -> dict[str, Any]:
+        await gate.wait()
+        return await original(inc)
+
+    notifier.escalate = slow_escalate  # type: ignore[method-assign]
+    await guardian.on_event(fall(sid))
+    inc = guardian.incidents[sid]
+    await until(lambda: inc.state == "escalated")
+    await guardian.on_event(ev(sid, "gesture", name="thumbs_up"))  # while the call is still being placed
+    gate.set()
+    await until(lambda: inc.state == "closed")
+    assert step_names(steps)[-3:] == ["patient_responded", "escalated", "closed"]
+
+
+async def test_a_hanging_update_never_holds_up_event_intake(setup: Any) -> None:
+    # Regression: push_update (update_live over the network) used to be awaited inside on_event.
+    guardian, _, _, notifier, sid, _ = setup
+    inc = await escalated(guardian, sid, notifier)
+    hang = asyncio.Event()
+
+    async def hanging_push(inc: Incident, text: str, status: str) -> bool:
+        await hang.wait()
+        return True
+
+    notifier.push_update = hanging_push  # type: ignore[method-assign]
+    await asyncio.wait_for(guardian.on_event(ev(sid, "gesture", name="thumbs_up")), 0.5)
+    await asyncio.wait_for(guardian.on_event(ev(sid, "hr", bpm=170)), 0.5)
+    assert inc.hr_now == 170
+    hang.set()
+
+
+async def test_client_times_in_milliseconds_fall_back_to_the_server_clock(setup: Any) -> None:
+    guardian, _, _, _, sid, _ = setup
+    await guardian.on_event(ev(sid, "command", name="pain", payload={"level": 9}, t=time.time() * 1000))
+    inc = guardian.incidents[sid]
+    assert abs(inc.started_t - time.time()) < 5

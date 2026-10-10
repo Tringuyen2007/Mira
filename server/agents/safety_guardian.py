@@ -35,6 +35,8 @@ UPDATE_INTERVAL_S = 10.0
 STILL_UPDATE_EVERY_S = 30.0
 HR_UPDATE_DELTA_BPM = 15
 SNAPSHOT_LOOKBACK_S = 5.0
+NO_CALL_HOLD_S = 240.0  # no call to watch: keep the incident (Call 911 shown) this long, like a call watch
+MAX_CLOCK_SKEW_S = 3600.0  # event times further than this from the server clock are not trusted
 RESPONSE_GESTURES = ("thumbs_up", "raised_hand")
 RETELL_STEPS = ("escalated", "call_update", "acknowledged", "therapist_call", "call_retry", "call_failed")
 
@@ -75,6 +77,7 @@ class Incident:
     pending_status: str | None = None
     last_push_at: float | None = None
     flush_task: asyncio.Task[None] | None = None
+    hold_task: asyncio.Task[None] | None = None
     posture_now: str | None = None
     moving_now: bool | None = None
     still_baseline: float | None = None
@@ -97,10 +100,17 @@ def _number(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+def _event_time(ev: dict[str, Any]) -> float:
+    """The event's epoch time, or the server clock when it is missing or implausible (e.g. a client in ms)."""
+    now = time.time()
+    t = _number(ev.get("t"))
+    return t if t is not None and abs(t - now) <= MAX_CLOCK_SKEW_S else now
+
+
 class SafetyGuardian:
     def __init__(self, hub: Hub, bridge: EngineBridge, notifier: Notifier, sessions: SessionRegistry,
                  timeout_s: float, *, alert_hooks: list[AlertHook] | None = None,
-                 update_interval_s: float = UPDATE_INTERVAL_S,
+                 update_interval_s: float = UPDATE_INTERVAL_S, no_call_hold_s: float = NO_CALL_HOLD_S,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.hub = hub
         self.bridge = bridge
@@ -109,6 +119,7 @@ class SafetyGuardian:
         self.timeout_s = timeout_s
         self.alert_hooks = alert_hooks if alert_hooks is not None else []
         self.update_interval_s = update_interval_s
+        self.no_call_hold_s = no_call_hold_s
         self.clock = clock
         self.incidents: dict[str, Incident] = {}  # session key → open incident
         self.hr_over_since: dict[str, float] = {}
@@ -137,8 +148,8 @@ class SafetyGuardian:
             log.exception("guardian failed on event", extra={"event_type": kind, "session_id": ev.get("session_id")})
 
     async def on_hr(self, ev: dict[str, Any]) -> None:
-        bpm, t = _number(ev.get("bpm")), _number(ev.get("t"))
-        if bpm is None or t is None:
+        bpm, t = _number(ev.get("bpm")), _event_time(ev)
+        if bpm is None:
             return
         key = _session_key(ev)
         self.last_hr[key] = int(bpm)
@@ -146,7 +157,7 @@ class SafetyGuardian:
         if inc is not None:
             inc.hr_now = int(bpm)
             if inc.state == "escalated":
-                await self._hr_update(inc)
+                self._hr_update(inc)
         # HR rule: above the limit for ≥ 5 s, not one noisy reading.
         if bpm > self._profile(key).hr_limit:
             since = self.hr_over_since.setdefault(key, t)
@@ -163,7 +174,7 @@ class SafetyGuardian:
             return
         level = _number((ev.get("payload") or {}).get("level")) if kind == "pain" else None
         inc = Incident(alert_id=str(uuid.uuid4()), kind=kind, session_id=ev.get("session_id"),
-                       profile=self._profile(key), started_t=_number(ev.get("t")) or time.time(),
+                       profile=self._profile(key), started_t=_event_time(ev),
                        trigger=dict(ev), hr_before=self.last_hr.get(key), hr_now=self.last_hr.get(key),
                        pain_level=int(level) if level is not None else None)
         self.incidents[key] = inc
@@ -173,7 +184,7 @@ class SafetyGuardian:
         self._check_in(inc)
         inc.state = "checking_in"
         await self.log(inc, "checked_in")
-        inc.timer = asyncio.create_task(self._wait_then_escalate(inc), name=f"guardian-timer-{inc.alert_id}")
+        inc.timer = self._spawn(self._wait_then_escalate(inc), name=f"guardian-timer-{inc.alert_id}")
 
     async def patient_responded(self, ev: dict[str, Any]) -> None:
         inc = self.incidents.get(_session_key(ev))
@@ -194,7 +205,7 @@ class SafetyGuardian:
                 return
             s = self.live_snapshot(inc)
             text = templates.response_update(inc.first_name, response, inc.profile.pronoun_poss)
-            await self.queue_update(inc, f"responded:{response}", text, status_text(s))
+            self.queue_update(inc, f"responded:{response}", text, status_text(s))
 
     async def on_status(self, ev: dict[str, Any]) -> None:
         inc = self.incidents.get(_session_key(ev))
@@ -211,20 +222,20 @@ class SafetyGuardian:
             inc.still_baseline = still  # "another 30 s" counts from when the contact is on the line
         if posture is not None and posture != inc.posture_now:
             phrase = posture_phrase(s) or posture
-            await self.queue_update(inc, f"posture:{posture}", templates.posture_update(name, phrase, be), status)
+            self.queue_update(inc, f"posture:{posture}", templates.posture_update(name, phrase, be), status)
         if not inc.responses:  # once she has responded, moving/still are no longer news
             if moving is True and inc.moving_now is False:
-                await self.queue_update(inc, "moving", templates.moving_update(name), status)
+                self.queue_update(inc, "moving", templates.moving_update(name), status)
             elif moving is not True and still is not None and inc.still_baseline is not None:
                 periods = int((still - inc.still_baseline) // STILL_UPDATE_EVERY_S)
                 if periods >= 1:
-                    await self.queue_update(inc, f"still:{periods}", templates.still_update(name, be), status)
+                    self.queue_update(inc, f"still:{periods}", templates.still_update(name, be), status)
         if posture is not None:
             inc.posture_now = posture
         if moving is not None:
             inc.moving_now = moving
 
-    async def _hr_update(self, inc: Incident) -> None:
+    def _hr_update(self, inc: Incident) -> None:
         if inc.hr_now is None:
             return
         if inc.hr_at_update is None:
@@ -233,7 +244,7 @@ class SafetyGuardian:
         if abs(inc.hr_now - inc.hr_at_update) > HR_UPDATE_DELTA_BPM:
             inc.hr_at_update = inc.hr_now
             text = templates.hr_update(inc.profile.pronoun_poss, inc.hr_now)
-            await self.queue_update(inc, f"hr:{inc.hr_now}", text, status_text(self.live_snapshot(inc)))
+            self.queue_update(inc, f"hr:{inc.hr_now}", text, status_text(self.live_snapshot(inc)))
 
     # ---- escalation ------------------------------------------------------------------------------
 
@@ -246,11 +257,27 @@ class SafetyGuardian:
             inc.snapshot = self.live_snapshot(inc)
             inc.posture_now, inc.moving_now = inc.snapshot["posture"], inc.snapshot["moving"]
             inc.hr_at_update = inc.hr_now
-        except Exception:  # noqa: BLE001 - a snapshot bug must not stop the call; the notifier falls back
+        except Exception:  # noqa: BLE001 - a snapshot bug must not stop the call; call_variables falls back
             log.exception("snapshot failed", extra={"alert_id": inc.alert_id})
-        result = await self.notifier.escalate(inc)  # retries inside; never raises; starts the call watcher
+        try:
+            result = await self.notifier.escalate(inc)  # retries inside; starts the call watcher
+        except Exception as exc:  # noqa: BLE001 - the contract says never raises; don't trust it here
+            log.exception("notifier.escalate raised", extra={"alert_id": inc.alert_id})
+            result = {"error": repr(exc)[:300]}
         inc.escalation = result
         await self.log(inc, "escalated", payload={"retell": result, "snapshot": inc.snapshot})
+        if not result.get("contact_call_id") and inc.state == "escalated":
+            # No call watcher will ever close this incident: close now if she already responded, else after
+            # a bounded hold, so a later fall in this session is never ignored.
+            if inc.responses:
+                await self.close(inc)
+            else:
+                inc.hold_task = self._spawn(self._close_after(inc, self.no_call_hold_s),
+                                            name=f"guardian-hold-{inc.alert_id}")
+
+    async def _close_after(self, inc: Incident, delay_s: float) -> None:
+        await asyncio.sleep(delay_s)
+        await self.close(inc, reason="no_call_hold_elapsed")
 
     def live_snapshot(self, inc: Incident) -> dict[str, Any]:
         frames = self.bridge.ring_buffer.frames_since(inc.started_t - SNAPSHOT_LOOKBACK_S)
@@ -258,46 +285,49 @@ class SafetyGuardian:
 
     # ---- live updates (§8.6.4): ≤ 1 push per interval, merged, never the same fact twice ---------------
 
-    async def queue_update(self, inc: Incident, fact: str, text: str, status: str) -> None:
+    def queue_update(self, inc: Incident, fact: str, text: str, status: str) -> None:
         if fact in inc.pushed_facts or fact in inc.pending:
             return
         inc.pending[fact] = text
         inc.pending_status = status
-        await self.flush_updates(inc)
+        self.flush_updates(inc)
 
-    async def flush_updates(self, inc: Incident) -> None:
-        """Push pending facts if the call is live and the throttle allows; otherwise retry later."""
-        if not inc.pending or inc.state != "escalated" or inc.call_state != "ongoing":
-            return  # the notifier calls this again when the call goes ongoing
-        if inc.last_push_at is not None:
-            wait = self.update_interval_s - (self.clock() - inc.last_push_at)
-            if wait > 0:
-                if inc.flush_task is None or inc.flush_task.done():
-                    inc.flush_task = asyncio.create_task(self._flush_later(inc, wait))
-                return
-        facts, text = list(inc.pending), " ".join(inc.pending.values())
-        status = inc.pending_status or templates.DEFAULT_CURRENT_STATUS
-        inc.pending.clear()
-        inc.last_push_at = self.clock()
-        if await self.notifier.push_update(inc, text, status):
-            inc.pushed_facts.update(facts)
+    def flush_updates(self, inc: Incident) -> None:
+        """Start pushing pending facts in the background. Never waits on the network: the push loop is its own
+        task, so event intake is never held up by update_live. The notifier calls this when the call connects."""
+        if inc.pending and (inc.flush_task is None or inc.flush_task.done()):
+            inc.flush_task = self._spawn(self._push_pending(inc), name=f"guardian-updates-{inc.alert_id}")
 
-    async def _flush_later(self, inc: Incident, wait: float) -> None:
-        await asyncio.sleep(wait)
-        await self.flush_updates(inc)
+    async def _push_pending(self, inc: Incident) -> None:
+        while inc.pending and inc.state == "escalated" and inc.call_state == "ongoing":
+            if inc.last_push_at is not None:
+                wait = self.update_interval_s - (self.clock() - inc.last_push_at)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    continue
+            facts, text = list(inc.pending), " ".join(inc.pending.values())
+            status = inc.pending_status or templates.DEFAULT_CURRENT_STATUS
+            inc.pending.clear()
+            inc.last_push_at = self.clock()
+            if await self.notifier.push_update(inc, text, status):
+                inc.pushed_facts.update(facts)
 
     # ---- closing ---------------------------------------------------------------------------------
 
-    async def close(self, inc: Incident) -> None:
-        """Called by the call watcher when the call is over (§8.4). Idempotent."""
+    async def close(self, inc: Incident, reason: str | None = None) -> None:
+        """Called by the call watcher when the call is over (§8.4). Idempotent.
+
+        A push already in flight is left to finish (its `call_update` step is then logged); the push loop
+        stops by itself once the incident is closed.
+        """
         if inc.state == "closed":
             return
         inc.state = "closed"
         current = asyncio.current_task()
-        for task in (inc.timer, inc.flush_task):
+        for task in (inc.timer, inc.hold_task):
             if task is not None and task is not current:
                 task.cancel()
-        await self.log(inc, "closed")
+        await self.log(inc, "closed", payload={"reason": reason} if reason else None)
         self._end(inc)
 
     def _end(self, inc: Incident) -> None:
@@ -336,7 +366,7 @@ class SafetyGuardian:
             try:
                 result = hook(inc, step, safe)
                 if inspect.isawaitable(result):
-                    self._spawn(result)
+                    self._spawn(result, name="guardian-alert-hook")
             except Exception:  # noqa: BLE001 - a listener (e.g. notifications) must not break the safety path
                 log.exception("alert hook failed", extra={"alert_id": inc.alert_id, "step": step})
 
@@ -350,17 +380,21 @@ class SafetyGuardian:
             return
         channel = "retell" if step.startswith(("call_", "webhook_")) or step in RETELL_STEPS else "device"
         self._spawn(writes.insert_alert_step(db, datetime.now(UTC), inc.alert_id, inc.patient_id, inc.session_id,
-                                             inc.kind, step, channel, payload))
+                                             inc.kind, step, channel, payload), name="guardian-alert-row")
 
-    def _spawn(self, awaitable: Any) -> None:
+    def _spawn(self, awaitable: Any, *, name: str) -> asyncio.Task[Any]:
+        """A tracked background task whose failure is always logged (never silently swallowed)."""
         task = asyncio.ensure_future(awaitable)
+        task.set_name(name)
         self._background.add(task)
         task.add_done_callback(self._task_done)
+        return task
 
     def _task_done(self, task: asyncio.Task[Any]) -> None:
         self._background.discard(task)
         if not task.cancelled() and task.exception() is not None:
-            log.warning("background alert task failed", extra={"error": repr(task.exception())})
+            log.error("guardian background task failed", extra={"task": task.get_name(),
+                                                                "error": repr(task.exception())})
 
     def _profile(self, key: str) -> PatientProfile:
         session = self.sessions.get(key) if key else None
@@ -370,9 +404,7 @@ class SafetyGuardian:
         return default_profile(cfg.MOCK_PATIENT_ID)
 
     async def stop(self) -> None:
-        for inc in list(self.incidents.values()):
-            for task in (inc.timer, inc.flush_task):
-                if task is not None:
-                    task.cancel()
-        for task in list(self._background):
+        tasks = list(self._background)
+        for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
