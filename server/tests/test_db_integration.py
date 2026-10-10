@@ -258,11 +258,13 @@ async def test_small_sim_check3_compress_and_hyperfunctions(sim_dsn: str) -> Non
         tw = await queries.session_tw_load(db, sid)
         per_set = await queries.session_tw_load_per_set(db, sid)
         points = await queries.session_knee_lttb(db, sid, 300)
-        frames = await queries.session_frames(db, sid)
+        page = await queries.session_frames(db, sid)
+        frames = queries.frames_from_json(page["frames_json"])
         assert tw is not None and 45 < tw < 70
         assert [r["set_no"] for r in per_set] == [1, 2, 3]
         assert len(points) == 300 and points == sorted(points, key=lambda p: p["time"])
         assert len(frames) == 1200 and len(frames[0]["joints"]) == 33 and len(frames[0]["joints"][0]) == 3
+        assert page["count"] == 1200 and page["next_t0"] is None  # one page: under MAX_FULL_RATE_FRAMES
 
         results = await guard.run_all()
         by_name = {r["check_name"]: r for r in results}

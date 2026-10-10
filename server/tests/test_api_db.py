@@ -81,6 +81,53 @@ def test_live_mock_session_is_persisted_and_readable(client: TestClient, api_dsn
     assert "total_rows" in stats and "compression" in stats
 
 
+def test_full_rate_frames_are_paged_and_rendered_off_the_event_loop(
+        client: TestClient, api_dsn: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from server.api import sessions as sessions_api
+    from server.db import queries
+
+    sid = get_state().sessions.current.session_id
+    assert _wait(lambda: _count(api_dsn, "SELECT count(*) FROM pose_frames WHERE session_id = %s", sid) >= 30)
+    t1 = _scalar(api_dsn, "SELECT max(time) FROM pose_frames WHERE session_id = %s", sid)
+    total = _count(api_dsn, "SELECT count(*) FROM pose_frames WHERE session_id = %s AND time <= %s", sid, t1)
+    monkeypatch.setattr(queries, "MAX_FULL_RATE_FRAMES", 7)
+    render_threads: list[bool] = []
+    real_render = sessions_api.render_frames
+
+    def render(session_id: str, page: dict) -> bytes:  # type: ignore[type-arg]
+        try:
+            asyncio.get_running_loop()
+            render_threads.append(False)  # on the event loop
+        except RuntimeError:
+            render_threads.append(True)
+        return real_render(session_id, page)
+
+    monkeypatch.setattr(sessions_api, "render_frames", render)
+    times: list[str] = []
+    params: dict[str, str] = {"downsample": "0", "t1": t1.isoformat()}
+    for _ in range(total):
+        r = client.get(f"/sessions/{sid}/frames", params=params, headers=AUTH)
+        assert r.status_code == 200 and r.headers["content-type"] == "application/json"
+        page = r.json()
+        assert page["mode"] == "full" and page["count"] == len(page["frames"]) <= 7
+        assert all(len(f["joints"]) == 33 for f in page["frames"] if f["joints"] is not None)
+        times += [f["time"] for f in page["frames"]]
+        if page["next_t0"] is None:
+            break
+        params["t0"] = page["next_t0"]
+    assert len(times) == total and len(set(times)) == total  # every frame once, no gap, no duplicate
+    assert len(render_threads) >= 2 and all(render_threads)
+
+
+def _scalar(dsn: str, sql: str, *params: object) -> object:
+    with psycopg.connect(dsn) as conn:
+        row = conn.execute(sql, params).fetchone()
+    assert row is not None
+    return row[0]
+
+
 def test_new_session_replaces_current_and_stop_ends_it(client: TestClient, api_dsn: str) -> None:
     r = client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
     sid = r.json()["session_id"]

@@ -3,6 +3,8 @@ the /stats queries (§5.13). Every function takes `db` first and raises DBError 
 
 from __future__ import annotations
 
+import json
+from datetime import timedelta
 from typing import Any
 
 from server.db.pool import Database, DBError
@@ -12,7 +14,7 @@ log = get_logger("db.queries")
 
 TZ = "America/Chicago"  # local days (Houston) everywhere: rollup, Data Guard, charts
 CLOSED_ALERT_STEPS = ("resolved", "closed", "resolved_by_therapist")
-MAX_FULL_RATE_FRAMES = 36_000  # 20 min at 30 Hz
+MAX_FULL_RATE_FRAMES = 9_000  # frames per /frames page (5 min at 30 Hz); page on with next_t0
 
 PROGRESS_COLUMNS = ("patient_id, exercise_id, day, max_knee, p95_knee, avg_load_left, tw_load_left, "
                     "affected_load_pct, avg_asymmetry, avg_trunk_lean, avg_confidence, frames")
@@ -98,17 +100,37 @@ async def session_knee_lttb(db: Database, session_id: str, points: int = 300) ->
                           "WHERE session_id = %s AND knee_r IS NOT NULL))", (points, session_id))
 
 
-async def session_frames(db: Database, session_id: str, t0: Any = None, t1: Any = None) -> list[dict[str, Any]]:
-    """Full-rate frames for the 3D replay; landmarks are reshaped to joints[33][3] (None when not stored)."""
-    rows = await db.fetch(
-        "SELECT time, landmarks, load_l_pct, knee_l, knee_r, set_no FROM pose_frames "
-        "WHERE session_id = %s AND (%s::timestamptz IS NULL OR time >= %s) "
-        "AND (%s::timestamptz IS NULL OR time <= %s) ORDER BY time LIMIT %s",
-        (session_id, t0, t0, t1, t1, MAX_FULL_RATE_FRAMES))
-    for row in rows:
-        lm = row.pop("landmarks")
-        row["joints"] = [lm[i:i + 3] for i in range(0, len(lm), 3)] if lm else None
-    return rows
+async def session_frames(db: Database, session_id: str, t0: Any = None, t1: Any = None,
+                         limit: int | None = None) -> dict[str, Any]:
+    """One page (≤ MAX_FULL_RATE_FRAMES) of full-rate frames for the 3D replay, as JSON text built by Postgres, so
+    nothing is decoded on the event loop: {count, next_t0, frames_json}. `next_t0` (just after the last frame) is
+    set when the page is full: pass it as t0 for the next page. Decode with `frames_from_json` off the loop."""
+    limit = limit or MAX_FULL_RATE_FRAMES
+    row = await db.fetchrow("""
+        WITH f AS (
+          SELECT time, landmarks, load_l_pct, knee_l, knee_r, set_no FROM pose_frames
+          WHERE session_id = %(sid)s AND (%(t0)s::timestamptz IS NULL OR time >= %(t0)s)
+            AND (%(t1)s::timestamptz IS NULL OR time <= %(t1)s)
+          ORDER BY time LIMIT %(limit)s)
+        SELECT count(*) AS count, max(time) AS last_time,
+               coalesce(json_agg(json_build_object('time', time, 'landmarks', landmarks, 'load_l_pct', load_l_pct,
+                                                   'knee_l', knee_l, 'knee_r', knee_r, 'set_no', set_no)
+                                 ORDER BY time), '[]')::text AS frames_json
+        FROM f""", {"sid": session_id, "t0": t0, "t1": t1, "limit": limit}, timeout_s=20)
+    count = int(row["count"]) if row else 0
+    full = count >= limit and row is not None and row["last_time"] is not None
+    return {"count": count, "next_t0": row["last_time"] + timedelta(microseconds=1) if full else None,
+            "frames_json": row["frames_json"] if row else "[]"}
+
+
+def frames_from_json(frames_json: str) -> list[dict[str, Any]]:
+    """Decode a session_frames page; landmarks are reshaped to joints[33][3] (None when not stored). CPU-bound:
+    call it through asyncio.to_thread."""
+    frames: list[dict[str, Any]] = json.loads(frames_json)
+    for frame in frames:
+        lm = frame.pop("landmarks")
+        frame["joints"] = [lm[i:i + 3] for i in range(0, len(lm), 3)] if lm else None
+    return frames
 
 
 async def session_hr_tw(db: Database, session_id: str) -> float | None:

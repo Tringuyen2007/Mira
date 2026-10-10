@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections import Counter
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from server.ai.validators import AI_DRAFT_LABEL
 from server.api.db_dep import require_db
 from server.config import cfg
 from server.db import queries, writes
@@ -18,8 +20,6 @@ from server.db.pool import Database
 from server.state import get_state
 
 router = APIRouter()
-
-AI_DRAFT_LABEL = "AI draft — review before use"
 
 
 class SessionIn(BaseModel):
@@ -87,17 +87,27 @@ async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db))
     }
 
 
-@router.get("/sessions/{session_id}/frames")
+@router.get("/sessions/{session_id}/frames", response_model=None)
 async def get_frames(session_id: uuid.UUID, downsample: int = Query(default=300, ge=0, le=5000),
                      t0: datetime | None = None, t1: datetime | None = None,
-                     db: Database = Depends(require_db)) -> dict[str, Any]:
-    """downsample > 0: knee curve with lttb (charts); downsample=0: full-rate frames between t0 and t1 (replay)."""
+                     db: Database = Depends(require_db)) -> dict[str, Any] | Response:
+    """downsample > 0: knee curve with lttb (charts); downsample=0: one page of full-rate frames between t0 and t1
+    (replay). A full page has `next_t0`: request again with t0=next_t0 for the rest."""
     sid = str(session_id)
     if downsample > 0:
         points = await queries.session_knee_lttb(db, sid, downsample)
         return {"session_id": sid, "mode": "lttb", "series": "knee_r", "points": points}
-    frames = await queries.session_frames(db, sid, t0, t1)
-    return {"session_id": sid, "mode": "full", "count": len(frames), "frames": frames}
+    page = await queries.session_frames(db, sid, t0, t1)
+    # Thousands of frames × 99 floats: decode, reshape and encode off the event loop (pose/live streams stay live).
+    body = await asyncio.to_thread(render_frames, sid, page)
+    return Response(body, media_type="application/json")
+
+
+def render_frames(session_id: str, page: dict[str, Any]) -> bytes:
+    next_t0 = page["next_t0"]
+    return json.dumps({"session_id": session_id, "mode": "full", "count": page["count"],
+                       "next_t0": next_t0.isoformat() if next_t0 else None,
+                       "frames": queries.frames_from_json(page["frames_json"])}, separators=(",", ":")).encode()
 
 
 @router.post("/sessions/{session_id}/share")
