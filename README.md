@@ -156,6 +156,49 @@ someone last edited in the dashboard). It prints `RETELL_AGENT_ID` and `RETELL_A
 both as `override_agent_id` / `override_agent_version`. The LLM also has an `end_call` tool so the agent
 can hang up once the contact has said what they will do.
 
+## Dashboard notifications (§8.7)
+
+One backend turns alerts, call progress, Insight notes, Copilot proposals, milestones, Coach
+adaptations and Data Guard failures into therapist notifications with unread state, acknowledgement,
+history and real-time delivery. `server/notify/notifications.py: create(kind, severity, therapist_id,
+patient_id, title, body, link, source_table, source_id, dedupe_key) -> int | None` is the **only**
+producer API — every agent (and F7 itself, from the Guardian's `on_alert_step` hooks) calls it, never
+the database directly. It applies the §8.5 policy (quiet hours 9 PM–8 AM America/Chicago except
+urgent, at most 1 non-urgent push per patient per local day — the row is still stored either way, only
+the `push` flag on it changes), stores the row (`ON CONFLICT (dedupe_key) DO NOTHING`, so a step is
+never notified twice) and publishes `{"type": "notification", ...row}` on the hub's `"notifications"`
+channel. It works **with or without a database** — rows and ids live in an in-memory ring (the server
+is exactly one process), and a database row, when one exists, is only an audit trail. An urgent
+notification that stays unacked is re-sent on the hub every `NOTIFY_RESEND_MIN` minutes (default 5)
+until it is acked.
+
+Guardian steps become notifications: `escalated` → `kind=alert, severity=urgent`; `call_registered`,
+`call_ongoing`, `call_update`, `call_not_connected`, `call_error`, `call_retry`, `call_failed`,
+`call_ended`, `acknowledged` → `kind=call_update, severity=urgent`; `resolved` (false alarm) →
+`kind=alert, severity=low`. Dedupe keys are `alert:<alert_id>:<step>`; the therapist comes from the
+incident's cached `PatientProfile.therapist_id`.
+
+REST (token required, like every other router, but **not** gated on a database):
+```
+GET  /notifications?unread=true&limit=50&since_id=&therapist_id=   # panel list (newest first, or
+                                                                    # ascending catch-up when since_id is set)
+GET  /notifications/count?therapist_id=                             # bell badge {unread, urgent_unacked}
+POST /notifications/{id}/read
+POST /notifications/read-all {therapist_id?}
+POST /notifications/{id}/ack {therapist_id}   # acking an alert/call_update notification pushes
+                                               # "Her therapist <name> has seen the alert." into the
+                                               # open live call via notifier.push_update, if any
+```
+Samples: `server/samples/rest_get_notifications.json`, `rest_get_notifications_count.json`,
+`rest_post_notification_read.json`, `rest_post_notifications_read_all.json`,
+`rest_post_notification_ack.json`.
+
+WebSocket `/ws/notifications?token=…&since_id=<last id>&therapist_id=<optional>`: on connect the server
+replays every row after `since_id` for that therapist (default: all), with no gap and no duplicate,
+then streams new rows live as `{"type": "notification", ...row}`
+(`server/samples/ws_notifications_message.json`). A reconnecting dashboard never misses one. Fallback
+when the socket is down: poll `GET /notifications?since_id=` every 10 s.
+
 ## Retell live calls: BLOCKED (no spend approved) — exact manual steps to enable
 
 Live calls cost Retell credits (about $0.07–0.15 per minute), so they are off. The agent is already
