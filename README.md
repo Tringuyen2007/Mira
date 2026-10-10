@@ -87,6 +87,23 @@ knee flexion. The database rollup (`max_knee`, `p95_knee` = deepest bend), the s
 See `server/samples/engine_frame.json`.
 Logs are JSON lines in `logs/server.log` (phone numbers masked, secrets redacted).
 
+## Engine reverse channel
+
+The server sends these messages to the engine with `bridge.send_to_engine(msg)` (the mock source handles
+`trigger_fall` and `incident_closed` and ignores the rest; the vision engine must apply the Coach messages):
+
+| `type` | Other fields | Sent by | Meaning |
+|---|---|---|---|
+| `trigger_fall` | `responds_at_s` | `/demo/trigger_fall` | start the scripted mock fall |
+| `incident_closed` | — | Guardian | the fall incident is over; resume at the next set |
+| `end_set_early` | `session_id`, `set`, `reason: "fatigue"` | Coach | end the current set now (already ≥ `limits.min_reps`) |
+| `extend_rest` | `session_id`, `rest_s` | Coach | make the coming rest `rest_s` seconds (≤ `limits.max_rest_s`) |
+| `adjust_next_set` | `session_id`, `reps?`, `rest_s?` | Coach | use these (already clamped) values for the next set |
+| `skip_next_exercise` | `session_id`, `body_part`, `reason: "pain"` | Coach | skip the next exercise that loads `body_part` |
+
+Coach values are always inside the active prescription's `limits`; the Coach sends nothing while the Safety
+Guardian holds the session, and it never sends a resume.
+
 ## AI layer (Gemini + ElevenLabs)
 
 All AI lives in `server/ai/`; nothing else imports the Google SDK.
@@ -118,6 +135,38 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
 - `prompts/*.md`: system prompts; each ends with the shared guardrail rules.
 
 Voice by [ElevenLabs](https://elevenlabs.io) (free plan, attribution required).
+
+## Between-Set Coach
+
+`server/agents/session_coach.py` (`SessionCoach`) adjusts the workout, always within the active
+prescription's `limits` (`min_reps`, `max_reps`, `min_rest_s`, `max_rest_s`; sane defaults `8/15/30/120`
+when no database or prescription is found; limits are loaded once per session, so an approved proposal
+takes effect the next time a session starts).
+
+- **Live rules (no AI, instant):** `fatigue` ends the set early with a `fatigue` cue, but never before
+  `limits.min_reps` reps are done; a heart rate over `hr_limit - 10` extends the next rest, never past
+  `limits.max_rest_s`; a reported pain level of 5-6 (`command {name: pain, payload: {level, body_part?}}`)
+  skips the next exercise for that body part (`payload.body_part`, else squat → knee, glute_bridge → hip)
+  and raises a `kind="coach"` therapist notification. Pain ≥ 7 is left to the Safety Guardian.
+- **Guardian first:** while the Guardian holds the session (open incident, `paused`, confirmed `fall`,
+  pain ≥ 7) the Coach makes no adaptation, plays no cue and drops any in-flight AI result.
+- **Between-set agent (Gemini FAST, during rest, ≤ 5 tool calls, 4 s timeout):** on `set_done`, a
+  background task gives the model this set's stats (`get_set_stats`) and the last 3 sessions
+  (`get_history`), then lets it call `adjust_next_set(reps?, rest_s?)` (clamped server-side to `limits`,
+  requested vs. applied both logged) and `choose_focus_cue(cue_id)` (must already exist in
+  `cues.json` and be a form/encouragement cue, played as a real `cue` event) before `finish(reason)`.
+  Tool arguments are validated with Pydantic (types, ranges, no extra fields); unknown tools are refused.
+  It can never change the prescription or speak unrecorded words. If Gemini is slow or disabled, or its
+  answer arrives after the rest window (the next set's countdown or first rep, or `max(min_rest_s, 4 s)`
+  after `set_done`), the result is dropped and the plain rules stand; the live session never waits on it.
+- Every adaptation is written through `writes.insert_agent_action(agent="coach", ...)`, announced as
+  `coach_adapt {action, detail}` on `/ws/events` (actions `end_set_early`, `extend_rest`,
+  `adjust_next_set`, `skip_next_exercise`, `choose_focus_cue`) and, except the cue, sent to the engine
+  (see "Engine reverse channel"); a shortened set or a skipped exercise also raises a
+  best-effort notification through `server.notify.notifications.create` (a no-op until F7 lands).
+- `GEMINI_MODE=fake` ships a default coach fake (`register_fake("coach", ...)`) that reads the set's
+  stats and history and nudges the next set / picks a focus cue when a form flag was seen, so the agent
+  is exercised in a plain `make run` with no live Gemini calls.
 
 ## Safety path (Guardian, emergency calls)
 
