@@ -7,7 +7,7 @@ DB_IMAGE ?= timescale/timescaledb-ha:pg18
 DB_LOCAL_PORT ?= 55432
 DB_LOCAL_DSN ?= postgresql://postgres:mira@localhost:$(DB_LOCAL_PORT)/mira
 
-.PHONY: run test db-local db-setup
+.PHONY: run test db-local db-setup evals demo-data
 
 # Exactly one server process: the hub, Guardian timers and ring buffer live in memory (TRI.md §3.1).
 run:
@@ -26,3 +26,14 @@ db-local:
 db-setup:
 	@test -n "$(DSN)" || (echo 'usage: make db-setup DSN="postgres://..."'; exit 2)
 	@$(PY) -m server.db.setup --dsn "$(DSN)"
+
+# Care Copilot evals (not part of `make test`): MIRA_EVAL_DSN / MIRA_EVAL_RO_DSN, GEMINI_MODE=fake|live.
+evals:
+	$(PY) -m server.tests.copilot_evals $(EVAL_ARGS)
+
+# Day of the demo (history, expected.json and the cached demo answer are relative to TODAY). One command:
+# rebuild the local database with today's simulated history (rewrites server/sim/expected.json), then
+# regenerate data/copilot_demo.json through the real tool loop (fake model, guarded SQL on copilot_ro). It refuses
+# to write a cache that doesn't rank like expected.json. Needs COPILOT_RO_PASSWORD. Commit both files.
+demo-data: db-local
+	GEMINI_MODE=fake COPILOT_CACHED_DEMO=0 $(PY) -m server.agents.copilot --write-demo-cache --dsn "$(DB_LOCAL_DSN)"

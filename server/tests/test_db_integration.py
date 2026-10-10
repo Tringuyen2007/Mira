@@ -114,9 +114,10 @@ def test_nine_pm_houston_frame_lands_on_that_local_day(dsn: str) -> None:
 def test_copilot_ro_is_read_only_and_cannot_see_alerts(dsn: str) -> None:
     with psycopg.connect(ro_dsn(dsn), autocommit=True) as conn:
         conn.execute("SELECT * FROM progress_v LIMIT 1")
-        conn.execute("SELECT * FROM patients LIMIT 1")
+        conn.execute("SELECT id, name, affected_side FROM patients LIMIT 1")
         for stmt in ("SELECT * FROM alerts LIMIT 1", "SELECT * FROM agent_actions LIMIT 1",
-                     "SELECT * FROM ai_calls LIMIT 1", "SELECT * FROM pose_frames LIMIT 1"):
+                     "SELECT * FROM ai_calls LIMIT 1", "SELECT * FROM pose_frames LIMIT 1",
+                     "SELECT emergency_contact_phone FROM patients LIMIT 1", "SELECT * FROM patients LIMIT 1"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(stmt)
         for stmt in ("INSERT INTO memory_events (patient_id, kind, message, evidence) VALUES ('maya','x','y','{}')",

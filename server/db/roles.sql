@@ -13,7 +13,11 @@ $$;
 ALTER ROLE copilot_ro WITH LOGIN PASSWORD {{copilot_ro_password}};
 GRANT USAGE ON SCHEMA public TO copilot_ro;
 GRANT SELECT ON progress_v, sessions, reps, form_events, memory_events,
-                patients, prescriptions TO copilot_ro;           -- NOT alerts, agent_actions, ai_calls, pose_frames
+                prescriptions TO copilot_ro;                     -- NOT alerts, agent_actions, ai_calls, pose_frames
+-- patients column by column: the emergency contact (name, phone) never reaches the Copilot or Gemini.
+REVOKE SELECT ON patients FROM copilot_ro;
+GRANT SELECT (id, name, age, height_cm, mass_kg, affected_side, condition, therapist_id, hr_limit, simulated,
+              created_at) ON patients TO copilot_ro;
 ALTER ROLE copilot_ro SET statement_timeout = '3s';
 ALTER ROLE copilot_ro SET default_transaction_read_only = on;    -- belt and braces
 ALTER ROLE copilot_ro SET idle_in_transaction_session_timeout = '10s';
