@@ -222,7 +222,8 @@ class SafetyGuardian:
             inc.still_baseline = still  # "another 30 s" counts from when the contact is on the line
         if posture is not None and posture != inc.posture_now:
             phrase = posture_phrase(s) or posture
-            self.queue_update(inc, f"posture:{posture}", templates.posture_update(name, phrase, be), status)
+            text = templates.posture_update(name, phrase, be, estimated=bool(s.get("posture_estimated")))
+            self.queue_update(inc, f"posture:{posture}", text, status)
         if not inc.responses:  # once she has responded, moving/still are no longer news
             if moving is True and inc.moving_now is False:
                 self.queue_update(inc, "moving", templates.moving_update(name), status)

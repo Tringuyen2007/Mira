@@ -344,3 +344,15 @@ async def test_client_times_in_milliseconds_fall_back_to_the_server_clock(setup:
     await guardian.on_event(ev(sid, "command", name="pain", payload={"level": 9}, t=time.time() * 1000))
     inc = guardian.incidents[sid]
     assert abs(inc.started_t - time.time()) < 5
+
+
+async def test_an_estimated_posture_change_is_said_as_an_estimate(setup: Any) -> None:
+    guardian, _, bridge, notifier, sid, _ = setup
+    await escalated(guardian, sid, notifier)  # no frames: position unknown at escalation
+    rng = random.Random(2)
+    now = time.time()
+    for i in range(30):
+        bridge.ring_buffer.append({"t": now + i / 30, **lying_frame_body(False, rng)})
+    await guardian.on_event(ev(sid, "fall_status", posture="unknown", moving=False, still_s=3.0, on_mat=True))
+    await until(lambda: len(notifier.pushes) == 1)
+    assert notifier.pushes[0][0] == "Maya appears to be lying down on the mat now."

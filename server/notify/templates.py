@@ -126,7 +126,10 @@ def response_update(first_name: str, response: str, pronoun_poss: str) -> str:
     return f"{first_name} {phrase}."
 
 
-def posture_update(first_name: str, posture_phrase: str, verb: str) -> str:
+def posture_update(first_name: str, posture_phrase: str, verb: str, estimated: bool = False) -> str:
+    """Estimated postures (from the ring buffer, not the engine) are said as such: the agent must never guess."""
+    if estimated:
+        return f"{first_name} {'appear' if verb == 'are' else 'appears'} to be {posture_phrase} now."
     return f"{first_name} {verb} now {posture_phrase}."
 
 
