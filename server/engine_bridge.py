@@ -146,6 +146,11 @@ def _angle_deg(a: Vec, vertex: Vec, b: Vec) -> float:
     return math.degrees(math.acos(max(-1.0, min(1.0, dot / norm))))
 
 
+def _flexion_deg(a: Vec, vertex: Vec, b: Vec) -> float:
+    """Joint flexion: 180 minus the interior angle, so a straight joint is 0 and a 90 degree bend is 90."""
+    return 180.0 - _angle_deg(a, vertex, b)
+
+
 def _leg(side: float, depth: float, knee_in: float) -> tuple[Vec, Vec, Vec, Vec, Vec]:
     """Ankle, knee, hip, heel, foot index for one leg. side=+1 left, -1 right; depth 0..1."""
     shank_tilt = math.radians(35 * depth)
@@ -196,10 +201,11 @@ def squat_frame_body(depth_l: float, depth_r: float, knee_in: float, rng: random
     trunk = _sub(chest, pelvis)
     knee_ratio = abs(pts[25][0] - pts[26][0]) / abs(pts[27][0] - pts[28][0])
     angles = {
-        "knee_l": round(_angle_deg(pts[23], pts[25], pts[27]), 1),
-        "knee_r": round(_angle_deg(pts[24], pts[26], pts[28]), 1),
-        "hip_l": round(_angle_deg(pts[11], pts[23], pts[25]), 1),
-        "hip_r": round(_angle_deg(pts[12], pts[24], pts[26]), 1),
+        # Flexion convention (README "Frame contract"): 0 = straight, larger = deeper bend.
+        "knee_l": round(_flexion_deg(pts[23], pts[25], pts[27]), 1),
+        "knee_r": round(_flexion_deg(pts[24], pts[26], pts[28]), 1),
+        "hip_l": round(_flexion_deg(pts[11], pts[23], pts[25]), 1),
+        "hip_r": round(_flexion_deg(pts[12], pts[24], pts[26]), 1),
         "trunk_lean": round(math.degrees(math.atan2(-trunk[2], trunk[1])), 1),
         "trunk_side": round(1.0 + rng.gauss(0, 0.3), 1),
         "pelvis_rot": round(2.0 + rng.gauss(0, 0.5), 1),
@@ -251,7 +257,7 @@ def lying_frame_body(moving: bool, rng: random.Random) -> Message:
     return {
         "joints": joints,
         "confidence": confidence,
-        "angles": {"knee_l": 172.0, "knee_r": 171.0, "hip_l": 175.0, "hip_r": 174.0, "trunk_lean": 88.0,
+        "angles": {"knee_l": 8.0, "knee_r": 9.0, "hip_l": 5.0, "hip_r": 6.0, "trunk_lean": 88.0,
                    "trunk_side": 2.0, "pelvis_rot": 4.0, "knee_ratio": 0.92},
         "com": [0.0, 0.12, -0.15],
         "load_l_pct": 0.0,
@@ -600,7 +606,7 @@ class LiveState:
     def on_frame(self, frame: Message) -> None:
         angles = frame.get("angles") or {}
         knees = [a for a in (angles.get("knee_l"), angles.get("knee_r")) if isinstance(a, (int, float))]
-        self.main_angle = round(min(knees), 1) if knees else None
+        self.main_angle = round(max(knees), 1) if knees else None  # deepest bend (flexion)
         self.load_l_pct = frame.get("load_l_pct")
         self.load_conf = frame.get("confidence_avg")
         self.flags = list(frame.get("flags") or [])

@@ -208,10 +208,10 @@
     0.965
   ],
   "angles": {
-    "knee_l": 94.2,
-    "knee_r": 102.7,
-    "hip_l": 91.3,
-    "hip_r": 93.5,
+    "knee_l": 85.8,
+    "knee_r": 77.3,
+    "hip_l": 88.7,
+    "hip_r": 86.5,
     "trunk_lean": 36.8,
     "trunk_side": 0.9,
     "pelvis_rot": 2.9,

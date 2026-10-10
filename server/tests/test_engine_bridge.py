@@ -71,7 +71,8 @@ async def test_mock_produces_contract_frames_and_events(run_bridge: Callable[...
     json.dumps(frame)  # JSON types only
 
     knees = [f["angles"]["knee_l"] for f in got.frames]
-    assert max(knees) > 165 and min(knees) < 105, "squat should go from standing to ~90-100 degrees"
+    # Flexion convention: standing ~5 degrees, bottom of the squat ~80-90 degrees.
+    assert min(knees) < 15 and 70 < max(knees) <= 95, "squat flexion should go from ~5 (standing) to ~70-90"
     assert any("knee_cave_l" in f["flags"] for f in got.frames)
 
     seqs = [f["seq"] for f in got.frames]

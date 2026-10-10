@@ -23,6 +23,7 @@ BASELINE_ENV = {
     "RETELL_API_KEY": "",
     "TIGER_DSN": "",
     "COPILOT_DSN": "",
+    "DB_DISABLED": "0",
     "GEMINI_API_KEY": "",
     "GEMINI_MODE": "fake",
     "GEMINI_DISABLED": "0",
