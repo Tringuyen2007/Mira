@@ -4,7 +4,12 @@ struct HomeView: View {
     @Environment(AppState.self) private var state
     var body: some View {
         List {
-            if state.connectionEnabled && state.liveSession.connectionState != .connected {
+            if state.connectionEnabled && !state.isPaired {
+                Section {
+                    Text("Mira isn’t paired with this phone yet.")
+                        .foregroundStyle(.secondary)
+                }
+            } else if state.connectionEnabled && state.liveSession.connectionState != .connected {
                 Section {
                     Text("Mira is unavailable right now.")
                         .foregroundStyle(.secondary)

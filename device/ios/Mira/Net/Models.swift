@@ -1,7 +1,10 @@
 import Foundation
 
-// Section 16 specifies fields but not the event envelope. The development mock
-// uses flat, `type`-tagged events. Confirm this contract with Tri's samples.
+// Wire contract of Tri's server (README "Try it" + server/samples/*.json, which the
+// tests decode as fixtures). Every server message is a flat JSON object; /ws/events
+// messages carry a `type` discriminator. Snake-case keys map to camelCase properties.
+// The server adds `t`, `seq` and `session_id` to most events; fields the app does not
+// need are ignored rather than modelled.
 enum WireJSON {
     static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
@@ -14,10 +17,19 @@ enum WireJSON {
         encoder.keyEncodingStrategy = .convertToSnakeCase
         return encoder
     }
+
+    /// The hub sends `{"type":"ping"}` on every channel (also /ws/live and /ws/pose)
+    /// after 10 s without traffic. It is a keep-alive, not data.
+    static func isPing(_ data: Data) -> Bool {
+        struct Probe: Decodable { let type: String? }
+        guard data.count <= 64 else { return false }
+        return (try? JSONDecoder().decode(Probe.self, from: data))?.type == "ping"
+    }
 }
 
-// Retains fields for REST responses whose schemas are not defined in the spec,
-// arbitrary command payloads, and future event types without losing their data.
+// Lossless JSON for genuinely free-form server data: command payloads, prescription
+// targets/limits, proposal evidence/changes, Copilot charts, coach_adapt details and
+// event types this app version does not know yet.
 enum JSONValue: Codable, Equatable, Sendable {
     case object([String: JSONValue]), array([JSONValue]), string(String)
     case number(Double), bool(Bool), null
@@ -45,11 +57,14 @@ enum JSONValue: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Streams
+
+/// /ws/pose: the server's subset of an engine frame, ~25 Hz (server/samples/ws_pose.json).
 struct PoseMessage: Codable, Sendable {
     let t: Double
     let joints: [[Double]]
     let confidence: [Double]
-    let loadLPct: Double
+    let loadLPct: Double?
     let flags: [String]
 
     var hasValidDimensions: Bool {
@@ -57,31 +72,98 @@ struct PoseMessage: Codable, Sendable {
     }
 }
 
+/// /ws/live: session state, ~10 Hz (server/samples/ws_live.json). Most fields are null
+/// while idle, before the first frame or between exercises.
 struct LiveMessage: Codable, Sendable {
-    let phase: String
-    let exerciseId: String
+    var t: Double?
+    let phase: String  // idle | countdown | active | rest | paused | incident
+    let exerciseId: String?
     let rep: Int
-    let repsTarget: Int
+    let repsTarget: Int?
+    var set: Int?
+    var setsTarget: Int?
     let countdown: Int?
-    let mainAngle: Double?
-    let loadLPct: Double
+    let mainAngle: Double?  // knee flexion in degrees, 0 = straight
+    let loadLPct: Double?
+    var loadConf: Double?
+    var hr: Int?
     let flags: [String]
     let cueId: String?
     let paused: Bool
 }
 
-struct GreetingMessage: Codable, Sendable { let audioId: String?; let text: String }
+// MARK: - /ws/events, server → app
+
+struct ArrivedMessage: Codable, Sendable { let patientId: String? }
+struct GreetingMessage: Codable, Sendable { let text: String; let audioUrl: String? }
 struct AwaitingGestureMessage: Codable, Sendable { let gesture: String }
 struct GestureMessage: Codable, Sendable { let name: String }
-struct CountdownMessage: Codable, Sendable { let n: Int }
-struct CueMessage: Codable, Sendable { let id: String; let text: String }
-struct RepMessage: Codable, Sendable { let index: Int; let quality: String; let flags: [String] }
-struct PausedMessage: Codable, Sendable { let reason: String }
-struct AlertMessage: Codable, Sendable { let kind: String; let step: String; let patientId: String }
+struct CountdownMessage: Codable, Sendable {
+    let n: Int
+    let set: Int?, repsTarget: Int?, setsTarget: Int?, exerciseId: String?
+}
+/// `audio_url` is a server path such as `/audio/set_start.mp3` (resolve against the server address).
+struct CueMessage: Codable, Sendable { let id: String; let text: String; let audioUrl: String? }
+struct RepMessage: Codable, Sendable {
+    let index: Int
+    let set: Int?, exerciseId: String?
+    let quality: String  // good | fix_form
+    let flags: [String]
+}
+struct SetDoneMessage: Codable, Sendable { let set: Int?; let reps: Int?; let exerciseId: String? }
+struct PausedMessage: Codable, Sendable { let reason: String? }
 struct HapticMessage: Codable, Sendable { let pattern: String }
+struct FallMessage: Codable, Sendable {
+    let stage: String
+    let dropM: Double?, peakDownSpeedMps: Double?, posture: String?, onMat: Bool?
+}
+struct FallStatusMessage: Codable, Sendable {
+    let posture: String?, moving: Bool?, stillS: Double?, onMat: Bool?
+}
+struct FatigueMessage: Codable, Sendable { let level: String; let exerciseId: String?; let set: Int?; let rep: Int? }
+/// Every Safety Guardian step (detected, checked_in, escalated, call_*, closed, resolved…).
+struct AlertMessage: Codable, Sendable {
+    let alertId: String
+    let kind: String  // fall | pain | hr
+    let step: String
+    let patientId: String
+    let sessionId: String?
+    let message: String?
+    let showCall911: Bool?  // wire key `show_call_911`
+
+    var isOpen: Bool { !["closed", "resolved", "resolved_by_therapist"].contains(step) }
+}
+struct SummaryReadyMessage: Codable, Sendable {
+    let sessionId: String?
+    let set: Int?
+    let spoken: String
+    let therapistNote: String?
+    let audioUrl: String?
+}
+struct CoachAdaptMessage: Codable, Sendable { let action: String; let detail: JSONValue? }
+struct ProposalCreatedMessage: Codable, Sendable { let proposalId: Int; let patientId: String; let agent: String? }
+struct ProposalDecidedMessage: Codable, Sendable {
+    let proposalId: Int
+    let patientId: String
+    let status: String
+    let decidedBy: String?
+    let exerciseId: String?
+    let prescriptionVersion: Int?
+}
+
+// MARK: - /ws/events, app → server (server allow-list: command, hr, wrist, watch_button, device_health)
+
 struct HeartRateMessage: Codable, Sendable { let t: Double; let bpm: Double }
 struct WristMessage: Codable, Sendable { let t: Double; let quat: [Double]; let accel: [Double] }
 struct WatchButtonMessage: Codable, Sendable { let name: String }
+/// Sent by the app/watch (`t`, `battery_pct`, `app`) and by the engine (`cameras`, `fps`).
+struct DeviceHealthMessage: Codable, Sendable {
+    var t: Double?
+    var batteryPct: Double?
+    var app: String?
+    var cameras: Int?
+    var fps: Double?
+}
 
 enum CommandName: String, Codable, Sendable {
     case start, pause, skip, stop, pain
@@ -91,24 +173,33 @@ enum CommandName: String, Codable, Sendable {
 struct CommandMessage: Codable, Sendable {
     let name: CommandName
     var payload: JSONValue = .object([:])
+
+    /// The Safety Guardian opens an incident for `pain` with `payload.level >= 7` (0–10).
+    static func pain(level: Int) -> CommandMessage {
+        CommandMessage(name: .pain, payload: .object(["level": .number(Double(level))]))
+    }
 }
 
 // Both directions share the same envelope. Unknown types survive decoding so a
 // server rollout does not break the stream; malformed known events still fail.
 enum SocketEvent: Codable, Sendable {
-    case arrived, setDone
+    case arrived(ArrivedMessage), setDone(SetDoneMessage), resumed, ping
     case greeting(GreetingMessage), awaitingGesture(AwaitingGestureMessage)
     case gesture(GestureMessage), countdown(CountdownMessage), cue(CueMessage)
     case rep(RepMessage), paused(PausedMessage), alert(AlertMessage), haptic(HapticMessage)
+    case fall(FallMessage), fallStatus(FallStatusMessage), fatigue(FatigueMessage)
+    case summaryReady(SummaryReadyMessage), coachAdapt(CoachAdaptMessage)
+    case proposalCreated(ProposalCreatedMessage), proposalDecided(ProposalDecidedMessage)
     case command(CommandMessage), hr(HeartRateMessage), wrist(WristMessage)
-    case watchButton(WatchButtonMessage)
-    case summaryReady(JSONValue), deviceHealth(JSONValue)
+    case watchButton(WatchButtonMessage), deviceHealth(DeviceHealthMessage)
     case unknown(type: String, body: JSONValue)
 
     var type: String {
         switch self {
         case .arrived: return "arrived"
         case .setDone: return "set_done"
+        case .resumed: return "resumed"
+        case .ping: return "ping"
         case .greeting: return "greeting"
         case .awaitingGesture: return "awaiting_gesture"
         case .gesture: return "gesture"
@@ -118,11 +209,17 @@ enum SocketEvent: Codable, Sendable {
         case .paused: return "paused"
         case .alert: return "alert"
         case .haptic: return "haptic"
+        case .fall: return "fall"
+        case .fallStatus: return "fall_status"
+        case .fatigue: return "fatigue"
+        case .summaryReady: return "summary_ready"
+        case .coachAdapt: return "coach_adapt"
+        case .proposalCreated: return "proposal_created"
+        case .proposalDecided: return "proposal_decided"
         case .command: return "command"
         case .hr: return "hr"
         case .wrist: return "wrist"
         case .watchButton: return "watch_button"
-        case .summaryReady: return "summary_ready"
         case .deviceHealth: return "device_health"
         case .unknown(let type, _): return type
         }
@@ -133,8 +230,10 @@ enum SocketEvent: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let type = try decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .type)
         switch type {
-        case "arrived": self = .arrived
-        case "set_done": self = .setDone
+        case "arrived": self = .arrived(try ArrivedMessage(from: decoder))
+        case "set_done": self = .setDone(try SetDoneMessage(from: decoder))
+        case "resumed": self = .resumed
+        case "ping": self = .ping
         case "greeting": self = .greeting(try GreetingMessage(from: decoder))
         case "awaiting_gesture": self = .awaitingGesture(try AwaitingGestureMessage(from: decoder))
         case "gesture": self = .gesture(try GestureMessage(from: decoder))
@@ -144,19 +243,27 @@ enum SocketEvent: Codable, Sendable {
         case "paused": self = .paused(try PausedMessage(from: decoder))
         case "alert": self = .alert(try AlertMessage(from: decoder))
         case "haptic": self = .haptic(try HapticMessage(from: decoder))
+        case "fall": self = .fall(try FallMessage(from: decoder))
+        case "fall_status": self = .fallStatus(try FallStatusMessage(from: decoder))
+        case "fatigue": self = .fatigue(try FatigueMessage(from: decoder))
+        case "summary_ready": self = .summaryReady(try SummaryReadyMessage(from: decoder))
+        case "coach_adapt": self = .coachAdapt(try CoachAdaptMessage(from: decoder))
+        case "proposal_created": self = .proposalCreated(try ProposalCreatedMessage(from: decoder))
+        case "proposal_decided": self = .proposalDecided(try ProposalDecidedMessage(from: decoder))
         case "command": self = .command(try CommandMessage(from: decoder))
         case "hr": self = .hr(try HeartRateMessage(from: decoder))
         case "wrist": self = .wrist(try WristMessage(from: decoder))
         case "watch_button": self = .watchButton(try WatchButtonMessage(from: decoder))
-        case "summary_ready": self = .summaryReady(try JSONValue(from: decoder))
-        case "device_health": self = .deviceHealth(try JSONValue(from: decoder))
+        case "device_health": self = .deviceHealth(try DeviceHealthMessage(from: decoder))
         default: self = .unknown(type: type, body: try JSONValue(from: decoder))
         }
     }
 
     func encode(to encoder: Encoder) throws {
         switch self {
-        case .arrived, .setDone: break
+        case .resumed, .ping: break
+        case .arrived(let v): try v.encode(to: encoder)
+        case .setDone(let v): try v.encode(to: encoder)
         case .greeting(let v): try v.encode(to: encoder)
         case .awaitingGesture(let v): try v.encode(to: encoder)
         case .gesture(let v): try v.encode(to: encoder)
@@ -166,18 +273,184 @@ enum SocketEvent: Codable, Sendable {
         case .paused(let v): try v.encode(to: encoder)
         case .alert(let v): try v.encode(to: encoder)
         case .haptic(let v): try v.encode(to: encoder)
+        case .fall(let v): try v.encode(to: encoder)
+        case .fallStatus(let v): try v.encode(to: encoder)
+        case .fatigue(let v): try v.encode(to: encoder)
+        case .summaryReady(let v): try v.encode(to: encoder)
+        case .coachAdapt(let v): try v.encode(to: encoder)
+        case .proposalCreated(let v): try v.encode(to: encoder)
+        case .proposalDecided(let v): try v.encode(to: encoder)
         case .command(let v): try v.encode(to: encoder)
         case .hr(let v): try v.encode(to: encoder)
         case .wrist(let v): try v.encode(to: encoder)
         case .watchButton(let v): try v.encode(to: encoder)
-        case .summaryReady(let v), .deviceHealth(let v), .unknown(_, let v): try v.encode(to: encoder)
+        case .deviceHealth(let v): try v.encode(to: encoder)
+        case .unknown(_, let v): try v.encode(to: encoder)
         }
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(type, forKey: .type)
     }
+
+    /// Types the server accepts from a client on /ws/events (server/main.py
+    /// CLIENT_EVENT_TYPES); anything else is silently dropped by the server.
+    static let clientTypes: Set<String> = ["command", "hr", "wrist", "watch_button", "device_health"]
 }
 
-struct CopilotRequest: Codable, Sendable { let question: String }
-struct CopilotResponse: Codable, Sendable { let answer: String; let charts: [JSONValue]; let sql: [String] }
-struct TherapistCueRequest: Codable, Sendable { let text: String }
+// MARK: - REST (server/samples/rest_*.json)
+
+struct HealthStatus: Codable, Sendable { let status: String; let time: Double? }
+
+/// Placeholder until the vision engine reports calibration (fields fixed, contents vary).
+struct CalibrationStatus: Codable, Sendable {
+    let status: String
+    let calibrated: Bool
+    let cameras: [JSONValue]
+    let errors: JSONValue?
+    let note: String?
+}
+
+struct SessionRequest: Codable, Sendable { var patientId: String?; var exerciseId: String? }
+struct SessionStarted: Codable, Sendable {
+    let sessionId: String
+    let patientId: String
+    let exerciseId: String
+    let startedAt: Double
+    let firstName: String?
+}
+struct SessionStopped: Codable, Sendable { let sessionId: String; let stopped: Bool }
+struct SessionShared: Codable, Sendable { let sessionId: String; let shared: Bool }
+
+struct SessionRecord: Codable, Sendable {
+    let id: String
+    let patientId: String
+    let exerciseId: String
+    let startedAt: String
+    let endedAt: String?
+    let repsDone: Int?
+    let painPre: Int?, painPost: Int?, effort: Int?
+    let shared: Bool
+    let aiSummary: String?, aiNote: String?
+}
+struct RepRecord: Codable, Sendable {
+    let rep: Int
+    let setNo: Int?
+    let peakAngle: Double?
+    let quality: Double?
+    let flags: [String]
+}
+struct SessionSummary: Codable, Sendable {
+    let repsTotal: Int
+    let goodReps: Int
+    let flagCounts: [String: Int]
+    let aiSummary: String?, aiNote: String?, aiNoteLabel: String?
+}
+struct SetSummary: Codable, Sendable { let setNo: Int; let twLoadLeftPct: Double?; let reps: Int; let goodReps: Int }
+struct SessionDetail: Codable, Sendable {
+    let session: SessionRecord
+    let reps: [RepRecord]
+    let summary: SessionSummary?
+    let twLoadLeftPct: Double?
+    let perSet: [SetSummary]?
+}
+
+/// `downsample > 0`: `mode = "lttb"` with `points`; `downsample = 0`: `mode = "full"`
+/// with `frames` and `next_t0` (request again with `t0 = next_t0` until it is null).
+struct SessionFrames: Codable, Sendable {
+    struct Point: Codable, Sendable { let time: String; let value: Double? }
+    struct Frame: Codable, Sendable {
+        let time: String
+        let loadLPct: Double?, kneeL: Double?, kneeR: Double?
+        let setNo: Int?
+        let joints: [[Double]]?
+    }
+    let sessionId: String
+    let mode: String
+    let series: String?
+    let points: [Point]?
+    let count: Int?
+    let nextT0: String?
+    let frames: [Frame]?
+}
+
+struct ProgressDay: Codable, Sendable {
+    let day: String
+    let exerciseId: String?
+    let maxKnee: Double?, p95Knee: Double?
+    let avgLoadLeft: Double?, twLoadLeft: Double?, affectedLoadPct: Double?
+    let avgAsymmetry: Double?, avgTrunkLean: Double?, avgConfidence: Double?
+    let frames: Int?
+}
+struct PatientProgress: Codable, Sendable {
+    let patientId: String
+    let exerciseId: String?
+    let days: Int
+    let source: String?
+    let series: [ProgressDay]
+}
+
+struct Prescription: Codable, Sendable {
+    let id: Int
+    let patientId: String
+    let exerciseId: String
+    let version: Int
+    let sets: Int?
+    let reps: Int?
+    let targets: JSONValue?  // free-form per exercise (knee_deg, hold_s, add…)
+    let limits: JSONValue?
+    let active: Bool
+    let createdBy: String?
+    let createdAt: String?
+}
+struct PrescriptionList: Codable, Sendable { let patientId: String; let prescriptions: [Prescription] }
+
+struct Proposal: Codable, Sendable {
+    let id: Int
+    let patientId: String
+    let createdAt: String
+    let agent: String
+    let rationale: String
+    let evidence: JSONValue?
+    let change: JSONValue?
+    let status: String  // pending | approved | edited | dismissed
+    let decidedBy: String?
+    let decidedAt: String?
+    let patientName: String?
+}
+struct ProposalList: Codable, Sendable { let proposals: [Proposal] }
+struct ProposalDecisionRequest: Codable, Sendable {
+    let therapistId: String
+    var change: JSONValue?  // edit only
+    var reason: String?     // dismiss only
+}
+struct ProposalDecision: Codable, Sendable { let proposal: Proposal; let prescription: Prescription? }
 enum ProposalAction: String { case approve, edit, dismiss }
+
+struct AlertStep: Codable, Sendable { let time: String; let step: String; let channel: String?; let payload: JSONValue? }
+struct AlertRecord: Codable, Sendable {
+    let alertId: String
+    let patientId: String
+    let sessionId: String?
+    let kind: String
+    let startedAt: String
+    let steps: [AlertStep]
+    let lastStep: String
+    let updatedAt: String?
+    let open: Bool
+}
+struct AlertList: Codable, Sendable { let alerts: [AlertRecord] }
+struct AlertResolveRequest: Codable, Sendable { var resolvedBy: String = "therapist"; var note: String? }
+struct AlertResolution: Codable, Sendable { let alertId: String; let step: String; let time: Double }
+
+struct NotificationCount: Codable, Sendable { let unread: Int; let urgentUnacked: Int }
+
+struct CopilotRequest: Codable, Sendable { let question: String; var patientId: String? }
+struct CopilotQuery: Codable, Sendable { let query: String; let rows: Int?; let ms: Double? }
+struct CopilotResponse: Codable, Sendable {
+    let answer: String
+    let charts: [JSONValue]
+    let evidence: [String]?
+    let sql: [CopilotQuery]
+    let cached: Bool?
+    let proposals: [Int]?
+    let fallback: String?
+}

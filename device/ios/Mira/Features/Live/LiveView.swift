@@ -7,7 +7,9 @@ struct LiveView: View {
 
     var body: some View {
         List {
-            if state.liveSession.connectionState != .connected {
+            if state.liveSession.connectionState == .notPaired || state.liveSession.connectionState == .rejected {
+                Section { Text("Mira isn’t paired with this phone yet.") }
+            } else if state.liveSession.connectionState != .connected {
                 Section {
                     Text("Mira is unavailable right now.")
                     if state.liveSession.live != nil {
@@ -16,11 +18,13 @@ struct LiveView: View {
                 }
             }
             if let live = state.liveSession.live {
-                Section(live.exerciseId) {
-                    LabeledContent("Reps", value: "\(live.rep) / \(live.repsTarget)")
+                Section(live.exerciseId ?? "Session") {
+                    LabeledContent("Reps", value: live.repsTarget.map { "\(live.rep) / \($0)" } ?? "\(live.rep)")
                     LabeledContent("Phase", value: live.paused ? "Paused" : live.phase)
                     if let angle = live.mainAngle { LabeledContent("Angle", value: "\(angle.formatted())°") }
-                    LabeledContent("Left / right balance", value: "\(live.loadLPct.formatted())% / \((100 - live.loadLPct).formatted())%")
+                    if let left = live.loadLPct {
+                        LabeledContent("Left / right balance", value: "\(left.formatted())% / \((100 - left).formatted())%")
+                    }
                     if let cue = state.liveSession.cue { Text(cue) }
                 }
             } else {
@@ -35,7 +39,7 @@ struct LiveView: View {
             }
             if let alert = state.liveSession.alert {
                 Section("Mira alert") {
-                    Text("\(alert.kind): \(alert.step)")
+                    Text(alert.message ?? "\(alert.kind): \(alert.step)")
                     Button("I'm OK") { send(.imOK) }
                         .disabled(state.liveSession.eventSocket.state != .connected || isSending)
                 }

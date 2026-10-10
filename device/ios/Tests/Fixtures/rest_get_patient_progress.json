@@ -1,0 +1,50 @@
+{
+  "patient_id": "maya",
+  "exercise_id": "squat",
+  "days": 90,
+  "source": "progress_v",
+  "series": [
+    {
+      "patient_id": "maya",
+      "exercise_id": "squat",
+      "day": "2026-10-08T05:00:00Z",
+      "max_knee": 88.365,
+      "p95_knee": 84.77235440929027,
+      "avg_load_left": 64.00920971080649,
+      "tw_load_left": 64.00908543011663,
+      "affected_load_pct": 35.99091456988337,
+      "avg_asymmetry": 14.009209710806482,
+      "avg_trunk_lean": 11.244045508038425,
+      "avg_confidence": 0.9191929239531776,
+      "frames": 1187
+    },
+    {
+      "patient_id": "maya",
+      "exercise_id": "squat",
+      "day": "2026-10-09T05:00:00Z",
+      "max_knee": 93.344,
+      "p95_knee": 88.94066805204486,
+      "avg_load_left": 63.55736661437374,
+      "tw_load_left": 63.55783236792328,
+      "affected_load_pct": 36.44216763207672,
+      "avg_asymmetry": 13.557366614373738,
+      "avg_trunk_lean": 11.470309545729785,
+      "avg_confidence": 0.9198372484553581,
+      "frames": 1192
+    },
+    {
+      "patient_id": "maya",
+      "exercise_id": "squat",
+      "day": "2026-10-10T05:00:00Z",
+      "max_knee": 173.6,
+      "p95_knee": 173.642956865944,
+      "avg_load_left": 53.34342383940185,
+      "tw_load_left": 53.342045352347334,
+      "affected_load_pct": 46.657954647652666,
+      "avg_asymmetry": 3.5580376085508343,
+      "avg_trunk_lean": 19.912525987326475,
+      "avg_confidence": 0.9500438398010795,
+      "frames": 479
+    }
+  ]
+}
