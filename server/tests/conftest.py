@@ -35,6 +35,7 @@ BASELINE_ENV = {
     "RETELL_AGENT_ID": "",
     "RETELL_AGENT_VERSION": "",
     "CALLS_DISABLED": "1",
+    "NOTIFY_RESEND_MIN": "5",
 }
 
 

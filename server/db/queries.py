@@ -181,6 +181,42 @@ async def alert_latest(db: Database, alert_id: str) -> dict[str, Any] | None:
     return await db.fetchrow("SELECT * FROM alerts WHERE alert_id = %s ORDER BY time DESC LIMIT 1", (alert_id,))
 
 
+# ---- notifications (§8.7) ---------------------------------------------------------------------------------
+
+NOTIFICATION_COLUMNS = ("id, time, kind, severity, therapist_id, patient_id, title, body, link, source_table, "
+                        "source_id, dedupe_key, read_at, acked_at, acked_by")
+_NOTIFICATION_FILTER = """
+    WHERE (%(t)s::text IS NULL OR therapist_id = %(t)s)
+      AND (NOT %(unread)s OR read_at IS NULL)
+      AND (%(since)s::bigint IS NULL OR id > %(since)s)"""
+NOTIFICATIONS_NEWEST_SQL = f"SELECT {NOTIFICATION_COLUMNS} FROM notifications{_NOTIFICATION_FILTER} " \
+                           "ORDER BY id DESC LIMIT %(limit)s"
+NOTIFICATIONS_OLDEST_SQL = f"SELECT {NOTIFICATION_COLUMNS} FROM notifications{_NOTIFICATION_FILTER} " \
+                           "ORDER BY id ASC LIMIT %(limit)s"
+
+
+async def notifications(db: Database, *, therapist_id: str | None = None, unread: bool = False,
+                        since_id: int | None = None, limit: int | None = 50,
+                        newest_first: bool = True) -> list[dict[str, Any]]:
+    """Rows after `since_id` (if set), newest or oldest first; `limit=None` means no limit."""
+    sql = NOTIFICATIONS_NEWEST_SQL if newest_first else NOTIFICATIONS_OLDEST_SQL
+    return await db.fetch(sql, {"t": therapist_id, "unread": unread, "since": since_id, "limit": limit})
+
+
+async def notification(db: Database, notification_id: int) -> dict[str, Any] | None:
+    return await db.fetchrow(f"SELECT {NOTIFICATION_COLUMNS} FROM notifications WHERE id = %s",
+                             (notification_id,))
+
+
+async def notification_counts(db: Database, therapist_id: str | None = None) -> dict[str, int]:
+    row = await db.fetchrow("""
+        SELECT count(*) FILTER (WHERE read_at IS NULL) AS unread,
+               count(*) FILTER (WHERE severity = 'urgent' AND acked_at IS NULL) AS urgent_unacked
+        FROM notifications WHERE (%(t)s::text IS NULL OR therapist_id = %(t)s)""", {"t": therapist_id})
+    row = row or {}
+    return {"unread": int(row.get("unread") or 0), "urgent_unacked": int(row.get("urgent_unacked") or 0)}
+
+
 # ---- /stats (§5.13) ----------------------------------------------------------------------------------------
 
 async def total_rows(db: Database) -> int | None:

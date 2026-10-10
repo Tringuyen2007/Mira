@@ -19,6 +19,7 @@ from server.agents.safety_guardian import SafetyGuardian
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, patients, prescriptions
+from server.api import notifications as notifications_api
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
@@ -29,6 +30,8 @@ from server.engine_bridge import EngineBridge
 from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
 from server.notify import webhooks
+from server.notify.notifications import NotificationService
+from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
 from server.security import TunnelFilterMiddleware, require_token, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
@@ -92,6 +95,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(guardian.on_event)
     state.guardian, state.notifier = guardian, notifier
     state.stat_providers["notifier"] = notifier.stats
+    notifications = NotificationService(hub, db, notifier=notifier, guardian=guardian)
+    state.notifications = notifications
+    state.on_alert_step.append(notify_on_alert_step)
+    state.stat_providers["notifications"] = notifications.stats
     set_state(state)
     if state.db is not None:
         await gemini.seed_budget(state.db)
@@ -107,6 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await notifications.stop()
         await notifier.stop()
         await guardian.stop()
         await bridge.stop()
@@ -143,6 +151,15 @@ def _on_client_event(msg: dict[str, Any]) -> None:
     get_state().bridge.inject(msg)
 
 
+def _parse_since_id(raw: str | None) -> int | None:
+    if not raw:
+        return None
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return None
+
+
 async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None) -> None:
     if not await ws_token_ok(ws):
         await ws.close(code=1008)
@@ -171,7 +188,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(demo.router)
-    for module in (sessions_api, patients, prescriptions, calibration, alerts):
+    for module in (sessions_api, patients, prescriptions, calibration, alerts, notifications_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
 
@@ -186,6 +203,20 @@ def create_app() -> FastAPI:
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket) -> None:
         await _serve_ws(ws, "events", _client_event_handler())
+
+    @app.websocket("/ws/notifications")
+    async def ws_notifications(ws: WebSocket) -> None:
+        if not await ws_token_ok(ws):
+            await ws.close(code=1008)
+            return
+        await ws.accept()
+        since_id = _parse_since_id(ws.query_params.get("since_id"))
+        therapist_id = ws.query_params.get("therapist_id") or None
+        service = get_state().notifications
+        if service is None:
+            await ws.close(code=1011)
+            return
+        await service.serve(ws, since_id=since_id, therapist_id=therapist_id)
 
     _mount_static(app)
     return app

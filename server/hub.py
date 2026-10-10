@@ -9,7 +9,7 @@ import asyncio
 import json
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -39,6 +39,7 @@ class _Client:
     ws: WebSocketLike
     queue: asyncio.Queue[str] = field(default_factory=lambda: asyncio.Queue(maxsize=QUEUE_MAXSIZE))
     dropped: int = 0
+    accept: Callable[[dict[str, Any]], bool] | None = None  # per-client filter, evaluated in publish()
 
 
 def _round(value: Any, ndigits: int = 3) -> Any:
@@ -112,18 +113,34 @@ class Hub:
         self._clock = clock
 
     async def connect(self, channel: str, ws: WebSocketLike,
-                      on_message: Callable[[dict[str, Any]], None] | None = None) -> None:
-        """Serve an accepted WebSocket until it disconnects. Incoming JSON objects go to `on_message`."""
+                      on_message: Callable[[dict[str, Any]], None] | None = None,
+                      on_connect: Callable[[], Awaitable[None]] | None = None,
+                      accept: Callable[[dict[str, Any]], bool] | None = None) -> None:
+        """Serve an accepted WebSocket until it disconnects. Incoming JSON objects go to `on_message`.
+
+        `on_connect` (optional, awaited) runs once the client is registered but before its sender task
+        starts draining the queue — used for a reconnect replay (e.g. `/ws/notifications?since_id=`) that
+        must be sent before any later live message, with no gap and no duplicate. `accept` (optional, sync,
+        cheap) decides per published message whether this client gets it (e.g. therapist scoping).
+        """
         if channel not in self._clients:
             raise ValueError(f"unknown channel {channel!r}")
-        client = _Client(channel, ws)
+        client = _Client(channel, ws, accept=accept)
         self._clients[channel].add(client)
-        sender = asyncio.create_task(self._sender(client), name=f"ws-sender-{channel}")
-        log.info("ws connected", extra={"channel": channel, "clients": len(self._clients[channel])})
+        sender: asyncio.Task[None] | None = None
         try:
+            if on_connect is not None:
+                try:
+                    await on_connect()
+                except Exception:  # noqa: BLE001 - the socket went away mid-replay; treat as a disconnect
+                    log.info("ws closed during on_connect", extra={"channel": channel})
+                    return
+            sender = asyncio.create_task(self._sender(client), name=f"ws-sender-{channel}")
+            log.info("ws connected", extra={"channel": channel, "clients": len(self._clients[channel])})
             await self._receiver(client, on_message, sender)
         finally:
-            sender.cancel()
+            if sender is not None:
+                sender.cancel()
             self._clients[channel].discard(client)
             log.info("ws disconnected", extra={"channel": channel, "clients": len(self._clients[channel]),
                                                "dropped": client.dropped})
@@ -147,7 +164,8 @@ class Hub:
             return
         text = to_json(msg)
         for client in clients:
-            self._enqueue(client, text)
+            if client.accept is None or self._accepts(client, msg):
+                self._enqueue(client, text)
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         self.publish("events", {"type": event_type, **payload})
@@ -160,6 +178,14 @@ class Hub:
             "pose_throttled": self._pose_throttled,
             "slow_disconnects": self._slow_disconnects,
         }
+
+    @staticmethod
+    def _accepts(client: _Client, msg: dict[str, Any]) -> bool:
+        try:
+            return bool(client.accept(msg))  # type: ignore[misc]
+        except Exception:  # noqa: BLE001 - a broken filter must not break publish() for other clients
+            log.exception("ws client filter failed", extra={"channel": client.channel})
+            return False
 
     def _enqueue(self, client: _Client, text: str) -> None:
         if client.queue.full():
