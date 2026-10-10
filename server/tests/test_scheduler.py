@@ -5,16 +5,19 @@ POST /insight/run."""
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 import types
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from server.agents.data_guard import DataGuard
 from server.agents.scheduler import Scheduler
 from server.db import writes
 from server.db.pool import Database
@@ -23,6 +26,7 @@ from server.sim.simulate_history import simulate
 from server.tests.conftest import AUTH
 from server.tests.dbutil import fresh_database, prepare, ro_dsn
 
+WRITES_PY = str(Path(writes.__file__).resolve())
 FAST = {"guard_delay_s": 0, "guard_interval_s": 0.05, "insight_delay_s": 0, "insight_interval_s": 0.05}
 
 
@@ -234,6 +238,49 @@ async def test_event_loop_lag_while_guard_and_insight_run(sim_dsn: str, notified
         assert any(n["kind"] == "insight" and n["patient_id"] == "maya" for n in notified)
     finally:
         await db.close()
+
+
+_WRITE_WORDS = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|CALL|GRANT|COPY)\b", re.I)
+
+
+def _called_from_writes() -> bool:
+    frame = sys._getframe(1)
+    while frame is not None:
+        if frame.f_code.co_filename == WRITES_PY:
+            return True
+        frame = frame.f_back  # type: ignore[assignment]
+    return False
+
+
+async def test_data_guard_only_writes_through_writes_py(sim_dsn: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """copilot_ro may not read pose_frames, so the Data Guard reads on the app pool: every statement it sends
+    there outside writes.py must be a plain SELECT; its only writes are the archive insert and data_checks."""
+    db = Database(sim_dsn)
+    await db.open()
+    reads: list[str] = []
+    written: list[str] = []
+    real = {name: getattr(db, name) for name in ("fetch", "execute")}
+
+    def guarded(name: str) -> Any:
+        async def call(sql: Any, *args: Any, **kwargs: Any) -> Any:
+            text = sql.as_string(None) if hasattr(sql, "as_string") else str(sql)
+            if _called_from_writes():
+                written.append(text)
+            else:
+                assert text.lstrip().upper().startswith(("SELECT", "WITH")) and not _WRITE_WORDS.search(text), text
+                reads.append(text)
+            return await real[name](sql, *args, **kwargs)
+        return call
+
+    for name in real:
+        monkeypatch.setattr(db, name, guarded(name))
+    try:
+        results = await DataGuard(db).run_all()
+    finally:
+        await db.close()
+    assert {r["status"] for r in results} <= {"ok", "warn"} and len(reads) >= 6
+    assert {" ".join(w.split()[:3]) for w in written} == {"INSERT INTO daily_progress_archive",
+                                                         "INSERT INTO data_checks"}
 
 
 # ---- HTTP: /health/data and /insight/run ----------------------------------------------------------------------
