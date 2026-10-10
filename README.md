@@ -119,6 +119,33 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
 
 Voice by [ElevenLabs](https://elevenlabs.io) (free plan, attribution required).
 
+## Between-Set Coach
+
+`server/agents/session_coach.py` (`SessionCoach`) adjusts the workout, always within the active
+prescription's `limits` (`min_reps`, `max_reps`, `min_rest_s`, `max_rest_s`; sane defaults `8/15/30/120`
+when no database or prescription is found; limits are loaded once per session, so an approved proposal
+takes effect the next time a session starts).
+
+- **Live rules (no AI, instant):** `fatigue` ends the set early with a `fatigue` cue, but never before
+  `limits.min_reps` reps are done; a heart rate over `hr_limit - 10` extends the next rest, never past
+  `limits.max_rest_s`; a reported pain level of 5-6 (`command {name: pain, payload: {level}}`) skips the
+  next exercise for that body part and raises a `kind="coach"` therapist notification. Pain ≥ 7 is left
+  to the Safety Guardian; the Coach ignores it.
+- **Between-set agent (Gemini FAST, during rest, ≤ 5 tool calls, 4 s timeout):** on `set_done`, a
+  background task gives the model this set's stats (`get_set_stats`) and the last 3 sessions
+  (`get_history`), then lets it call `adjust_next_set(reps?, rest_s?)` (clamped server-side to `limits`,
+  requested vs. applied both logged) and `choose_focus_cue(cue_id)` (must already exist in
+  `cues.json`, played as a real `cue` event) before `finish(reason)`. It can never change the
+  prescription or speak unrecorded words. If Gemini is slow, disabled, or its answer arrives after a
+  later set has already finished, the result is dropped and the plain rules stand; the live session
+  never waits on it.
+- Every adaptation is written through `writes.insert_agent_action(agent="coach", ...)` and announced as
+  `coach_adapt {action, detail}` on `/ws/events`; a shortened set or a skipped exercise also raises a
+  best-effort notification through `server.notify.notifications.create` (a no-op until F7 lands).
+- `GEMINI_MODE=fake` ships a default coach fake (`register_fake("coach", ...)`) that reads the set's
+  stats and history and nudges the next set / picks a focus cue when a form flag was seen, so the agent
+  is exercised in a plain `make run` with no live Gemini calls.
+
 ## Safety path (Guardian, emergency calls)
 
 The Safety Guardian (`server/agents/safety_guardian.py`) watches the event stream: a confirmed `fall`,

@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from server.agents.safety_guardian import SafetyGuardian
+from server.agents.session_coach import SessionCoach
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, patients, prescriptions
@@ -100,6 +101,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.add_event_enricher(cue_library.enrich_cue_event)
     voice = SessionVoice(hub, sessions, live=bridge.live)
     bridge.subscribe_events(voice.on_event)
+    coach = SessionCoach(hub, sessions)
+    bridge.subscribe_events(coach.on_event)
+    state.coach = coach
 
     if cfg.MIRA_SOURCE.startswith("mock"):
         voice.prepare_greeting(await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID))
@@ -111,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await guardian.stop()
         await bridge.stop()
         await voice.close()
+        await coach.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
         if writer is not None:
