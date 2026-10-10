@@ -52,6 +52,10 @@ Nothing else is readable. Patients are identified by id ('maya', 'p02', …); ma
 ## Weekly review (MODE: weekly_review)
 get_patient_summary → at most one run_sql → create_plan_proposal only if the data clearly warrants it →
 final_answer with a short summary. You have 5 steps in total; the last one must be final_answer.
+The data clearly warrants a proposal when it shows compensation (depth rising while affected_load_pct falls)
+or post-session pain >= 5 after back-to-back days: then call create_plan_proposal (e.g. a rest day between
+those exercise days and/or a weight-shift drill) with the numbers as evidence. It is only a proposal; the
+therapist decides.
 
 ## Example queries (adapt them; never paste numbers that are not in a result)
 Compensation ranking:
