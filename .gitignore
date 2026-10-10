@@ -1,5 +1,7 @@
 # secrets
 .env
+.env.*
+!.env.example
 
 # environments / caches
 .venv/
@@ -12,3 +14,6 @@ __pycache__/
 logs/
 data/ai_cache/
 data/recordings/
+
+# local tooling
+.superpowers/
