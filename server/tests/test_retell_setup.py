@@ -106,7 +106,8 @@ def test_apply_creates_when_missing_and_binds_the_outbound_number() -> None:
     ids = apply(client, "+15550100999")
     assert ids == {"action": "created", "agent_id": "agent_new", "llm_id": "llm_new", "voice_id": "11labs-Grace"}
     assert [c[0] for c in client.calls] == ["llm.create", "agent.create", "phone.update"]
-    assert client.calls[2][1] == ("+15550100999", {"outbound_agents": [{"agent_id": "agent_new", "weight": 1.0}]})
+    assert client.calls[2][1] == ("+15550100999", {"outbound_agents": [{"agent_id": "agent_new", "weight": 1.0,
+                                                                         "agent_version": "latest"}]})
 
 
 def test_apply_updates_in_place_when_the_agent_exists() -> None:

@@ -78,7 +78,8 @@ def agent_payload(llm_id: str, voice_id: str) -> dict[str, Any]:
 
 
 def phone_payload(agent_id: str) -> dict[str, Any]:
-    return {"outbound_agents": [{"agent_id": agent_id, "weight": 1.0}]}
+    # "latest" = the version this script just wrote (drafts are never published by this script).
+    return {"outbound_agents": [{"agent_id": agent_id, "weight": 1.0, "agent_version": "latest"}]}
 
 
 def pick_voice(voices: list[Any]) -> str:
@@ -175,7 +176,8 @@ def verify(client: Any, ids: dict[str, str], from_number: str) -> list[tuple[str
     check("agent.post_call_analysis_data", [(f["name"], f["type"]) for f in POST_CALL_ANALYSIS],
           [(f.get("name"), f.get("type")) for f in analysis if f.get("type") != "system-presets"])
     outbound = _plain(getattr(number, "outbound_agents", None)) or []
-    check("phone_number.outbound_agents[0].agent_id", ids["agent_id"], outbound[0].get("agent_id") if outbound else None)
+    check("phone_number.outbound_agents[0]", phone_payload(ids["agent_id"])["outbound_agents"][0],
+          outbound[0] if outbound else None)
     return rows
 
 
