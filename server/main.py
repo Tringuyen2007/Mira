@@ -19,6 +19,8 @@ from server.agents.safety_guardian import SafetyGuardian
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, patients, prescriptions
+from server.api import copilot as copilot_api
+from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
@@ -172,6 +174,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(demo.router)
     for module in (sessions_api, patients, prescriptions, calibration, alerts):
+        app.include_router(module.router, dependencies=[Depends(require_token)])
+    for module in (copilot_api, proposals):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
 
