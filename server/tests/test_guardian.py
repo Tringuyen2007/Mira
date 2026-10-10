@@ -172,7 +172,7 @@ async def test_live_updates_are_throttled_merged_and_never_repeated(setup: Any) 
     assert first[0] == "Maya just gave a thumbs up."
     assert second[0] == "Maya is now sitting up on the mat. Maya just pressed I'm OK on her phone."
     assert second[2] - first[2] >= INTERVAL_S - 0.01
-    assert inc.pushed_facts == {"responded:thumbs_up", "posture:sitting", "responded:im_ok"}
+    assert inc.last_pushed == {"responded": "im_ok", "posture": "sitting"}
 
 
 async def test_status_changes_while_still_unresponsive_become_updates(setup: Any) -> None:
@@ -191,6 +191,36 @@ async def test_status_changes_while_still_unresponsive_become_updates(setup: Any
     await guardian.on_event(ev(sid, "hr", bpm=160))  # +20: news
     await until(lambda: len(notifier.pushes) == 3)
     assert notifier.pushes[2][0] == "Her heart rate is now 160."
+
+
+async def test_a_fact_that_changes_back_is_pushed_again(setup: Any) -> None:
+    """lying → sitting → lying: the caller must hear she is lying down again (F3-#1); HR 131 → 115 → 131 too."""
+    guardian, _, _, notifier, sid, _ = setup
+    inc = await escalated(guardian, sid, notifier)
+    for n, posture in enumerate(("lying", "sitting", "lying"), start=1):
+        await guardian.on_event(ev(sid, "fall_status", posture=posture, moving=False, still_s=1.0, on_mat=True))
+        await until(lambda n=n: len(notifier.pushes) == n)
+    assert [p[0] for p in notifier.pushes] == ["Maya is now lying down on the mat.",
+                                               "Maya is now sitting up on the mat.",
+                                               "Maya is now lying down on the mat."]
+    await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=2.0, on_mat=True))
+    for bpm in (131, 115, 131):  # 131 sets the baseline; each later change is > 15 bpm
+        await guardian.on_event(ev(sid, "hr", bpm=bpm))
+        await asyncio.sleep(INTERVAL_S * 1.2)
+    assert [p[0] for p in notifier.pushes[3:]] == ["Her heart rate is now 115.", "Her heart rate is now 131."]
+    assert inc.last_pushed["posture"] == "lying" and inc.last_pushed["hr"] == "131"
+
+
+async def test_a_newer_state_replaces_a_queued_one(setup: Any) -> None:
+    """Within one throttle window, sitting then lying again (already pushed) leaves nothing to push."""
+    guardian, _, _, notifier, sid, _ = setup
+    await escalated(guardian, sid, notifier)
+    await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=1.0, on_mat=True))
+    await until(lambda: len(notifier.pushes) == 1)
+    await guardian.on_event(ev(sid, "fall_status", posture="sitting", moving=False, still_s=1.0, on_mat=True))
+    await guardian.on_event(ev(sid, "fall_status", posture="lying", moving=False, still_s=1.0, on_mat=True))
+    await asyncio.sleep(INTERVAL_S * 1.5)
+    assert [p[0] for p in notifier.pushes] == ["Maya is now lying down on the mat."]
 
 
 async def test_updates_wait_until_the_call_is_ongoing(setup: Any) -> None:

@@ -34,6 +34,7 @@ HR_SUSTAIN_S = 5.0
 UPDATE_INTERVAL_S = 10.0
 STILL_UPDATE_EVERY_S = 30.0
 HR_UPDATE_DELTA_BPM = 15
+STATE_FACTS = ("posture", "hr")  # live-update categories where only the newest value is news
 SNAPSHOT_LOOKBACK_S = 5.0
 NO_CALL_HOLD_S = 240.0  # no call to watch: keep the incident (Call 911 shown) this long, like a call watch
 MAX_CLOCK_SKEW_S = 3600.0  # event times further than this from the server clock are not trusted
@@ -72,7 +73,7 @@ class Incident:
     call_state: str | None = None
     timer: asyncio.Task[None] | None = None
     # live-update bookkeeping (§8.6.4)
-    pushed_facts: set[str] = field(default_factory=set)
+    last_pushed: dict[str, str] = field(default_factory=dict)  # fact category → value last pushed into the call
     pending: dict[str, str] = field(default_factory=dict)
     pending_status: str | None = None
     last_push_at: float | None = None
@@ -284,10 +285,17 @@ class SafetyGuardian:
         frames = self.bridge.ring_buffer.frames_since(inc.started_t - SNAPSHOT_LOOKBACK_S)
         return build_snapshot(inc, frames, inc.profile)
 
-    # ---- live updates (§8.6.4): ≤ 1 push per interval, merged, never the same fact twice ---------------
+    # ---- live updates (§8.6.4): ≤ 1 push per interval, merged, never the same fact twice in a row --------
 
     def queue_update(self, inc: Incident, fact: str, text: str, status: str) -> None:
-        if fact in inc.pushed_facts or fact in inc.pending:
+        """`fact` is "<category>:<value>". It is deduped against the value last pushed in its category, not
+        against every fact ever pushed: lying → sitting → lying tells the caller she is lying down again. For
+        a state category (posture, heart rate) a newer value replaces one still waiting for the throttle."""
+        category, _, value = fact.partition(":")
+        if category in STATE_FACTS:
+            for stale in [f for f in inc.pending if f.partition(":")[0] == category]:
+                del inc.pending[stale]
+        if fact in inc.pending or inc.last_pushed.get(category) == value:
             return
         inc.pending[fact] = text
         inc.pending_status = status
@@ -311,7 +319,9 @@ class SafetyGuardian:
             inc.pending.clear()
             inc.last_push_at = self.clock()
             if await self.notifier.push_update(inc, text, status):
-                inc.pushed_facts.update(facts)
+                for fact in facts:
+                    category, _, value = fact.partition(":")
+                    inc.last_pushed[category] = value
 
     # ---- closing ---------------------------------------------------------------------------------
 
