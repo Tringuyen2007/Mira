@@ -35,7 +35,13 @@ _listener: logging.handlers.QueueListener | None = None
 
 
 def mask_phone(s: str) -> str:
-    """Mask every phone-number-looking substring to its last 4 digits, e.g. ``***0123``."""
+    """Mask every phone-number-looking substring to its last 4 digits, e.g. ``***0123``. The configured phone
+    numbers (config PHONE_FIELDS) are masked in any form, including bare digits the pattern can't tell apart
+    from other numbers ("7135550111")."""
+    for phone in cfg.phone_values():
+        if phone in s:
+            digits = re.sub(r"\D", "", phone)
+            s = s.replace(phone, f"***{digits[-4:]}")
 
     def _mask(match: re.Match[str]) -> str:
         digits = re.sub(r"\D", "", match.group(0))

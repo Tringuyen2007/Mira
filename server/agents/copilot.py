@@ -635,7 +635,9 @@ def _ranking_problem(answer: str, today: date) -> str | None:
 
 
 async def _main(args: argparse.Namespace) -> int:
-    db = await _open(args.dsn or cfg.TIGER_DSN, args.ro_dsn or cfg.COPILOT_DSN)
+    # --dsn without --ro-dsn: copilot_ro on that same database, never COPILOT_DSN (which may be another one).
+    ro = args.ro_dsn or (ro_dsn_from(args.dsn) if args.dsn else cfg.COPILOT_DSN)
+    db = await _open(args.dsn or cfg.TIGER_DSN, ro)
     try:
         if args.weekly_review:
             print(json.dumps(await weekly_review(db, args.patient), indent=2))

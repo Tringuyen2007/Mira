@@ -6,6 +6,9 @@ DB_CONTAINER ?= mira-db
 DB_IMAGE ?= timescale/timescaledb-ha:pg18
 DB_LOCAL_PORT ?= 55432
 DB_LOCAL_DSN ?= postgresql://postgres:mira@localhost:$(DB_LOCAL_PORT)/mira
+# copilot_ro's password on the local container (a cluster-wide role). The tests use the same fixed value
+# (server/tests/dbutil.py), so a local COPILOT_DSN with it keeps working after `make test`. Never the Tiger one.
+LOCAL_RO_PASSWORD ?= mira-local-ro
 
 .PHONY: run test db-local db-setup evals demo-data
 
@@ -20,7 +23,7 @@ test:
 db-local:
 	@docker start $(DB_CONTAINER) >/dev/null 2>&1 || \
 		docker run -d --name $(DB_CONTAINER) -p $(DB_LOCAL_PORT):5432 -e POSTGRES_PASSWORD=mira $(DB_IMAGE)
-	$(PY) -m server.db.setup --dsn "$(DB_LOCAL_DSN)" --fresh --wait
+	COPILOT_RO_PASSWORD=$(LOCAL_RO_PASSWORD) $(PY) -m server.db.setup --dsn "$(DB_LOCAL_DSN)" --fresh --wait
 
 # Tiger Cloud (or any DSN): make db-setup DSN="postgres://tsdbadmin:...@host:port/tsdb?sslmode=require"
 db-setup:
@@ -34,6 +37,6 @@ evals:
 # Day of the demo (history, expected.json and the cached demo answer are relative to TODAY). One command:
 # rebuild the local database with today's simulated history (rewrites server/sim/expected.json), then
 # regenerate data/copilot_demo.json through the real tool loop (fake model, guarded SQL on copilot_ro). It refuses
-# to write a cache that doesn't rank like expected.json. Needs COPILOT_RO_PASSWORD. Commit both files.
+# to write a cache that doesn't rank like expected.json. Commit both files.
 demo-data: db-local
-	GEMINI_MODE=fake COPILOT_CACHED_DEMO=0 $(PY) -m server.agents.copilot --write-demo-cache --dsn "$(DB_LOCAL_DSN)"
+	GEMINI_MODE=fake COPILOT_CACHED_DEMO=0 COPILOT_RO_PASSWORD=$(LOCAL_RO_PASSWORD) $(PY) -m server.agents.copilot --write-demo-cache --dsn "$(DB_LOCAL_DSN)"

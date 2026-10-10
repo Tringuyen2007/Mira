@@ -30,6 +30,11 @@ SECRET_FIELDS = (
     "RETELL_API_KEY",
 )
 PHONE_FIELDS = ("RETELL_FROM_NUMBER", "DEMO_EMERGENCY_PHONE", "DEMO_THERAPIST_PHONE", "DEMO_PATIENT_PHONE")
+# Read straight from the environment by setup/evals (not a Config field), but still a secret for the logs.
+ENV_ONLY_SECRETS = ("COPILOT_RO_PASSWORD",)
+# The token shipped in .env.example; the server refuses it (and any token shorter than MIN_TOKEN_LEN).
+PLACEHOLDER_TOKEN = "change-me-long-random-token"
+MIN_TOKEN_LEN = 24
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,34 @@ class Config:
                 password = _dsn_password(value)
                 if password:
                     values.append(password)
+        values += [v for v in (os.environ.get(name) for name in ENV_ONLY_SECRETS) if v]
         return values
+
+    def phone_values(self) -> list[str]:
+        """Every configured phone number in the forms it may be logged in: as configured, digits only, and
+        with/without the +1 country code. A bare "7135550111" doesn't look like a phone to the log regex."""
+        values: set[str] = set()
+        for name in PHONE_FIELDS:
+            value = getattr(self, name)
+            if not value:
+                continue
+            digits = "".join(ch for ch in value if ch.isdigit())
+            values.update({value.strip(), digits, f"+{digits}"})
+            if len(digits) == 11 and digits.startswith("1"):
+                values.add(digits[1:])
+            elif len(digits) == 10:
+                values.update({f"1{digits}", f"+1{digits}"})
+        return sorted((v for v in values if sum(ch.isdigit() for ch in v) >= 7), key=len, reverse=True)
+
+    def token_problem(self) -> str | None:
+        """Why MIRA_API_TOKEN can't be used (None if it can). The server refuses to start on any problem."""
+        if not self.MIRA_API_TOKEN:
+            return "MIRA_API_TOKEN is not set"
+        if self.MIRA_API_TOKEN == PLACEHOLDER_TOKEN:
+            return "MIRA_API_TOKEN is still the .env.example placeholder"
+        if len(self.MIRA_API_TOKEN) < MIN_TOKEN_LEN:
+            return f"MIRA_API_TOKEN is shorter than {MIN_TOKEN_LEN} characters"
+        return None
 
 
 def _mask_tail(value: str) -> str:
@@ -166,5 +198,7 @@ def reload_config() -> Config:
     return cfg
 
 
-load_dotenv(REPO_ROOT / ".env", override=False)
+# The test suite sets MIRA_SKIP_DOTENV=1 (conftest) so it never reads a developer's real .env or secrets.
+if os.environ.get("MIRA_SKIP_DOTENV") != "1":
+    load_dotenv(REPO_ROOT / ".env", override=False)
 cfg: Config = _load()

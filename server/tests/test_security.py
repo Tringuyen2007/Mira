@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable, Iterator
 
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from retell.lib.webhook_auth import symmetric
 from starlette.websockets import WebSocketDisconnect
 
+from server.config import PLACEHOLDER_TOKEN
 from server.security import MAX_WEBHOOK_BYTES, require_token
 from server.tests.conftest import AUTH, TOKEN
 
@@ -52,8 +54,8 @@ def test_every_rest_route_requires_token_except_public(client: TestClient) -> No
         assert require_token in calls, f"{route.path} is missing require_token"
 
 
-@pytest.mark.parametrize("path", ["/ws/pose", "/ws/live", "/ws/events"])
-@pytest.mark.parametrize("query", ["", "?token=wrong", "?token="])
+@pytest.mark.parametrize("path", ["/ws/pose", "/ws/live", "/ws/events", "/ws/notifications"])
+@pytest.mark.parametrize("query", ["", "?token=wrong", "?token=", "?token=wrong&since_id=0"])
 def test_ws_without_valid_token_is_refused(client: TestClient, path: str, query: str) -> None:
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect(path + query):
@@ -97,10 +99,11 @@ def test_tunnel_host_config_is_normalized(make_client: Callable[..., TestClient]
     assert client.get("/stats", headers=AUTH).status_code == 200
 
 
-def test_tunnel_host_ws_refused(make_client: Callable[..., TestClient]) -> None:
+@pytest.mark.parametrize("path", ["/ws/events", "/ws/notifications"])
+def test_tunnel_host_ws_refused(make_client: Callable[..., TestClient], path: str) -> None:
     client = make_client(PUBLIC_WEBHOOK_HOST=TUNNEL)
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(f"/ws/events?token={TOKEN}", headers={"Host": TUNNEL}):
+        with client.websocket_connect(f"{path}?token={TOKEN}", headers={"Host": TUNNEL}):
             pass
 
 
@@ -170,3 +173,20 @@ def test_demo_trigger_fall_enabled(make_client: Callable[..., TestClient]) -> No
 def test_refuses_to_start_without_token(make_client: Callable[..., TestClient]) -> None:
     with pytest.raises(RuntimeError, match="MIRA_API_TOKEN"):
         make_client(MIRA_API_TOKEN="")
+
+
+@pytest.mark.parametrize("token, reason", [
+    (PLACEHOLDER_TOKEN, "placeholder"),
+    ("short-token-123", "shorter than 24"),
+])
+def test_refuses_to_start_with_placeholder_or_short_token(make_client: Callable[..., TestClient], token: str,
+                                                          reason: str) -> None:
+    with pytest.raises(RuntimeError, match=reason):
+        make_client(MIRA_API_TOKEN=token)
+
+
+def test_tests_never_read_the_developers_dotenv() -> None:
+    from server.tests import dbutil
+
+    assert os.environ.get("MIRA_SKIP_DOTENV") == "1"
+    assert dbutil.RO_PASSWORD == "mira-local-ro"  # fixed, never taken from the environment

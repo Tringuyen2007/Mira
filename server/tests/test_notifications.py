@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from server.agents.safety_guardian import Incident
 from server.notify import notifications as notifications_mod
@@ -302,11 +303,13 @@ def test_notifications_rest_requires_token(make_client: Any) -> None:
     assert client.post("/notifications/1/ack", json={"therapist_id": "x"}).status_code == 401
 
 
-def test_notifications_ws_requires_token(make_client: Any) -> None:
+@pytest.mark.parametrize("query", ["", "?token=wrong", "?token=wrong&since_id=0"])
+def test_notifications_ws_requires_token(make_client: Any, query: str) -> None:
     client: TestClient = make_client()
-    with pytest.raises(Exception):  # noqa: B017 - starlette raises on the rejected handshake
-        with client.websocket_connect("/ws/notifications"):
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws/notifications" + query):
             pass
+    assert exc.value.code == 1008
 
 
 def test_notifications_count_and_read_rest(make_client: Any) -> None:

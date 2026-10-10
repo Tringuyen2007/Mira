@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from pathlib import Path
+import os
 
-import pytest
-from fastapi.testclient import TestClient
+# Before anything imports server.config: tests never read the developer's .env (real keys, Tiger passwords).
+os.environ["MIRA_SKIP_DOTENV"] = "1"
 
-from server.config import reload_config
-from server.logging_setup import shutdown_logging
+from collections.abc import Callable, Iterator  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from server.config import reload_config  # noqa: E402
+from server.logging_setup import shutdown_logging  # noqa: E402
 
 TOKEN = "test-token-0123456789abcdef"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}

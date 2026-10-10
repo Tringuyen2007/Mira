@@ -16,8 +16,9 @@ from server.db import seed
 from server.db.apply_sql import apply_file
 
 ADMIN_DSN = os.environ.get("MIRA_TEST_ADMIN_DSN", "postgresql://postgres:mira@localhost:55432/postgres")
-# copilot_ro is a cluster-wide role, so tests reuse the local password when one is configured.
-RO_PASSWORD = os.environ.get("COPILOT_RO_PASSWORD") or "mira-test-ro"
+# copilot_ro is a cluster-wide role: tests, `make db-local` / `make demo-data` and the local COPILOT_DSN all use
+# this one fixed local password, never a value from the environment (that could be the Tiger secret).
+RO_PASSWORD = "mira-local-ro"
 
 
 def _with_db(dsn: str, dbname: str, user: str | None = None, password: str | None = None) -> str:

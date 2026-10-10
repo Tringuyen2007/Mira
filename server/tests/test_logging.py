@@ -29,6 +29,29 @@ def test_mask_phone_leaves_other_numbers(text: str) -> None:
     assert mask_phone(text) == text
 
 
+@pytest.mark.parametrize("configured", ["7135550111", "+17135550111", "17135550111", "(713) 555-0111"])
+def test_configured_phone_is_masked_in_bare_forms(monkeypatch: pytest.MonkeyPatch, configured: str) -> None:
+    """Bare 10/11-digit numbers look like any other number to the pattern; configured phones are masked anyway."""
+    monkeypatch.setenv("DEMO_EMERGENCY_PHONE", configured)
+    reload_config()
+    for form in ("7135550111", "17135550111", "+17135550111"):
+        assert mask_phone(f"to={form} t=1760112345.117") == "to=***0111 t=1760112345.117"
+
+
+def test_bare_phone_masked_in_log_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEMO_EMERGENCY_PHONE", "7135550111")
+    monkeypatch.setenv("DEMO_THERAPIST_PHONE", "17135550222")
+    monkeypatch.setenv("COPILOT_RO_PASSWORD", "ro-password-xyz")
+    log = get_logger("retell")
+    lines = _lines(monkeypatch, lambda: log.info("calling 7135550111", extra={
+        "vars": {"therapist_phone": "7135550222", "contact": "17135550111"}, "pw": "ro-password-xyz"}))
+    blob = "\n".join(json.dumps(line) for line in lines)
+    for leaked in ("7135550111", "7135550222", "ro-password-xyz"):
+        assert leaked not in blob
+    entry = next(line for line in lines if line["component"] == "retell")
+    assert entry["msg"] == "calling ***0111" and entry["vars"]["therapist_phone"] == "***0222"
+
+
 def _lines(monkeypatch: pytest.MonkeyPatch, emit) -> list[dict]:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("GEMINI_API_KEY", GEMINI_KEY)
     monkeypatch.setenv("TIGER_DSN", f"postgresql://tsdbadmin:{DB_PASSWORD}@host.example:5432/tsdb")

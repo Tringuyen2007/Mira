@@ -61,8 +61,10 @@ class MultiDirStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    if not cfg.MIRA_API_TOKEN:
-        raise RuntimeError("MIRA_API_TOKEN is not set; refusing to start (see .env.example)")
+    problem = cfg.token_problem()
+    if problem:
+        raise RuntimeError(f"{problem}; refusing to start. Generate one with: "
+                           "python -c \"import secrets;print(secrets.token_urlsafe(32))\"")
     setup_logging()
     log.info("starting", extra={"config": cfg.redacted()})
 
