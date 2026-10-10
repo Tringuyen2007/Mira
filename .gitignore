@@ -15,3 +15,13 @@ build/
 .env
 .env.*
 !.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Vision
+vision/models/*.task
+config/backups/

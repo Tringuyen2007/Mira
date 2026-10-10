@@ -1,0 +1,12 @@
+# Mat frame: origin mat centre on the mat surface, +y up, +z toward Mira,
+# +x toward the patient's left (Mira's right). Right-handed.
+length_m: 1.73
+width_m: 0.61
+marker_size_m: 0.17
+marker_inset_m: 0.02
+aruco_dictionary: DICT_4X4_50
+camera_targets:
+  A: {eye: [1.98, 0.85, 1.98]}
+  B: {eye: [-1.98, 0.85, 1.98]}
+aim_point: [0.0, 0.8, 0.0]
+placement_tolerance: {position_m: 0.10, angle_deg: 5.0}
