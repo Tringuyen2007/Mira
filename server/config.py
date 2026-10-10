@@ -61,6 +61,7 @@ class Config:
     RETELL_FROM_NUMBER: str | None = None
     RETELL_AGENT_ID: str | None = None
     CALLS_DISABLED: bool = True
+    SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
 
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None
