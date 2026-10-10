@@ -46,9 +46,7 @@ async def verify_retell(request: Request) -> str:
     api_key = cfg.RETELL_API_KEY
     if not api_key:
         raise HTTPException(status_code=401, detail="webhook disabled")
-    body = await request.body()
-    if len(body) > MAX_WEBHOOK_BYTES:
-        raise HTTPException(status_code=413, detail="payload too large")
+    body = await _read_capped(request, MAX_WEBHOOK_BYTES)
     try:
         raw = body.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -60,8 +58,41 @@ async def verify_retell(request: Request) -> str:
     return raw
 
 
-def _host_of(value: str) -> str:
-    return value.split(",")[0].strip().rsplit(":", 1)[0].lower() if value else ""
+async def _read_capped(request: Request, limit: int) -> bytes:
+    """The request body, or 413 as soon as it exceeds `limit` (the webhook is public via the tunnel)."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="payload too large")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(status_code=413, detail="payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def normalize_host(value: str) -> str:
+    """Bare lower-case host name: no scheme, path, port or trailing dot ("https://A.b.:443/" → "a.b")."""
+    host = value.strip().lower()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0]
+    if host.startswith("["):  # IPv6 literal, optionally with a port
+        host = host[: host.find("]") + 1] if "]" in host else host
+    elif host.count(":") == 1:
+        host = host.split(":", 1)[0]
+    return host.rstrip(".")
+
+
+def _request_hosts(raw_headers: list[tuple[bytes, bytes]]) -> set[str]:
+    """Every host the request claims: each Host and X-Forwarded-Host value and list entry."""
+    hosts: set[str] = set()
+    for key, value in raw_headers:
+        if key.lower() in (b"host", b"x-forwarded-host"):
+            hosts.update(normalize_host(v) for v in value.decode("latin-1").split(",") if v.strip())
+    return hosts
 
 
 class TunnelFilterMiddleware:
@@ -71,13 +102,12 @@ class TunnelFilterMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        tunnel_host = (cfg.PUBLIC_WEBHOOK_HOST or "").lower()
+        tunnel_host = normalize_host(cfg.PUBLIC_WEBHOOK_HOST or "")
         if scope["type"] not in ("http", "websocket") or not tunnel_host:
             await self.app(scope, receive, send)
             return
-        headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope.get("headers", [])}
-        hosts = {_host_of(headers.get("host", "")), _host_of(headers.get("x-forwarded-host", ""))}
-        if tunnel_host not in hosts or (scope["type"] == "http" and scope["path"] == WEBHOOK_PATH):
+        via_tunnel = tunnel_host in _request_hosts(scope.get("headers", []))
+        if not via_tunnel or (scope["type"] == "http" and scope["path"] == WEBHOOK_PATH):
             await self.app(scope, receive, send)
             return
         log.warning("tunnel request blocked", extra={"path": scope["path"]})

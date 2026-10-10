@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.routing import APIRoute
@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from retell.lib.webhook_auth import symmetric
 from starlette.websockets import WebSocketDisconnect
 
-from server.security import require_token
+from server.security import MAX_WEBHOOK_BYTES, require_token
 from server.tests.conftest import AUTH, TOKEN
 
 TUNNEL = "mira-test.trycloudflare.com"
@@ -79,6 +79,24 @@ def test_tunnel_host_blocked_except_webhook(make_client: Callable[..., TestClien
     assert client.get("/stats", headers=AUTH).status_code == 200
 
 
+@pytest.mark.parametrize("headers", [
+    {"Host": f"{TUNNEL}."},                                  # trailing-dot FQDN
+    {"Host": f"{TUNNEL}.:443"},
+    {"Host": TUNNEL.upper()},
+    {"X-Forwarded-Host": f"proxy.local, {TUNNEL}"},          # tunnel host not first in the list
+])
+def test_tunnel_host_variants_blocked(make_client: Callable[..., TestClient], headers: dict[str, str]) -> None:
+    client = make_client(PUBLIC_WEBHOOK_HOST=TUNNEL)
+    assert client.get("/stats", headers={**AUTH, **headers}).status_code == 403
+
+
+@pytest.mark.parametrize("configured", [f"https://{TUNNEL}/", f"{TUNNEL.upper()}:443", f"{TUNNEL}."])
+def test_tunnel_host_config_is_normalized(make_client: Callable[..., TestClient], configured: str) -> None:
+    client = make_client(PUBLIC_WEBHOOK_HOST=configured)
+    assert client.get("/stats", headers={**AUTH, "Host": TUNNEL}).status_code == 403
+    assert client.get("/stats", headers=AUTH).status_code == 200
+
+
 def test_tunnel_host_ws_refused(make_client: Callable[..., TestClient]) -> None:
     client = make_client(PUBLIC_WEBHOOK_HOST=TUNNEL)
     with pytest.raises(WebSocketDisconnect):
@@ -110,6 +128,18 @@ def test_signed_webhook_is_accepted(make_client: Callable[..., TestClient]) -> N
     assert resp.status_code == 200
     # Tampered body with the same signature fails.
     assert client.post("/retell/webhook", content=body + " ", headers={"X-Retell-Signature": sig}).status_code == 401
+
+
+def test_oversized_webhook_is_413_before_signature_check(make_client: Callable[..., TestClient]) -> None:
+    client = make_client(RETELL_API_KEY=RETELL_KEY)
+    big = b"x" * (MAX_WEBHOOK_BYTES + 1)
+    assert client.post("/retell/webhook", content=big).status_code == 413
+
+    def chunked() -> Iterator[bytes]:  # no Content-Length: the cap must hold while streaming
+        for _ in range(MAX_WEBHOOK_BYTES // 65536 + 2):
+            yield b"x" * 65536
+
+    assert client.post("/retell/webhook", content=chunked()).status_code == 413
 
 
 def test_demo_trigger_fall_404_when_disabled(client: TestClient) -> None:
