@@ -1,5 +1,7 @@
 # Mira
 
+iOS networking setup and tests: [Networking guide](device/ios/NETWORKING.md).
+
 Initial Setup
 
 mira/

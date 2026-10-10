@@ -5,11 +5,19 @@ xcuserdata/
 
 # Build output and exports
 .build/
+.swiftpm/
 build/
 *.xcarchive
 *.ipa
 *.dSYM
 *.dSYM.zip
+
+# Python caches and local virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
 
 # Local environment configuration
 .env

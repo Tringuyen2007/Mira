@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct MiraApp: App {
     @State private var state = AppState()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -24,6 +25,11 @@ struct MiraApp: App {
             }
             .environment(state)
             .tint(Theme.Mira.accent)
+            .task { state.setForeground(scenePhase == .active) }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { state.setForeground(true) }
+                else if phase == .background { state.setForeground(false) }
+            }
         }
     }
 }
