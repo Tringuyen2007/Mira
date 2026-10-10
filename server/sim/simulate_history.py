@@ -30,7 +30,6 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import psycopg
-from psycopg.types.json import Jsonb
 
 from server.db import seed as seed_mod
 from server.engine_bridge import squat_frame_body

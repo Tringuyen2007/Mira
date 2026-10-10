@@ -183,9 +183,11 @@ async def alert_latest(db: Database, alert_id: str) -> dict[str, Any] | None:
 
 # ---- /stats (§5.13) ----------------------------------------------------------------------------------------
 
-async def approx_rows(db: Database) -> int | None:
-    row = await db.fetchrow("SELECT approximate_row_count('pose_frames') AS n", timeout_s=2)
-    return int(row["n"]) if row and row["n"] is not None else None
+async def total_rows(db: Database) -> int | None:
+    """Exact count: fast on columnstore chunks (per-batch row counts); approximate_row_count() undercounts
+    compressed chunks on TimescaleDB 2.30 (900k rows reported as ~15k)."""
+    row = await db.fetchrow("SELECT count(*) AS n FROM pose_frames", timeout_s=4)
+    return int(row["n"]) if row else None
 
 
 async def compression(db: Database) -> dict[str, Any]:

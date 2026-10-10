@@ -11,17 +11,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from server.api import demo, health
+from server.api import alerts, calibration, demo, health, patients, prescriptions
+from server.api import sessions as sessions_api
+from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
+from server.db.persist import DbStats, SessionPersistence
+from server.db.pool import Database, DBError
+from server.db.writer import FrameWriter
 from server.engine_bridge import EngineBridge
 from server.hub import Hub
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
 from server.notify import webhooks
-from server.security import TunnelFilterMiddleware, ws_token_ok
+from server.security import TunnelFilterMiddleware, require_token, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -48,14 +53,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log.info("starting", extra={"config": cfg.redacted()})
 
     hub = Hub()
-    sessions = SessionRegistry()
+    db: Database | None = None
+    persistence: SessionPersistence | None = None
+    if cfg.TIGER_DSN and not cfg.DB_DISABLED:
+        db = Database(cfg.TIGER_DSN, cfg.COPILOT_DSN)
+        await db.open()
+        persistence = SessionPersistence(db)
+    sessions = SessionRegistry(store=persistence)
+    if persistence is not None:
+        persistence.sessions = sessions
 
     def current_session_id() -> str | None:
         return sessions.current.session_id if sessions.current else None
 
+    def current_patient_id() -> str | None:
+        return sessions.current.patient_id if sessions.current else None
+
     bridge = EngineBridge(hub, asyncio.get_running_loop(), session_provider=current_session_id)
-    state = AppState(cfg, hub, bridge, sessions)
+    state = AppState(cfg, hub, bridge, sessions, db=db)
     state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats})
+    writer: FrameWriter | None = None
+    if db is not None and persistence is not None and cfg.TIGER_DSN:  # narrowed for the type checker
+        writer = FrameWriter(cfg.TIGER_DSN, patient_provider=current_patient_id)
+        writer.start()
+        bridge.subscribe_frames(writer.submit)
+        bridge.subscribe_events(persistence.on_event)
+        state.stat_providers["db"] = DbStats(db, writer, cfg.MOCK_PATIENT_ID)
+    else:
+        state.stat_providers["db"] = lambda: {"available": False, "status": "disabled"}
     set_state(state)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
@@ -67,6 +92,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bridge.stop()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
+        if writer is not None:
+            await asyncio.to_thread(writer.stop)
+        if db is not None:
+            await db.close()
         set_state(None)
         log.info("stopped")
         shutdown_logging()
@@ -103,9 +132,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Mira server", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(TunnelFilterMiddleware)  # added last = outermost
+    app.add_exception_handler(DBError, db_error_handler)
 
     app.include_router(health.router)
     app.include_router(demo.router)
+    for module in (sessions_api, patients, prescriptions, calibration, alerts):
+        app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
 
     @app.websocket("/ws/pose")

@@ -1,0 +1,7 @@
+{
+  "status": "unknown",
+  "calibrated": false,
+  "cameras": [],
+  "errors": null,
+  "note": "placeholder until the vision engine reports calibration"
+}

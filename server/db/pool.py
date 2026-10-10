@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from psycopg_pool import AsyncConnectionPool, PoolClosed, PoolTimeout
 
 from server.logging_setup import get_logger
 
@@ -25,6 +26,9 @@ CONNECT_KWARGS: dict[str, Any] = {
     "keepalives_count": 3,
 }
 CHECKOUT_TIMEOUT_S = 3.0
+# After a connectivity failure, calls fail immediately for this long instead of each waiting for a checkout
+# timeout (the pools keep reconnecting in the background).
+FAIL_FAST_S = 5.0
 DEFAULT_QUERY_TIMEOUT_S = 10.0
 
 
@@ -57,6 +61,7 @@ class Database:
                 configure=_configure_ro, check=AsyncConnectionPool.check_connection)
         self._ok = False
         self._opened = False
+        self._failed_at = 0.0
 
     @property
     def available(self) -> bool:
@@ -66,20 +71,18 @@ class Database:
     def has_ro(self) -> bool:
         return self._ro_pool is not None
 
-    async def open(self, wait_s: float = 5.0) -> None:
-        """Open the pools. If the database is unreachable the server still starts; pools keep retrying."""
+    async def open(self, wait_s: float = 2.0) -> None:
+        """Open the pools without waiting for them to fill (open(wait=True) closes a pool it can't fill), then
+        probe once. If the database is unreachable the server still starts; the pools keep reconnecting."""
         self._opened = True
-        pools = [p for p in (self._pool, self._ro_pool) if p is not None]
-        for pool in pools:
-            try:
-                await pool.open(wait=True, timeout=wait_s)
-            except PoolTimeout:
-                log.warning("database pool not ready at startup; continuing without it",
-                            extra={"pool": pool.name})
+        for pool in (self._pool, self._ro_pool):
+            if pool is not None:
+                await pool.open(wait=False)
         try:
             await self.fetch("SELECT 1 AS ok", timeout_s=wait_s)
-        except DBError:
-            pass
+        except DBError as exc:
+            self._ok, self._failed_at = False, time.monotonic()
+            log.warning("database unreachable at startup; continuing without it", extra={"error": str(exc)})
         log.info("database opened", extra={"available": self.available, "copilot_ro": self.has_ro})
 
     async def close(self) -> None:
@@ -91,11 +94,13 @@ class Database:
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[psycopg.AsyncConnection[Any]]:
         """An autocommit app connection; use `async with conn.transaction():` for multi-statement writes."""
+        if not self._ok and time.monotonic() - self._failed_at < FAIL_FAST_S:
+            raise DBError("database unreachable (reconnecting in the background)")
         try:
             async with self._pool.connection(timeout=CHECKOUT_TIMEOUT_S) as conn:
                 yield conn
             self._ok = True
-        except (psycopg.Error, PoolTimeout, OSError) as exc:
+        except (psycopg.Error, PoolTimeout, PoolClosed, OSError) as exc:
             raise self._wrap(exc) from exc
 
     async def fetch(self, sql: Any, params: Params = None, *,
@@ -144,7 +149,7 @@ class Database:
                     await conn.execute(f"SET LOCAL statement_timeout = {int(timeout_s * 1000)}")
                     cur = await conn.execute(sql.encode(), params)
                     return await cur.fetchall() if cur.description else []
-        except (psycopg.Error, PoolTimeout, OSError) as exc:
+        except (psycopg.Error, PoolTimeout, PoolClosed, OSError) as exc:
             raise self._wrap(exc) from exc
 
     async def _timed(self, coro: Any, timeout_s: float | None) -> Any:
@@ -158,8 +163,9 @@ class Database:
     def _wrap(self, exc: BaseException) -> DBError:
         if isinstance(exc, DBError):
             return exc
-        if isinstance(exc, (psycopg.OperationalError, PoolTimeout, OSError)) and not isinstance(
+        if isinstance(exc, (psycopg.OperationalError, PoolTimeout, PoolClosed, OSError)) and not isinstance(
                 exc, psycopg.errors.QueryCanceled):
             self._ok = False
+            self._failed_at = time.monotonic()
         message = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         return DBError(f"{type(exc).__name__}: {message}")

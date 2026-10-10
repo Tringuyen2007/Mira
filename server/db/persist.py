@@ -145,7 +145,7 @@ class DbStats:
     async def _refresh(self) -> None:
         params = {"pid": self.patient_id, "ex": None, "days": 90}
         parts = {
-            "total_rows": queries.approx_rows(self.db),
+            "total_rows": queries.total_rows(self.db),
             "compression": queries.compression(self.db),
             "aggregate_query_ms": queries.explain_ms(self.db, queries.PROGRESS_V_SQL, params),
             "raw_query_ms": queries.explain_ms(self.db, queries.PROGRESS_FALLBACK_SQL, params),

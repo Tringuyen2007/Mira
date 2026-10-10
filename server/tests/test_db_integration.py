@@ -1,4 +1,4 @@
-"""Against the local Docker TimescaleDB: writer, rollup, time zones, roles, writes, sim → Data Guard → compression."""
+"""Local Docker TimescaleDB: writer, rollup, time zones, roles, writes, sim → Data Guard → compression."""
 
 from __future__ import annotations
 
