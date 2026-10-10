@@ -269,6 +269,61 @@ async def test_mock_fall_still_scripted_after_session_restart(run_bridge: Callab
     assert got.of_type("fall")[0]["stage"] == "confirmed"
 
 
+async def test_mock_user_pause_freezes_program_then_start_resumes(run_bridge: Callable[..., Any]) -> None:
+    bridge, got = await run_bridge(source="mock", speed=20)
+    await wait_until(lambda: len(got.of_type("rep")) >= 2)
+    reps_at_pause = len(got.of_type("rep"))
+
+    bridge.send_to_engine({"type": "command", "name": "pause", "payload": {}})
+    await wait_until(lambda: bool(got.of_type("paused")))
+    assert got.of_type("paused")[-1]["reason"] == "user"
+    assert bridge.live.payload()["paused"] is True
+
+    await asyncio.sleep(0.3)  # time passes (simulated ~6s at speed=20) but the program must not advance
+    assert len(got.of_type("rep")) == reps_at_pause
+    assert got.frames[-1]["angles"]["knee_l"] < 10, "standing still while paused"
+    assert len(got.of_type("paused")) == 1, "pause is idempotent while already paused"
+
+    bridge.send_to_engine({"type": "command", "name": "start", "payload": {}})
+    await wait_until(lambda: bool(got.of_type("resumed")))
+    assert bridge.live.payload()["paused"] is False
+    await wait_until(lambda: len(got.of_type("rep")) > reps_at_pause)
+
+
+async def test_mock_user_skip_ends_the_set_and_moves_to_the_next(run_bridge: Callable[..., Any]) -> None:
+    bridge, got = await run_bridge(source="mock", speed=20)
+    await wait_until(lambda: len(got.of_type("rep")) >= 2)
+
+    bridge.send_to_engine({"type": "command", "name": "skip", "payload": {}})
+    await wait_until(lambda: bool(got.of_type("set_done")))
+    done = got.of_type("set_done")[-1]
+    assert done["set"] == 1 and done["exercise_id"] == "squat"
+    assert 0 < done["reps"] < 10, "a partial set: fewer reps than the full target"
+
+    await wait_until(lambda: len(got.of_type("countdown")) >= 4)  # 3 countdown ticks for set 1, then set 2's
+    assert got.of_type("countdown")[-1]["set"] == 2, "skip moves straight into the next set's countdown"
+
+
+async def test_mock_user_stop_ends_the_program(run_bridge: Callable[..., Any]) -> None:
+    bridge, got = await run_bridge(source="mock", speed=20)
+    await wait_until(lambda: len(got.of_type("rep")) >= 2)
+
+    bridge.send_to_engine({"type": "command", "name": "stop", "payload": {}})
+    await wait_until(lambda: bool(got.of_type("stopped")))
+    assert bridge.live.payload()["phase"] == "done"
+
+    rep_count = len(got.of_type("rep"))
+    await asyncio.sleep(0.3)
+    assert len(got.of_type("rep")) == rep_count, "no more reps once stopped"
+    assert got.frames[-1]["angles"]["knee_l"] < 10, "standing still once stopped"
+
+    # a later start/pause/skip has no effect: the program is over for this session
+    bridge.send_to_engine({"type": "command", "name": "start", "payload": {}})
+    await asyncio.sleep(0.2)
+    assert not got.of_type("resumed")
+    assert bridge.live.payload()["phase"] == "done"
+
+
 async def test_event_enricher_runs_before_hub_and_subscribers(run_bridge: Callable[..., Any]) -> None:
     published: list[dict[str, Any]] = []
     bridge = EngineBridge(Hub(), asyncio.get_running_loop(), source="mock", session_provider=lambda: SESSION)

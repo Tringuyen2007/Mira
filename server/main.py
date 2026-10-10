@@ -47,6 +47,9 @@ log = get_logger("main")
 # Client → server message types accepted on /ws/events (§4.3); anything else is dropped. Engine events
 # (fall, fall_status, gesture, …) can never come from a client.
 CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health"})
+# `command` names that control the session itself (as opposed to pain/im_ok, which the Guardian/Coach
+# handle off the broadcast event). These are forwarded to the engine over the reverse channel.
+SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
 MAX_CLIENT_MSG_KEYS = 32
 CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
@@ -191,7 +194,25 @@ def _on_client_event(msg: dict[str, Any]) -> None:
     if msg.get("type") not in CLIENT_EVENT_TYPES or len(msg) > MAX_CLIENT_MSG_KEYS:
         log.debug("dropping client event", extra={"event_type": str(msg.get("type"))[:40]})
         return
-    get_state().bridge.inject(msg)
+    state = get_state()
+    state.bridge.inject(msg)
+    if msg.get("type") == "command" and msg.get("name") in SESSION_COMMANDS:
+        _forward_session_command(state, msg)
+
+
+def _forward_session_command(state: AppState, msg: dict[str, Any]) -> None:
+    """start/pause/skip/stop go to the engine over the reverse channel (`EngineBridge.send_to_engine`), same
+    as `incident_closed`. A user `start` must never resume a session the Safety Guardian is holding open
+    (a pain/HR incident): the Guardian, not the patient, decides when that ends."""
+    session = state.sessions.current
+    session_id = session.session_id if session is not None else None
+    name = msg.get("name")
+    guardian = state.guardian
+    if name == "start" and guardian is not None and session_id is not None and session_id in guardian.incidents:
+        log.info("ignoring user start: Guardian holds the session", extra={"session_id": session_id})
+        return
+    state.bridge.send_to_engine({"type": "command", "name": name, "payload": msg.get("payload") or {},
+                                 "session_id": session_id})
 
 
 def _parse_since_id(raw: str | None) -> int | None:

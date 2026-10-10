@@ -4,6 +4,7 @@ whole app wires the Guardian so /demo/trigger_fall drives the alert ladder."""
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -82,3 +83,36 @@ def test_signed_webhook_is_recorded_on_the_incident(make_client: Callable[..., T
         assert client.post("/retell/webhook", content=body, headers={"X-Retell-Signature": sig}).status_code == 200
         step = read_until(ws, lambda m: m.get("type") == "alert" and m["step"].startswith("webhook_"))
         assert step["step"] == "webhook_call_started" and step["alert_id"] == escalated["alert_id"]
+
+
+def test_session_commands_are_forwarded_to_the_engine(make_client: Callable[..., TestClient],
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """start/pause/skip/stop reach `EngineBridge.send_to_engine` (ENGINE_MODE=thread, the BASELINE_ENV default)."""
+    client = make_client(MIRA_SOURCE="mock")
+    state = get_state()
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(state.bridge, "send_to_engine", sent.append)
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        for name in ("pause", "start", "skip", "stop"):
+            ws.send_json({"type": "command", "name": name, "payload": {}})
+        time.sleep(0.2)  # the client handler runs on the server's event loop thread
+    assert [m["name"] for m in sent] == ["pause", "start", "skip", "stop"]
+    assert all(m["type"] == "command" and "session_id" in m for m in sent)
+
+
+def test_user_start_does_not_resume_a_session_the_guardian_is_holding(
+        make_client: Callable[..., TestClient], monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pain >= 7 report opens a Guardian incident and pauses the session; the patient's own `start` must
+    not be the thing that resumes it (only the Guardian's own resolution does)."""
+    client = make_client(MIRA_SOURCE="mock", CHECKIN_TIMEOUT_S="60")
+    state = get_state()
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        ws.send_json({"type": "command", "name": "pain", "payload": {"level": 8}})
+        read_until(ws, lambda m: m.get("type") == "alert" and m.get("step") == "detected")
+        assert [inc.kind for inc in state.guardian.incidents.values()] == ["pain"]
+
+        sent: list[dict[str, Any]] = []
+        monkeypatch.setattr(state.bridge, "send_to_engine", sent.append)
+        ws.send_json({"type": "command", "name": "start", "payload": {}})
+        time.sleep(0.2)
+    assert sent == [], "a user start must never resume a session the Safety Guardian is holding open"

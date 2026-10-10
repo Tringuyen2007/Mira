@@ -353,13 +353,15 @@ class MockSource:
         self._arrived = False
         self._arrive_due_s = MOCK_ARRIVE_AT_S
         self._patient_id = cfg.MOCK_PATIENT_ID
+        self._paused = False  # user `pause`/`start` (§ reverse channel); independent of a Guardian `paused`
+        self._stopped = False  # user `stop`: the program is over, no more reps for this session
 
     def run(self, emit: Emit, inbox: Inbox, stop: StopFlag) -> None:
         dt = 1.0 / FRAME_HZ
         self._t0 = time.time()
         next_tick = time.monotonic()
         while not stop.is_set():
-            self._drain(inbox)
+            self._drain(emit, inbox)
             # The mock patient steps in front of the device once per run, a few seconds after start (so clients
             # that connect at boot see the greeting); the squat program starts on arrival. A new live session
             # (REST or boot) restarts this via `_restart_session`, so later sessions get their own arrival too.
@@ -373,6 +375,11 @@ class MockSource:
                 body = lying_frame_body(self._fall.responded, self._rng)
                 pose = _program_pose(self._program_s)
                 events = self._fall.due(self._sim_s - self._fall_started_s)
+            elif self._stopped or self._paused:
+                # Standing still: a user `pause` or `stop` freezes the program but the camera keeps streaming.
+                pose = _program_pose(self._program_s)
+                body = squat_frame_body(0.0, 0.0, 0.0, self._rng)
+                events = []
             else:
                 pose = _program_pose(self._program_s)
                 body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
@@ -386,7 +393,7 @@ class MockSource:
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
             self._sim_s += dt
-            if self._fall is None and self._arrived:
+            if self._fall is None and self._arrived and not self._paused and not self._stopped:
                 self._program_s += dt
             next_tick += dt / self.speed
             delay = next_tick - time.monotonic()
@@ -395,7 +402,7 @@ class MockSource:
             elif delay > 0:
                 stop.wait(delay)
 
-    def _drain(self, inbox: Inbox) -> None:
+    def _drain(self, emit: Emit, inbox: Inbox) -> None:
         while True:
             try:
                 msg = inbox.get_nowait()
@@ -409,6 +416,38 @@ class MockSource:
                 self._program_s = math.ceil(self._program_s / _SET_S) * _SET_S  # resume at the next set
             elif kind == SESSION_START:
                 self._restart_session(msg.get("patient_id"))
+            elif kind == "command":
+                self._on_command(emit, msg.get("name"))
+
+    def _on_command(self, emit: Emit, name: str | None) -> None:
+        """A client session command (start/pause/skip/stop), forwarded by `main._forward_session_command`.
+        Ignored while a scripted fall is in progress: the Guardian already owns the frames then."""
+        if self._fall is not None:
+            return
+        if name == "pause":
+            if not self._paused and not self._stopped:
+                self._paused = True
+                self._emit(emit, {"type": "paused", "reason": "user"})
+        elif name == "start":
+            if self._paused and not self._stopped:
+                self._paused = False
+                self._emit(emit, {"type": "resumed"})
+        elif name == "skip":
+            if not self._stopped:
+                self._skip_set(emit)
+        elif name == "stop":
+            if not self._stopped:
+                self._stopped = True
+                self._paused = False
+                self._emit(emit, {"type": "stopped"})
+
+    def _skip_set(self, emit: Emit) -> None:
+        """End the current set now (a partial `set_done`) and jump straight to the next set's countdown,
+        without replaying the rest of this set's schedule (mirrors how `incident_closed` resumes)."""
+        pose = _program_pose(self._program_s)
+        self._emit(emit, {"type": "set_done", "set": pose.set_no, "reps": pose.rep, "exercise_id": _EXERCISE})
+        self._program_s = math.ceil((self._program_s + 1e-6) / _SET_S) * _SET_S
+        self._prev_program_s = self._program_s - 1e-9
 
     def _restart_session(self, patient_id: str | None) -> None:
         """A new live session started: fresh rep/set counters and a fresh `arrived` MOCK_ARRIVE_AT_S seconds
@@ -419,6 +458,8 @@ class MockSource:
         self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
         self._program_s = 0.0
         self._prev_program_s = -1e-9
+        self._paused = False
+        self._stopped = False
 
     def _start_fall(self, responds_at_s: float | None) -> None:
         pose = _program_pose(self._program_s)
@@ -604,7 +645,7 @@ class LagMonitor:
 class LiveState:
     """The /ws/live payload, maintained from frames and events."""
 
-    phase: str = "idle"  # idle | countdown | active | rest | paused | incident
+    phase: str = "idle"  # idle | countdown | active | rest | paused | incident | done
     exercise_id: str | None = None
     rep: int = 0
     reps_target: int | None = None
@@ -649,6 +690,8 @@ class LiveState:
             self.phase, self.paused = "paused", True
         elif kind == "resumed":
             self.phase, self.paused = "active", False
+        elif kind == "stopped":
+            self.phase = "done"
         elif kind == "fall":
             self.phase = "incident"
         elif kind == INCIDENT_CLOSED:

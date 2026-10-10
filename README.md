@@ -245,12 +245,14 @@ Logs are JSON lines in `logs/server.log` (phone numbers masked, secrets redacted
 ## Engine reverse channel
 
 The server sends these messages to the engine with `bridge.send_to_engine(msg)` (the mock source handles
-`trigger_fall` and `incident_closed` and ignores the rest; the vision engine must apply the Coach messages):
+`trigger_fall`, `incident_closed`, `command` and ignores the rest; the vision engine must apply the Coach
+messages):
 
 | `type` | Other fields | Sent by | Meaning |
 |---|---|---|---|
 | `trigger_fall` | `responds_at_s` | `/demo/trigger_fall` | start the scripted mock fall |
 | `incident_closed` | — | Guardian | the fall incident is over; resume at the next set |
+| `command` | `name: start\|pause\|skip\|stop`, `payload`, `session_id` | `/ws/events` client (`command`) | session control from the patient/companion app, see below |
 | `end_set_early` | `session_id`, `set`, `reason: "fatigue"` | Coach | end the current set now (already ≥ `limits.min_reps`) |
 | `extend_rest` | `session_id`, `rest_s` | Coach | make the coming rest `rest_s` seconds (≤ `limits.max_rest_s`) |
 | `adjust_next_set` | `session_id`, `reps?`, `rest_s?` | Coach | use these (already clamped) values for the next set |
@@ -258,6 +260,19 @@ The server sends these messages to the engine with `bridge.send_to_engine(msg)` 
 
 Coach values are always inside the active prescription's `limits`; the Coach sends nothing while the Safety
 Guardian holds the session, and it never sends a resume.
+
+A client `command` on `/ws/events` named `start`, `pause`, `skip` or `stop` (§4.3; `pain`/`im_ok` are read
+straight off the broadcast event by the Guardian/Coach and never reach the engine) is forwarded to the
+engine as `{"type": "command", "name": ..., "payload": ..., "session_id": ...}` by
+`main._forward_session_command`, the same reverse channel used for `incident_closed`. It works the same in
+`ENGINE_MODE=thread` and `=process`. The mock source applies it: `pause` freezes the program (frames keep
+flowing, the patient standing still, `/ws/live` reports `paused: true`) and emits `paused {reason: "user"}`;
+`start` while paused emits `resumed` and lets the program continue where it left off; `skip` ends the
+current set (`set_done` with the reps completed so far) and moves straight to the next set's countdown;
+`stop` ends the program for good (`stopped`, `/ws/live` `phase: "done"`, no more reps). The server never
+forwards a `start` for a session the Safety Guardian is holding open (a pain/HR incident): only the
+Guardian's own `incident_closed`/resolution ends that pause, never the patient's `start`. The vision engine
+should implement the same four commands.
 
 ## AI layer (Gemini + ElevenLabs)
 
