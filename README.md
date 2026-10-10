@@ -76,4 +76,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ```
 
 Example payloads for every WebSocket message and REST response are in `server/samples/`.
+
+## Frame contract: joint angles
+
+`angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (TRI.md §4.5) are **flexion in degrees**:
+0 = straight joint, larger = deeper bend (flexion = 180 minus the interior angle between the two bones).
+A standing person reads about 5, the bottom of a squat about 70-90, and a "90 degree squat target" means 90 degrees of
+knee flexion. The database rollup (`max_knee`, `p95_knee` = deepest bend), the simulator, `/ws/live`
+`main_angle` (the deeper knee) and the mock source all use this convention, so the vision engine must emit it too.
+See `server/samples/engine_frame.json`.
 Logs are JSON lines in `logs/server.log` (phone numbers masked, secrets redacted).
