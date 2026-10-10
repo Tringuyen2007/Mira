@@ -716,6 +716,8 @@ class EngineBridge:
             await asyncio.to_thread(self._process.join, JOIN_TIMEOUT_S)
             if self._process.is_alive():
                 self._process.terminate()
+            self._inbox.close()
+            self._inbox.cancel_join_thread()  # don't block interpreter exit on unread reverse messages
         tasks = [*self._tasks, *(s.task for s in self._event_subs if s.task), *([self._fall_injector]
                  if self._fall_injector else [])]
         for task in tasks:
@@ -793,7 +795,7 @@ class EngineBridge:
             self.live.on_event(msg)
             if self._fall_injector_closed is not None:
                 self._fall_injector_closed.set()
-        if self._inbox is not None:
+        if self._inbox is not None and self._running:
             self._inbox.put_nowait(msg)
 
     async def trigger_fall(self, responds_at_s: float | None) -> None:
