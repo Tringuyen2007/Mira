@@ -7,7 +7,7 @@ DB_IMAGE ?= timescale/timescaledb-ha:pg18
 DB_LOCAL_PORT ?= 55432
 DB_LOCAL_DSN ?= postgresql://postgres:mira@localhost:$(DB_LOCAL_PORT)/mira
 
-.PHONY: run test db-local db-setup
+.PHONY: run test db-local db-setup evals
 
 # Exactly one server process: the hub, Guardian timers and ring buffer live in memory (TRI.md §3.1).
 run:
@@ -26,3 +26,7 @@ db-local:
 db-setup:
 	@test -n "$(DSN)" || (echo 'usage: make db-setup DSN="postgres://..."'; exit 2)
 	@$(PY) -m server.db.setup --dsn "$(DSN)"
+
+# Care Copilot evals (not part of `make test`): MIRA_EVAL_DSN / MIRA_EVAL_RO_DSN, GEMINI_MODE=fake|live.
+evals:
+	$(PY) -m server.tests.copilot_evals $(EVAL_ARGS)
