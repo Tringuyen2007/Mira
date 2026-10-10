@@ -7,6 +7,10 @@ import time
 from server.hub import QUEUE_MAXSIZE, Hub, pose_payload
 
 
+def _strict(name: str) -> None:
+    raise AssertionError(f"server sent non-JSON constant {name}")
+
+
 class FakeWS:
     """Minimal WebSocket stand-in: records sends, optionally slow, receives from an inbox."""
 
@@ -19,7 +23,7 @@ class FakeWS:
     async def send_text(self, data: str) -> None:
         if self.send_delay_s:
             await asyncio.sleep(self.send_delay_s)
-        self.sent.append(json.loads(data))
+        self.sent.append(json.loads(data, parse_constant=_strict))  # like a browser's JSON.parse
 
     async def receive_text(self) -> str:
         item = await self.inbox.get()
@@ -73,7 +77,8 @@ async def test_incoming_messages_reach_handler() -> None:
     ws = FakeWS()
     got: list[dict] = []
     task = asyncio.create_task(hub.connect("events", ws, got.append))
-    for text in ('{"type": "hr", "bpm": 90}', "not json", "[1, 2]"):
+    for text in ('{"type": "hr", "bpm": 90}', "not json", "[1, 2]", '{"type": "hr", "bpm": NaN}',
+                 '{"type": "wrist", "accel": [0, 0, Infinity]}'):
         ws.inbox.put_nowait(text)
     await _wait_for(lambda: len(got) == 1)
     ws.inbox.put_nowait(None)
@@ -114,3 +119,20 @@ async def test_pose_throttled_to_25hz() -> None:
     assert 245 <= published <= 255
     ws.inbox.put_nowait(None)
     await task
+
+
+async def test_non_finite_numbers_are_sent_as_null() -> None:
+    hub = Hub()
+    pose, events = FakeWS(), FakeWS()
+    tasks = [asyncio.create_task(hub.connect("pose", pose)), asyncio.create_task(hub.connect("events", events))]
+    await _wait_for(lambda: hub.stats()["clients"]["pose"] == hub.stats()["clients"]["events"] == 1)
+    nan, inf = float("nan"), float("inf")
+    hub.publish("pose", {"t": 1.0, "joints": [[nan, 0.5, -inf]], "confidence": [nan], "load_l_pct": nan, "flags": []})
+    hub.emit("fall_status", {"still_s": inf, "detail": {"angles": [nan, 1.0]}})
+    await _wait_for(lambda: pose.sent and events.sent)
+    assert pose.sent[0]["joints"] == [[None, 0.5, None]]
+    assert pose.sent[0]["load_l_pct"] is None
+    assert events.sent[0] == {"type": "fall_status", "still_s": None, "detail": {"angles": [None, 1.0]}}
+    for ws in (pose, events):
+        ws.inbox.put_nowait(None)
+    await asyncio.gather(*tasks)

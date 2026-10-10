@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -46,6 +47,29 @@ def _round(value: Any, ndigits: int = 3) -> Any:
     if isinstance(value, list):
         return [_round(v, ndigits) for v in value]
     return value
+
+
+def _finite(value: Any) -> Any:
+    """Replace NaN/±Infinity (not valid JSON; browsers' JSON.parse rejects them) with None."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
+def to_json(msg: dict[str, Any]) -> str:
+    """Strict JSON for clients. The engine may emit NaN (e.g. an undefined angle); those become null."""
+    try:
+        return json.dumps(msg, separators=(",", ":"), allow_nan=False)
+    except ValueError:
+        return json.dumps(_finite(msg), separators=(",", ":"), allow_nan=False)
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"non-finite number {name} is not JSON")
 
 
 def pose_payload(frame: dict[str, Any]) -> dict[str, Any]:
@@ -100,7 +124,7 @@ class Hub:
         self._published[channel] += 1
         if not clients:
             return
-        text = json.dumps(msg, separators=(",", ":"))
+        text = to_json(msg)
         for client in clients:
             self._enqueue(client, text)
 
@@ -161,7 +185,7 @@ class Hub:
     @staticmethod
     def _handle_incoming(client: _Client, text: str, on_message: Callable[[dict[str, Any]], None]) -> None:
         try:
-            msg = json.loads(text)
+            msg = json.loads(text, parse_constant=_reject_constant)
         except ValueError:
             log.debug("ignoring non-JSON ws message", extra={"channel": client.channel})
             return
