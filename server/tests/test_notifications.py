@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 import uuid
 from datetime import datetime
@@ -151,9 +152,9 @@ async def test_list_unread_and_since_id_filters() -> None:
     for i in range(5):
         await _create(service, dedupe_key=f"d{i}")
     await service.mark_read(1)
-    rows = service.list_notifications(unread=True)
+    rows = await service.list_notifications(unread=True)
     assert [r["id"] for r in rows] == [5, 4, 3, 2]  # newest first, id 1 excluded
-    since = service.list_notifications(since_id=2)
+    since = await service.list_notifications(since_id=2)
     assert [r["id"] for r in since] == [3, 4, 5]  # ascending, catch-up order
 
 
@@ -161,10 +162,10 @@ async def test_count_unread_and_urgent_unacked() -> None:
     service, _ = make_service()
     await _create(service, kind="alert", severity="urgent", dedupe_key="u1")
     await _create(service, kind="milestone", severity="low", dedupe_key="u2")
-    counts = service.count()
+    counts = await service.count()
     assert counts == {"unread": 2, "urgent_unacked": 1}
     await service.mark_all_read()
-    counts = service.count()
+    counts = await service.count()
     assert counts["unread"] == 0 and counts["urgent_unacked"] == 1  # read != acked
 
 
@@ -371,6 +372,228 @@ def test_ws_notifications_scopes_replay_to_a_therapist_id(make_client: Any) -> N
     service = get_state().notifications
     asyncio.run(_create(service, kind="milestone", severity="low", therapist_id="okafor", dedupe_key="scopeA"))
     asyncio.run(_create(service, kind="milestone", severity="low", therapist_id="other", dedupe_key="scopeB"))
-    with client.websocket_connect(f"/ws/notifications?token={TOKEN}&therapist_id=other") as ws:
+    with client.websocket_connect(f"/ws/notifications?token={TOKEN}&since_id=0&therapist_id=other") as ws:
         msg = ws.receive_json()
     assert msg["therapist_id"] == "other"
+
+
+# ---- review fixes: call_update dedupe, policy budget, DB-failure fallback, ack-once, resend scope ------
+
+async def test_distinct_call_updates_each_become_a_row_but_repeats_do_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    service, hub = make_service()
+
+    class State:
+        notifications = service
+
+    monkeypatch.setattr(notifications_mod, "get_state", lambda: State())
+    inc = open_incident("cu")
+    await notifications_mod.on_alert_step(inc, "call_update", {"text": "UPDATE 10:01: she is sitting up."})
+    await notifications_mod.on_alert_step(inc, "call_update", {"text": "UPDATE 10:02: she is standing."})
+    await notifications_mod.on_alert_step(inc, "call_update", {"text": "UPDATE 10:02: she is standing."})
+    await notifications_mod.on_alert_step(inc, "escalated", {})
+    await notifications_mod.on_alert_step(inc, "escalated", {})
+    await notifications_mod.on_alert_step(inc, "acknowledged", {})
+    await notifications_mod.on_alert_step(inc, "acknowledged", {})
+    kinds = [(m["kind"], m["dedupe_key"]) for m in hub.published]
+    assert len(kinds) == 4
+    updates = [m for m in hub.published if m["dedupe_key"].startswith("alert:cu:call_update:")]
+    assert len(updates) == 2 and updates[0]["body"] == "UPDATE 10:01: she is sitting up."
+    await service.stop()
+
+
+async def test_call_update_body_never_carries_a_phone_number(monkeypatch: pytest.MonkeyPatch) -> None:
+    service, hub = make_service()
+
+    class State:
+        notifications = service
+
+    monkeypatch.setattr(notifications_mod, "get_state", lambda: State())
+    await notifications_mod.on_alert_step(open_incident("ph"), "call_update", {"text": "call +15550100111 now"})
+    assert "5550100111" not in hub.published[0]["body"] and "0111" in hub.published[0]["body"]
+    await service.stop()
+
+
+class FakeDB:
+    """Just enough of `Database` for the notification SQL: INSERT … RETURNING id, list, one row, counts."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.rows: list[dict[str, Any]] = []
+        self.keys: set[str] = set()
+        self.next_id = 100
+
+    def add(self, **row: Any) -> dict[str, Any]:
+        self.next_id += 1
+        full = {"id": self.next_id, "time": datetime.now(CHI), "kind": "milestone", "severity": "low",
+                "therapist_id": "okafor", "patient_id": "maya", "title": "t", "body": None, "link": None,
+                "source_table": None, "source_id": None, "dedupe_key": None, "read_at": None, "acked_at": None,
+                "acked_by": None, **row}
+        self.rows.append(full)
+        return full
+
+    async def fetchrow(self, sql: str, params: Any) -> dict[str, Any] | None:
+        if self.fail:
+            from server.db.pool import DBError
+            raise DBError("OperationalError: connection refused")
+        if sql.startswith("INSERT"):
+            key = params[-1]
+            if key is not None and key in self.keys:
+                return None
+            if key is not None:
+                self.keys.add(key)
+            return {"id": self.add(dedupe_key=key)["id"]}
+        if "WHERE id = %s" in sql:
+            return next((dict(r) for r in self.rows if r["id"] == params[0]), None)
+        raise AssertionError(sql)
+
+    async def fetch(self, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        if self.fail:
+            from server.db.pool import DBError
+            raise DBError("OperationalError: connection refused")
+        rows = [dict(r) for r in self.rows if params["since"] is None or r["id"] > params["since"]]
+        rows.sort(key=lambda r: r["id"], reverse="DESC" in sql)
+        return rows[:params["limit"]] if params["limit"] else rows
+
+
+async def test_a_duplicate_from_the_database_does_not_spend_the_daily_push_budget() -> None:
+    db = FakeDB()
+    db.keys.add("before-restart")  # stored by the previous process; this one's memory doesn't know it
+    service = NotificationService(FakeHub(), db, policy=NotificationPolicy(), clock=lambda: chicago(12).timestamp())
+    assert await _create(service, dedupe_key="before-restart") is None
+    hub = service.hub
+    assert await _create(service, dedupe_key="new") == 101  # the database id
+    assert hub.published[-1]["push"] is True  # budget still unspent
+
+
+async def test_urgent_row_is_delivered_live_when_the_database_insert_fails() -> None:
+    db = FakeDB(fail=True)
+    hub = FakeHub()
+    service = NotificationService(hub, db, policy=NotificationPolicy(), resend_min=0)
+    nid = await _create(service, kind="alert", severity="urgent", dedupe_key="down1")
+    assert nid is not None and nid < 0  # process-local id, never colliding with a database id
+    assert hub.published[0]["id"] == nid and hub.published[0]["push"] is True
+    assert (await service.count())["urgent_unacked"] == 1  # count falls back to memory
+    assert (await service.ack(nid, "dr_okafor"))["acked_by"] == "dr_okafor"
+
+
+async def test_ack_pushes_into_the_call_once_per_incident() -> None:
+    inc = open_incident("alert-once")
+    notifier = FakeNotifier()
+
+    class FakeGuardian:
+        incidents = {"s1": inc}
+
+        def live_snapshot(self, _inc: Any) -> dict[str, Any]:
+            return {"posture": None, "moving": None, "still_s": None, "hr": None}
+
+    service, _ = make_service(notifier=notifier, guardian=FakeGuardian())
+    first = await _create(service, kind="alert", severity="urgent", source_table="alerts", source_id="alert-once",
+                          dedupe_key="o1")
+    second = await _create(service, kind="call_update", severity="urgent", source_table="alerts",
+                           source_id="alert-once", dedupe_key="o2")
+    other_source = await _create(service, kind="alert", severity="urgent", source_table="proposals",
+                                 source_id="alert-once", dedupe_key="o3")
+    for nid in (first, first, second, other_source):
+        await service.ack(nid, "dr_okafor")  # type: ignore[arg-type]
+    assert len(notifier.pushed) == 1
+    await service.stop()
+
+
+async def test_resend_stops_once_another_row_about_the_same_alert_is_acked() -> None:
+    service, hub = make_service(resend_min=0.001)
+    await _create(service, kind="alert", severity="urgent", source_table="alerts", source_id="a9", dedupe_key="x1")
+    other = await _create(service, kind="alert", severity="urgent", source_table="alerts", source_id="a9",
+                          dedupe_key="x2")
+    call = await _create(service, kind="call_update", severity="urgent", source_table="alerts", source_id="a9",
+                         dedupe_key="x3")
+    assert call not in service._resend_tasks  # call progress rows are not re-sent
+    await service.ack(other, "dr_okafor")  # type: ignore[arg-type]
+    await asyncio.sleep(0.15)
+    assert not any(m.get("resend") for m in hub.published)
+    assert service._resend_tasks == {}
+    await service.stop()
+
+
+# ---- review fixes: WS replay hand-off (no gap, no duplicate) and live therapist scoping --------------
+
+class FakeWS:
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self._closed = asyncio.Event()
+
+    async def send_text(self, data: str) -> None:
+        import json
+        self.sent.append(json.loads(data))
+
+    async def receive_text(self) -> str:
+        await self._closed.wait()
+        raise RuntimeError("closed")
+
+    async def close(self, code: int = 1000) -> None:
+        self._closed.set()
+
+
+async def test_serve_replays_db_rows_then_ring_rows_and_never_duplicates_a_live_row() -> None:
+    from server.hub import Hub
+
+    db = FakeDB()
+    hub = Hub()
+    service = NotificationService(hub, db, policy=NotificationPolicy(), resend_min=0)
+    db.add()  # 101: the client already has it
+    db.add()  # 102: missed; committed before the replay query
+    committed_not_yet_published = db.add()  # 103: in the query result, published after the client registered
+    ws = FakeWS()
+    task = asyncio.create_task(service.serve(ws, since_id=101, therapist_id=None))
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if len(ws.sent) >= 2:
+            break
+    hub.publish("notifications", {"type": "notification", **committed_not_yet_published,
+                                   "time": 0.0, "push": False})
+    live = await _create(service, dedupe_key="after")  # 104
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if len(ws.sent) >= 3:
+            break
+    await asyncio.sleep(0.05)
+    await ws.close()
+    await task
+    assert [m["id"] for m in ws.sent] == [102, 103, live]
+
+
+async def test_serve_scopes_the_live_stream_to_the_therapist() -> None:
+    from server.hub import Hub
+
+    hub = Hub()
+    service = NotificationService(hub, None, policy=NotificationPolicy(), resend_min=0)
+    ws = FakeWS()
+    task = asyncio.create_task(service.serve(ws, since_id=None, therapist_id="other"))
+    await asyncio.sleep(0.02)
+    await _create(service, therapist_id="okafor", dedupe_key="s1")
+    mine = await _create(service, therapist_id="other", dedupe_key="s2")
+    await asyncio.sleep(0.05)
+    await ws.close()
+    await task
+    assert [m["id"] for m in ws.sent] == [mine]
+
+
+def test_ws_without_since_id_streams_live_only_and_scopes_by_therapist(make_client: Any) -> None:
+    client: TestClient = make_client()
+    service = get_state().notifications
+    in_app(client, service, therapist_id="okafor", dedupe_key="old")
+    with client.websocket_connect(f"/ws/notifications?token={TOKEN}&therapist_id=other") as ws:
+        in_app(client, service, therapist_id="okafor", dedupe_key="liveA")
+        nid = in_app(client, service, therapist_id="other", dedupe_key="liveB")
+        msg = ws.receive_json()
+    assert msg["id"] == nid and msg["therapist_id"] == "other"
+
+
+def in_app(client: TestClient, service: NotificationService, **overrides: Any) -> int | None:
+    """create() on the app's own event loop (the TestClient portal), as a real producer would run it."""
+    return client.portal.call(functools.partial(_create, service, **overrides))  # type: ignore[union-attr]
+
+
+def test_rest_limit_is_validated(make_client: Any) -> None:
+    client: TestClient = make_client()
+    assert client.get("/notifications?limit=0", headers=AUTH).status_code == 422
+    assert client.get("/notifications?limit=501", headers=AUTH).status_code == 422
