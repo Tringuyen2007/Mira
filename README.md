@@ -114,9 +114,16 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
   saved answers from `data/ai_cache/` (falls back to the fake); `live` calls Gemini and caches every answer
   (a caller that rejects an answer calls `await gemini.discard(reply)` so it is not replayed).
   Retries 429/5xx after 1 s and 3 s, honours retry hints, and on a daily-quota 429 for `GEMINI_MODEL_SMART`
-  moves through `GEMINI_SMART_FALLBACKS` (the exhausted model is skipped until midnight Pacific). Requests are
+  moves through `GEMINI_SMART_FALLBACKS` (the exhausted model is skipped until midnight Pacific). A `503`
+  (model overloaded) gets at most one retry before moving to the next model in the chain, and a per-call
+  timeout moves on immediately; both put the model on a short (60 s) cooldown instead of the daily block,
+  all still bounded by `timeout_s * 3` for the whole `ask()`. Requests are
   counted per model per Pacific day: warning at 70 %, background callers refused at 85 %. `GEMINI_DISABLED=1`
   is the kill switch. Call counts and budget are in `/stats` under `ai`.
+  `GEMINI_THINKING_LEVEL` (default `low`; `minimal|low|medium|high|off`) is sent as `thinking_config` on every
+  live request to a model that accepts it; `off` sends no thinking config at all. If a model rejects the
+  setting (e.g. a flash-lite model), that one call is retried once without it and the model is remembered
+  as not supporting it for the rest of the process.
 - `validators.py`: number / length / banned-content / JSON-shape checks applied to every AI text, and
   `AI_DRAFT_LABEL` for therapist notes.
 - `eleven.py`: `await tts(text, cache_key)` → `/audio/<hash>.mp3`, generated once; `ELEVEN_DISABLED=1` or no key

@@ -25,14 +25,15 @@ def _text_response(text: str) -> types.GenerateContentResponse:
         {"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}, "finishReason": "STOP"}]})
 
 
-def _error(code: int, *, quota_id: str | None = None, retry: str | None = None) -> genai_errors.APIError:
+def _error(code: int, *, quota_id: str | None = None, retry: str | None = None,
+          message: str = "boom") -> genai_errors.APIError:
     details: list[dict[str, Any]] = []
     if quota_id:
         details.append({"@type": "type.googleapis.com/google.rpc.QuotaFailure",
                         "violations": [{"quotaId": quota_id, "quotaValue": "20"}]})
     if retry:
         details.append({"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry})
-    body = {"error": {"code": code, "message": "boom", "status": "X", "details": details}}
+    body = {"error": {"code": code, "message": message, "status": "X", "details": details}}
     cls = genai_errors.ClientError if code < 500 else genai_errors.ServerError
     return cls(code, body)
 
@@ -183,12 +184,62 @@ async def test_fast_model_has_no_fallback_chain(monkeypatch: pytest.MonkeyPatch)
     assert send.models == ["fast-a"]
 
 
-async def test_server_errors_retried_then_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_503_retried_once_then_unavailable_with_no_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """503 gets at most one retry before the model is put on a cooldown; with no fallback model to move
+    to, the call fails after 2 attempts (not the full 3-attempt retry schedule used for other 5xx)."""
     send = FakeSend(_error(503))
     _live(monkeypatch, send)
     with pytest.raises(gemini.AIUnavailable):
         await gemini.ask("a", "m", "sys", USER)
+    assert send.models == ["m", "m"]
+    assert "m" in gemini.stats()["blocked"]
+
+
+async def test_other_5xx_retried_then_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_error(502))
+    _live(monkeypatch, send)
+    with pytest.raises(gemini.AIUnavailable):
+        await gemini.ask("a", "m", "sys", USER)
     assert send.models == ["m", "m", "m"]
+
+
+async def test_503_moves_to_next_model_without_daily_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_error(503), _error(503), _text_response("from fallback"))
+    _live(monkeypatch, send, GEMINI_MODEL_SMART="smart-a", GEMINI_SMART_FALLBACKS="smart-b")
+    reply = await gemini.ask("copilot", gemini.models.smart(), "sys", USER)
+    assert reply.text == "from fallback" and reply.model == "smart-b"
+    assert send.models == ["smart-a", "smart-a", "smart-b"]
+    # short cooldown, not an until-midnight block
+    assert "smart-a" in gemini.stats()["blocked"]
+    assert gemini.budget.blocked_until["smart-a"] < gemini.next_pacific_midnight()
+
+
+async def test_timeout_moves_to_next_model_within_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def slow() -> types.GenerateContentResponse:
+        await asyncio.sleep(5)
+        return _text_response("late")
+
+    send = FakeSend(slow, _text_response("fast"))
+    _live(monkeypatch, send, GEMINI_MODEL_SMART="smart-a", GEMINI_SMART_FALLBACKS="smart-b")
+    started = asyncio.get_running_loop().time()
+    reply = await gemini.ask("copilot", gemini.models.smart(), "sys", USER, timeout_s=0.05)
+    assert reply.text == "fast" and reply.model == "smart-b"
+    assert send.models == ["smart-a", "smart-b"]
+    assert asyncio.get_running_loop().time() - started < 1
+    assert "smart-a" in gemini.stats()["blocked"]
+
+
+async def test_cooldown_expires_and_model_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1_700_000_000.0]
+    clock_budget = gemini.Budget(clock=lambda: now[0])
+    monkeypatch.setattr(gemini, "budget", clock_budget)
+    send = FakeSend(_error(503))
+    _live(monkeypatch, send)
+    with pytest.raises(gemini.AIUnavailable):
+        await gemini.ask("a", "m", "sys", USER)
+    assert clock_budget.refusal("m", background=False) == "quota"
+    now[0] += gemini.OVERLOAD_COOLDOWN_S + 1
+    assert clock_budget.refusal("m", background=False) is None
 
 
 async def test_client_error_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,6 +262,42 @@ async def test_timeout_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
         await gemini.ask("a", "m", "sys", USER, timeout_s=0.05)
     assert asyncio.get_running_loop().time() - started < 1
     assert send.models == ["m"]
+
+
+# ---- thinking_config ----------------------------------------------------------------------------
+
+async def test_thinking_config_sent_with_configured_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_text_response("ok"))
+    _live(monkeypatch, send, GEMINI_THINKING_LEVEL="medium")
+    await gemini.ask("a", "m", "sys", USER)
+    _, config = send.requests[0]
+    assert config.thinking_config.thinking_level.value.lower() == "medium"
+
+
+async def test_thinking_level_off_sends_no_thinking_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_text_response("ok"))
+    _live(monkeypatch, send, GEMINI_THINKING_LEVEL="off")
+    await gemini.ask("a", "m", "sys", USER)
+    _, config = send.requests[0]
+    assert config.thinking_config is None
+
+
+async def test_thinking_level_rejected_retried_without_and_remembered(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_error(400, message="Thinking level is not supported for this model"),
+                    _text_response("ok without thinking"))
+    _live(monkeypatch, send, GEMINI_THINKING_LEVEL="low")
+    reply = await gemini.ask("a", "flash-lite", "sys", USER)
+    assert reply.text == "ok without thinking"
+    assert send.models == ["flash-lite", "flash-lite"]
+    assert send.requests[0][1].thinking_config.thinking_level.value.lower() == "low"
+    assert send.requests[1][1].thinking_config is None
+    assert "flash-lite" in gemini._thinking_unsupported
+
+    # Remembered: the next call for this model skips straight to no thinking_config.
+    send2 = FakeSend(_text_response("still fine"))
+    monkeypatch.setattr(gemini, "_send", send2)
+    await gemini.ask("a", "flash-lite", "sys", [{"role": "user", "content": "again"}])
+    assert send2.requests[0][1].thinking_config is None
 
 
 async def test_empty_response_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:

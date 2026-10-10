@@ -53,6 +53,7 @@ class Config:
     GEMINI_DAILY_LIMIT: int = 1000
     GEMINI_DAILY_LIMITS: str = ""
     GEMINI_SMART_FALLBACKS: str = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"
+    GEMINI_THINKING_LEVEL: str = "low"  # minimal | low | medium | high | off (off = no thinking_config sent)
 
     ELEVEN_API_KEY: str | None = None
     ELEVEN_VOICE_ID: str | None = None

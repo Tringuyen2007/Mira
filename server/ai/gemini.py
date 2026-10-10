@@ -43,9 +43,12 @@ PACIFIC = ZoneInfo("America/Los_Angeles")  # free-tier daily quota resets at mid
 RETRY_DELAYS_S = (0.0, 1.0, 3.0)
 MAX_HINT_WAIT_S = 3.0  # a retry hint longer than this moves on to the next model instead of waiting
 RPM_COOLDOWN_S = 60.0
+OVERLOAD_COOLDOWN_S = 60.0  # 503/timeout: short cooldown, not a daily block
 WARN_AT = 0.70
 BACKGROUND_STOP_AT = 0.85
 DEADLINE_FACTOR = 3  # whole ask() (retries + fallbacks) is bounded by timeout_s * DEADLINE_FACTOR
+
+THINKING_LEVELS = {"minimal", "low", "medium", "high"}  # plus "off" = no thinking_config
 
 # Free-tier requests per day per model (AI Studio, Oct 2026). GEMINI_DAILY_LIMITS overrides,
 # GEMINI_DAILY_LIMIT covers models not listed.
@@ -216,6 +219,24 @@ class Budget:
 
 budget = Budget()
 
+# Models that answered a thinking_config with an error, remembered for the rest of the process so we
+# stop paying for a doomed request on every call.
+_thinking_unsupported: set[str] = set()
+
+
+def _thinking_config(model: str) -> types.ThinkingConfig | None:
+    level = (cfg.GEMINI_THINKING_LEVEL or "off").strip().lower()
+    if level == "off" or model in _thinking_unsupported:
+        return None
+    if level not in THINKING_LEVELS:
+        log.warning("invalid GEMINI_THINKING_LEVEL, sending none", extra={"level": level})
+        return None
+    return types.ThinkingConfig(thinking_level=level)
+
+
+def _thinking_rejected(exc: genai_errors.APIError) -> bool:
+    return exc.code == 400 and "thinking" in (exc.message or "").lower()
+
 
 def model_chain(model: str) -> list[str]:
     """The SMART model falls back through GEMINI_SMART_FALLBACKS on quota errors; other models stand alone."""
@@ -296,7 +317,8 @@ def to_sdk_contents(messages: list[dict[str, Any]]) -> list[types.Content]:
     return contents
 
 
-def to_sdk_config(system: str, tools: list[dict[str, Any]] | None, json_mode: bool) -> types.GenerateContentConfig:
+def to_sdk_config(system: str, tools: list[dict[str, Any]] | None, json_mode: bool,
+                  thinking_config: types.ThinkingConfig | None = None) -> types.GenerateContentConfig:
     sdk_tools = None
     if tools:
         sdk_tools = [types.Tool(function_declarations=[
@@ -309,6 +331,7 @@ def to_sdk_config(system: str, tools: list[dict[str, Any]] | None, json_mode: bo
         tools=sdk_tools,
         response_mime_type="application/json" if json_mode else None,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        thinking_config=thinking_config,
     )
 
 
@@ -350,6 +373,10 @@ class _RateLimited(Exception):
 
 class _Retryable(Exception):
     pass
+
+
+class _Overloaded(Exception):
+    """503 UNAVAILABLE/overloaded: gets at most one retry, then the caller moves to the next model."""
 
 
 class _Fatal(Exception):
@@ -408,7 +435,9 @@ def _classify(exc: BaseException) -> Exception:
     if isinstance(exc, genai_errors.APIError):
         if exc.code == 429:
             return _RateLimited(_is_daily(exc), _retry_after(exc))
-        if exc.code in (408, 500, 502, 503, 504):
+        if exc.code == 503:
+            return _Overloaded(f"{exc.code} {exc.status}")
+        if exc.code in (408, 500, 502, 504):
             return _Retryable(f"{exc.code} {exc.status}")
         return _Fatal(f"{exc.code} {exc.status}")
     if isinstance(exc, httpx.TransportError):
@@ -420,13 +449,30 @@ def _classify(exc: BaseException) -> Exception:
 
 async def _call_sdk(model: str, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None,
                     json_mode: bool) -> Reply:
+    contents = to_sdk_contents(messages)
+    thinking = _thinking_config(model)
     try:
-        resp = await _send(model, to_sdk_contents(messages), to_sdk_config(system, tools, json_mode))
+        resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, thinking))
         return from_sdk_response(resp)
     except asyncio.CancelledError:
         raise
     except (asyncio.TimeoutError, TimeoutError):
         raise
+    except genai_errors.APIError as exc:
+        if thinking is not None and _thinking_rejected(exc):
+            _thinking_unsupported.add(model)
+            log.info("gemini thinking_level rejected, retrying without it",
+                     extra={"model": model, "level": cfg.GEMINI_THINKING_LEVEL})
+            try:
+                resp = await _send(model, contents, to_sdk_config(system, tools, json_mode, None))
+                return from_sdk_response(resp)
+            except asyncio.CancelledError:
+                raise
+            except (asyncio.TimeoutError, TimeoutError):
+                raise
+            except Exception as exc2:  # noqa: BLE001 - mapped to retry / fallback categories
+                raise _classify(exc2) from exc2
+        raise _classify(exc) from exc
     except Exception as exc:  # noqa: BLE001 - mapped to retry / fallback categories
         raise _classify(exc) from exc
 
@@ -580,7 +626,18 @@ async def _ask_live(agent: str, model: str, system: str, messages: list[dict[str
             except (asyncio.TimeoutError, TimeoutError):
                 _counters["live_failed"] += 1
                 _record(agent, m, _ms(loop, started), False, False, "timeout")
-                raise AIUnavailable("timeout") from None
+                last_error = "timeout"
+                budget.cooldown(m, OVERLOAD_COOLDOWN_S)
+                break
+            except _Overloaded as exc:
+                _counters["live_failed"] += 1
+                _record(agent, m, _ms(loop, started), False, False, str(exc))
+                last_error = str(exc)
+                if attempt == 0 and len(RETRY_DELAYS_S) > 1:
+                    wait = RETRY_DELAYS_S[1]
+                    continue
+                budget.cooldown(m, OVERLOAD_COOLDOWN_S)
+                break
             except _RateLimited as exc:
                 _counters["live_failed"] += 1
                 _record(agent, m, _ms(loop, started), False, False, "429")
@@ -623,8 +680,9 @@ def _ms(loop: asyncio.AbstractEventLoop, started: float) -> int:
 
 
 def reset_for_tests() -> None:
-    """Fresh budget and counters (tests only)."""
+    """Fresh budget, counters and thinking-support memory (tests only)."""
     global budget
     budget = Budget()
     for k in _counters:
         _counters[k] = 0
+    _thinking_unsupported.clear()
