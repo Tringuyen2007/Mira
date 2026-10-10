@@ -19,6 +19,7 @@ log = get_logger("db.persist")
 QUALITY_SCORES = {"good": 1.0, "fix_form": 0.5, "poor": 0.0}
 REP_METRICS = ("peak_angle", "rom", "hold_s", "asym_avg", "asym_max", "smoothness")
 FORM_EVENT_SEVERITY = "warning"
+UNSAVED_RETRY_S = 2.0  # how often to retry a session row that couldn't be inserted
 
 
 def _first_name(name: str) -> str:
@@ -59,6 +60,11 @@ class SessionPersistence:
         self.db = db
         self.sessions = sessions  # SessionRegistry, set after construction (it needs this store first)
         self._rep_counts: dict[str, int] = {}
+        # Sessions whose row isn't confirmed in the database yet (insert failed, timed out or was cancelled by
+        # the registry's 1 s bound). Retried before every later write for that session, so reps (FK) and the
+        # session itself survive a database outage at session start.
+        self._unsaved: dict[str, LiveSession] = {}
+        self._retry_after: dict[str, float] = {}
 
     # ---- SessionStore -------------------------------------------------------------------------------------
 
@@ -68,12 +74,26 @@ class SessionPersistence:
 
     async def session_started(self, session: LiveSession) -> None:
         self._rep_counts[session.session_id] = 0
-        await writes.insert_session(self.db, session.session_id, session.patient_id, session.exercise_id,
-                                    session.started_at)
+        self._unsaved[session.session_id] = session  # marked first: the registry may cancel the insert
+        await self._ensure_saved(session.session_id, force=True)
 
     async def session_stopped(self, session: LiveSession) -> None:
         reps = self._rep_counts.pop(session.session_id, None)
-        await writes.end_session(self.db, session.session_id, time.time(), reps_done=reps)
+        ended_at = time.time()
+        await self._ensure_saved(session.session_id, force=True)
+        self._unsaved.pop(session.session_id, None)
+        self._retry_after.pop(session.session_id, None)
+        await writes.end_session(self.db, session.session_id, ended_at, reps_done=reps)
+
+    async def _ensure_saved(self, session_id: str, *, force: bool = False) -> None:
+        session = self._unsaved.get(session_id)
+        if session is None or (not force and time.monotonic() < self._retry_after.get(session_id, 0.0)):
+            return
+        self._retry_after[session_id] = time.monotonic() + UNSAVED_RETRY_S
+        if await writes.insert_session(self.db, session.session_id, session.patient_id, session.exercise_id,
+                                       session.started_at):
+            self._unsaved.pop(session_id, None)
+            self._retry_after.pop(session_id, None)
 
     # ---- events -------------------------------------------------------------------------------------------
 
@@ -82,6 +102,8 @@ class SessionPersistence:
         if not session_id:
             return
         kind = ev.get("type")
+        if session_id in self._unsaved:
+            await self._ensure_saved(session_id)
         if kind == "rep":
             await self._on_rep(session_id, ev)
         elif kind == "command" and ev.get("name") == "pain":

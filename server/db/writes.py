@@ -8,6 +8,7 @@ write only through these. For fire-and-forget use `fire(writes.insert_x(db, ...)
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any, TypeVar
@@ -23,6 +24,10 @@ T = TypeVar("T")
 Timestamp = datetime | float | int | None
 
 _tasks: set[asyncio.Task[Any]] = set()
+
+
+class InvalidInput(ValueError):
+    """Bad arguments from the caller (raised, unlike database failures)."""
 
 
 def fire(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
@@ -42,8 +47,17 @@ def ts(value: Timestamp) -> datetime:
     return datetime.fromtimestamp(float(value), UTC)
 
 
+def _dumps(value: Any) -> str:
+    """JSON for jsonb columns; datetimes, UUIDs and other non-JSON values become strings instead of raising."""
+    return json.dumps(value, default=str)
+
+
+def _jsonb(value: Any) -> Jsonb:
+    return Jsonb(value, dumps=_dumps)
+
+
 def _json(value: Any) -> Jsonb | None:
-    return None if value is None else Jsonb(value)
+    return None if value is None else _jsonb(value)
 
 
 async def _safe(db: Database | None, op: str, fn: Callable[[Database], Awaitable[T]],
@@ -55,15 +69,21 @@ async def _safe(db: Database | None, op: str, fn: Callable[[Database], Awaitable
     except DBError as exc:
         log.warning(f"db write failed: {op}", extra={"error": str(exc), **log_fields})
         return default
+    except InvalidInput:
+        raise  # deliberate input validation (new_prescription_version), not a database failure
+    except Exception as exc:  # noqa: BLE001 - writes never raise into callers (safety path, agents)
+        log.exception(f"db write failed unexpectedly: {op}", extra={"error": repr(exc), **log_fields})
+        return default
 
 
 # ---- sessions ---------------------------------------------------------------------------------------
 
 async def insert_session(db: Database | None, session_id: str, patient_id: str, exercise_id: str,
                          started_at: Timestamp, simulated: bool = False) -> bool:
+    """True when the row exists afterwards (inserted now or already there); False on failure."""
     sql = ("INSERT INTO sessions (id, patient_id, exercise_id, started_at, simulated) "
            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING")
-    return await _safe(db, "insert_session", lambda d: _ok(d.execute(
+    return await _safe(db, "insert_session", lambda d: _done(d.execute(
         sql, (session_id, patient_id, exercise_id, ts(started_at), simulated))), False, session_id=session_id)
 
 
@@ -156,7 +176,7 @@ async def insert_memory_event(db: Database | None, patient_id: str, kind: str, m
     sql = ("INSERT INTO memory_events (patient_id, time, kind, message, evidence, dedupe_key, agent) "
            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (dedupe_key) DO NOTHING RETURNING id")
     return await _safe(db, "insert_memory_event", lambda d: _id(d.fetchrow(
-        sql, (patient_id, ts(time), kind, message, Jsonb(evidence), dedupe_key, agent))), None,
+        sql, (patient_id, ts(time), kind, message, _jsonb(evidence), dedupe_key, agent))), None,
         patient_id=patient_id)
 
 
@@ -165,7 +185,7 @@ async def insert_plan_proposal(db: Database | None, patient_id: str, agent: str,
     sql = ("INSERT INTO plan_proposals (patient_id, agent, rationale, evidence, change) "
            "VALUES (%s, %s, %s, %s, %s) RETURNING id")
     return await _safe(db, "insert_plan_proposal", lambda d: _id(d.fetchrow(
-        sql, (patient_id, agent, rationale, Jsonb(evidence), Jsonb(change)))), None, patient_id=patient_id)
+        sql, (patient_id, agent, rationale, _jsonb(evidence), _jsonb(change)))), None, patient_id=patient_id)
 
 
 async def decide_proposal(db: Database | None, proposal_id: int, status: str, decided_by: str
@@ -197,7 +217,7 @@ async def new_prescription_version(db: Database | None, patient_id: str, exercis
                 (patient_id, exercise_id))
             prev = await cur.fetchone()
             if prev is None and (sets is None or reps is None):
-                raise ValueError("sets and reps are required for a new exercise")
+                raise InvalidInput("sets and reps are required for a new exercise")
             base = prev or {"version": 0, "targets": {}, "limits": {}, "rule_overrides": {}}
             await conn.execute("UPDATE prescriptions SET active = false WHERE patient_id = %s AND exercise_id = %s "
                                "AND active", (patient_id, exercise_id))
@@ -206,9 +226,9 @@ async def new_prescription_version(db: Database | None, patient_id: str, exercis
                 "rule_overrides, active, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, %s) RETURNING *",
                 (patient_id, exercise_id, base["version"] + 1,
                  sets if sets is not None else base["sets"], reps if reps is not None else base["reps"],
-                 Jsonb(targets if targets is not None else base["targets"]),
-                 Jsonb(limits if limits is not None else base["limits"]),
-                 Jsonb(rule_overrides if rule_overrides is not None else base["rule_overrides"]), created_by))
+                 _jsonb(targets if targets is not None else base["targets"]),
+                 _jsonb(limits if limits is not None else base["limits"]),
+                 _jsonb(rule_overrides if rule_overrides is not None else base["rule_overrides"]), created_by))
             return await cur.fetchone()
 
     return await _safe(db, "new_prescription_version", run, None, patient_id=patient_id)
@@ -220,7 +240,7 @@ async def insert_data_check(db: Database | None, check_name: str, status: str, d
                             time: Timestamp = None) -> bool:
     sql = "INSERT INTO data_checks (time, check_name, status, details) VALUES (%s, %s, %s, %s)"
     return await _safe(db, "insert_data_check", lambda d: _ok(d.execute(
-        sql, (ts(time), check_name, status, Jsonb(details)))), False, check_name=check_name)
+        sql, (ts(time), check_name, status, _jsonb(details)))), False, check_name=check_name)
 
 
 async def archive_finished_days(db: Database | None, older_than_days: int = 31) -> int | None:
@@ -267,6 +287,12 @@ async def mark_all_notifications_read(db: Database | None, therapist_id: str) ->
 
 async def _ok(count: Awaitable[int]) -> bool:
     return await count > 0
+
+
+async def _done(count: Awaitable[int]) -> bool:
+    """True once the statement ran (an ON CONFLICT DO NOTHING that changed nothing still counts)."""
+    await count
+    return True
 
 
 async def _id(row: Awaitable[dict[str, Any] | None]) -> int | None:
