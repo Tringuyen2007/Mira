@@ -42,8 +42,10 @@ def iter_frames(path) -> Iterator[tuple[FrameResult, dict[str, PoseResult | None
 
 
 def replay_outputs(path, retriangulate: bool = False, cams: dict[str, CameraConfig] | None = None,
-                   realtime: bool = True, speed: float = 1.0) -> Iterator[PipelineOutput]:
-    pipeline = Pipeline(cams if cams is not None else load_cameras()) if retriangulate else None
+                   realtime: bool = True, speed: float = 1.0, smoothing: bool = True) -> Iterator[PipelineOutput]:
+    pipeline = None
+    if retriangulate:
+        pipeline = Pipeline(cams if cams is not None else load_cameras(), smoothing=smoothing)
     start_t = start_wall = None
     for frame, raw, skew in iter_frames(path):
         if realtime:

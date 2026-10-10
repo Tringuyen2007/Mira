@@ -1,7 +1,7 @@
 import numpy as np
 
 from vision.checks import (
-    bone_length_stats, format_checks, knee_angle_deg, marker_center_distances, run_checks,
+    bone_length_stats, outputs_from_recording, format_checks, knee_angle_deg, marker_center_distances, run_checks,
     triangulate_marker_centers,
 )
 from vision.config import MatConfig
@@ -59,3 +59,18 @@ def test_run_checks_all_pass_on_clean_synthetic_data():
 def test_run_checks_with_no_outputs():
     checks = run_checks([], {}, MAT)
     assert all(c.passed is None for c in checks)
+
+
+def test_checks_from_recording_use_unsmoothed_joints(tmp_path):
+    from vision.record import Recorder
+
+    cams, X = _cams(), standing_skeleton()
+    rng = np.random.default_rng(0)
+    path = tmp_path / "still.jsonl"
+    with Recorder(path, cams, {}) as rec:
+        pipe = Pipeline(cams)
+        for k in range(30):
+            rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X, noise_px=4.0, rng=rng),
+                                   pose_from_points(cams["B"], X, noise_px=4.0, rng=rng), 0.0))
+    for out in outputs_from_recording(path, cams):
+        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])

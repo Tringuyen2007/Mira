@@ -15,7 +15,7 @@ from collections import deque
 import cv2
 import numpy as np
 
-from vision.capture import Camera
+from vision.capture import Camera, camera_problem
 from vision.config import load_cameras, load_mat, save_cameras
 from vision.draw import GREEN, RED, YELLOW, draw_text, fit, pt
 from vision.frames import cam_center
@@ -44,10 +44,13 @@ def main() -> int:
     try:
         while True:
             tiles = []
+            problems = {n: camera_problem(cams[n], cam.error, cam.actual_size) for n, cam in cameras.items()}
             for n, cam in cameras.items():
                 item = cam.latest()
                 if item is None:
-                    tiles.append(np.zeros((360, 640, 3), np.uint8))
+                    tile = np.zeros((360, 640, 3), np.uint8)
+                    draw_text(tile, problems[n] or f"{n}: waiting for frames", (8, 22), RED, 0.5)
+                    tiles.append(tile)
                     continue
                 seq, _, frame = item
                 if seq != last_seq[n]:
@@ -59,6 +62,8 @@ def main() -> int:
                     cv2.polylines(tile, [(c * scale).astype(np.int32)], True, YELLOW, 2)
                     draw_text(tile, str(i), pt(c[0] * scale), YELLOW)
                 draw_text(tile, n, (8, 22))
+                if problems[n]:
+                    draw_text(tile, problems[n], (8, 110), RED, 0.45)
                 if n in results:
                     _, _, rms, obs, hint, warns = results[n]
                     draw_text(tile, f"markers {sorted(obs)}  rms {rms:.2f} px", (8, 44))
@@ -70,6 +75,9 @@ def main() -> int:
             if now - last_solve > 0.5:
                 last_solve = now
                 for n in cameras:
+                    if problems[n]:  # e.g. wrong resolution: a pose solved with this K would be wrong
+                        results.pop(n, None)
+                        continue
                     obs = average_detections(list(history[n]))
                     sol = solve_camera_pose(obs, mat, cams[n].K, cams[n].dist)
                     if sol is None:

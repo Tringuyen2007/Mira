@@ -32,35 +32,44 @@ def capture_live(cams, model: str, seconds: float):
     pairs = []
     path = default_path("refine-")
     pipeline = Pipeline(cams)
-    with LiveSource(cams, model) as src, Recorder(path, cams, mat_raw()) as rec:
-        start = time.monotonic()
-        while (elapsed := time.monotonic() - start) < COUNTDOWN_S + seconds:
-            capturing = elapsed >= COUNTDOWN_S
-            for pair in src.poll(0.005):
-                if capturing:
-                    rec.write(pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s))
-                    pairs.append((pair.a, pair.b))
-            tiles = []
-            for n, v in sorted(src.latest_frames().items()):
-                if v is None:
-                    tiles.append(np.zeros((360, 640, 3), np.uint8))
-                    continue
-                frame, pose = v
-                tile = fit(frame, (640, 360))
-                if pose.detected:
-                    draw_skeleton(tile, pose.lm2d * [640 / frame.shape[1], 360 / frame.shape[0]],
-                                  ok=pose.vis >= 0.5, color=GREEN)
-                tiles.append(tile)
-            msg = (f"capturing: {COUNTDOWN_S + seconds - elapsed:.0f} s left, keep moving"
-                   if capturing else f"get ready: {COUNTDOWN_S - elapsed:.0f}")
-            img = np.hstack(tiles)
-            draw_text(img, msg, (10, 30), GREEN if capturing else YELLOW, 0.8)
-            cv2.imshow("Mira refine", img)
-            if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
-                break
+    with LiveSource(cams, model) as src:
+        problems = src.wait_ready()
+        if problems:
+            print("cannot capture: " + "; ".join(problems))
+            return None
+        with Recorder(path, cams, mat_raw()) as rec:
+            _capture(src, rec, pipeline, pairs, seconds)
     cv2.destroyAllWindows()
     print(f"saved capture to {path} ({len(pairs)} frames)")
     return pairs
+
+
+def _capture(src, rec, pipeline, pairs, seconds: float) -> None:
+    start = time.monotonic()
+    while (elapsed := time.monotonic() - start) < COUNTDOWN_S + seconds:
+        capturing = elapsed >= COUNTDOWN_S
+        for pair in src.poll(0.005):
+            if capturing:
+                rec.write(pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s))
+                pairs.append((pair.a, pair.b))
+        tiles = []
+        for n, v in sorted(src.latest_frames().items()):
+            if v is None:
+                tiles.append(np.zeros((360, 640, 3), np.uint8))
+                continue
+            frame, pose = v
+            tile = fit(frame, (640, 360))
+            if pose.detected:
+                draw_skeleton(tile, pose.lm2d * [640 / frame.shape[1], 360 / frame.shape[0]],
+                              ok=pose.vis >= 0.5, color=GREEN)
+            tiles.append(tile)
+        msg = (f"capturing: {COUNTDOWN_S + seconds - elapsed:.0f} s left, keep moving"
+               if capturing else f"get ready: {COUNTDOWN_S - elapsed:.0f}")
+        img = np.hstack(tiles)
+        draw_text(img, msg, (10, 30), GREEN if capturing else YELLOW, 0.8)
+        cv2.imshow("Mira refine", img)
+        if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+            break
 
 
 def main() -> int:
@@ -78,6 +87,8 @@ def main() -> int:
     else:
         print(__doc__)
         pairs = capture_live(cams, args.model, args.seconds)
+        if pairs is None:
+            return 1
     try:
         report = refine_extrinsics(cams, mat, pairs, marker_weight=args.marker_weight)
     except ValueError as e:

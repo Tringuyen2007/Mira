@@ -8,12 +8,13 @@ import numpy as np
 from vision.cleanup import Cleaner
 from vision.config import CameraConfig
 from vision.filters import OneEuroFilter
+from vision.frames import world_to_mat
 from vision.triangulate import Triangulation, triangulate_pair
-from vision.types import FrameResult, PoseResult, swap_left_right
+from vision.types import LEFT_HIP, RIGHT_HIP, FrameResult, PoseResult, swap_left_right
 
 MIN_3D_JOINTS = 8  # below this the calibration or detections disagree; use one camera instead
-SWAP_HOLD_S = 0.5  # how recent the previous 3D frame must be to judge a left/right flip
-SWAP_MARGIN = 0.5  # a flipped labelling must be at least 2x closer to the previous frame
+FLIP_MARGIN_M = 0.05  # a relabelling must beat the as-detected labels by this much to be used
+MIRROR_PENALTY = 1.0  # cost added when the nose ends up behind the shoulders (a mirrored body)
 
 
 @dataclass
@@ -22,7 +23,7 @@ class PipelineOutput:
     raw: dict[str, PoseResult | None]
     tri: Triangulation | None = None
     skew_s: float | None = None
-    swapped: str | None = None  # camera whose left/right labels were flipped back, if any
+    swapped: str | None = None  # "A", "B" or "AB": cameras whose left/right labels were flipped back
 
 
 def _flipped(p: PoseResult) -> PoseResult:
@@ -30,11 +31,37 @@ def _flipped(p: PoseResult) -> PoseResult:
     return PoseResult(p.cam, p.t, swap_left_right(p.lm2d), swap_left_right(p.vis), world)
 
 
-def _distance_to(tri: Triangulation, prev: np.ndarray) -> float:
-    """Median distance of left/right body joints to the previous frame (inf if too few to compare)."""
-    m = tri.ok & np.isfinite(prev).all(axis=1)
-    m[:11] = False
-    return float(np.median(np.linalg.norm(tri.points[m] - prev[m], axis=1))) if m.sum() >= 4 else np.inf
+def _hip_mid(points: np.ndarray) -> np.ndarray | None:
+    h = (points[LEFT_HIP] + points[RIGHT_HIP]) / 2
+    return h if np.isfinite(h).all() else None
+
+
+def _labelling_cost(tri: Triangulation, views: list[PoseResult], cams: dict[str, CameraConfig]) -> float:
+    """How implausible a left/right labelling is, without using history.
+
+    Each camera's own 3D estimate (world landmarks rotated into the mat frame) must agree with the
+    triangulated body shape; a flip in one view breaks that. A flip in both views gives a consistent
+    but mirrored body, caught by the nose sitting behind the shoulders (front = left x body-up).
+    """
+    pts = tri.points
+    hip = _hip_mid(pts)
+    body = tri.ok.copy()
+    body[:11] = False
+    if hip is None or body.sum() < 4:
+        return np.inf
+    rel = pts - hip
+    mismatch = []
+    for p in views:
+        if p.world is not None:
+            own = world_to_mat(p.world - _hip_mid(p.world), cams[p.cam].R)
+            mismatch.append(float(np.median(np.linalg.norm(rel[body] - own[body], axis=1))))
+    cost = float(np.mean(mismatch)) if mismatch else 0.0
+    shoulders = (pts[11] + pts[12]) / 2
+    front = np.cross(pts[LEFT_HIP] - pts[RIGHT_HIP], shoulders - hip)
+    nose = pts[0] - shoulders
+    if np.isfinite(front).all() and np.isfinite(nose).all() and nose @ front < 0:
+        cost += MIRROR_PENALTY
+    return cost
 
 
 class Pipeline:
@@ -44,8 +71,6 @@ class Pipeline:
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
         self._cleaner = Cleaner(cams)
         self._filter = OneEuroFilter() if smoothing else None
-        self._prev: np.ndarray | None = None
-        self._prev_t = -np.inf
 
     def process(self, t: float, a: PoseResult | None, b: PoseResult | None, skew_s: float | None = None) -> PipelineOutput:
         """t is unix seconds (the FrameResult clock)."""
@@ -55,20 +80,19 @@ class Pipeline:
         if (a is not None and b is not None and a.detected and b.detected
                 and ca is not None and cb is not None and ca.calibrated and cb.calibrated):
             tri = triangulate_pair(a, b, ca, cb, self.min_vis, self.max_reproj_px)
-            if self._prev is not None and t - self._prev_t <= SWAP_HOLD_S:
-                # Equal-height cameras can't see a left/right flip in reprojection; use continuity.
-                best = _distance_to(tri, self._prev)
-                for name in ("B", "A"):
-                    a2, b2 = (a, _flipped(b)) if name == "B" else (_flipped(a), b)
-                    tri2 = triangulate_pair(a2, b2, ca, cb, self.min_vis, self.max_reproj_px)
-                    d = _distance_to(tri2, self._prev)
-                    if d < SWAP_MARGIN * best:
-                        best, swapped, a, b, tri = d, name, a2, b2, tri2
+            # Equal-height cameras can't see a left/right flip in reprojection: score each labelling.
+            best = _labelling_cost(tri, [a, b], self.cams) - FLIP_MARGIN_M
+            a0, b0 = a, b
+            for name in ("B", "A", "AB"):
+                a2 = _flipped(a0) if "A" in name else a0
+                b2 = _flipped(b0) if "B" in name else b0
+                tri2 = triangulate_pair(a2, b2, ca, cb, self.min_vis, self.max_reproj_px)
+                cost = _labelling_cost(tri2, [a2, b2], self.cams)
+                if cost < best:
+                    best, swapped, a, b, tri = cost, name, a2, b2, tri2
         usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
         joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
         if self._filter is not None:
             joints = self._filter(joints, t)
-        if tracking == "3d":
-            self._prev, self._prev_t = joints.copy(), t
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped)

@@ -159,7 +159,7 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
         err = float(np.nanmean(out.tri.reproj_err[out.tri.ok]))
         hud.append(f"3D reprojection {err:.1f} px  ({int(out.tri.ok.sum())}/33 joints)")
     if out is not None and out.swapped:
-        hud.append(f"undid a left/right flip in camera {out.swapped}")
+        hud.append(f"undid a left/right flip ({out.swapped})")
     if recording:
         hud.append(recording)
     hud.append("keys: r record   m markers   q quit")

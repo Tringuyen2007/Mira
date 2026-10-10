@@ -46,3 +46,18 @@ def test_replay_and_retriangulate(tmp_path):
     assert again[0].tri is not None and again[0].frame.tracking == "3d"
     np.testing.assert_allclose(again[0].frame.joints, standing_skeleton(), atol=1e-6)
     assert again[3].frame.tracking == "lost"
+
+
+def test_replay_can_retriangulate_without_smoothing(tmp_path):
+    path = tmp_path / "rec.jsonl"
+    cams, X = target_cams(), standing_skeleton()
+    rng = np.random.default_rng(0)
+    with Recorder(path, cams, {}) as rec:
+        pipe = Pipeline(cams)
+        for k in range(10):
+            a = pose_from_points(cams["A"], X, t=k / 30, noise_px=3.0, rng=rng)
+            b = pose_from_points(cams["B"], X, t=k / 30, noise_px=3.0, rng=rng)
+            rec.write(pipe.process(1000 + k / 30, a, b, 0.0))
+    raw = list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
+    for out in raw:
+        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])

@@ -135,7 +135,10 @@ def main() -> int:
     try:
         while len(views) < args.views:
             status = board.copy()
-            draw_text(status, f"{len(views)}/{args.views} captured", (10, 40), 0, 1.0)
+            draw_text(status, cam.error or f"{len(views)}/{args.views} captured", (10, 40), 0, 1.0)
+            if cam.error and not cam.is_alive():
+                print(cam.error)
+                return 1
             cv2.imshow("board", status)
             item = cam.latest()
             key = cv2.waitKey(1) & 0xFF

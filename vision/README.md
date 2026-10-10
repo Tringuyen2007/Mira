@@ -39,9 +39,10 @@ If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on 
 ### Left/right flips
 
 Both cameras are at the same height, so a MediaPipe left/right flip in one camera still looks
-geometrically consistent (it can't be caught by reprojection error). The pipeline instead compares
-the normal and flipped labellings with the previous 3D frame and keeps the closer one; the debug
-view says "undid a left/right flip in camera X" when that happens.
+geometrically consistent (reprojection error can't catch it). Every frame the pipeline also tries
+flipping camera A, camera B and both, and keeps the labelling whose triangulated body best matches
+each camera's own 3D estimate, with the nose in front of the shoulders. The debug view says
+"undid a left/right flip (A/B/AB)" when that happens.
 
 ## For the team
 

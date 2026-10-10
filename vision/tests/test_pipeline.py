@@ -34,20 +34,43 @@ def _flip(p):
     return p
 
 
-def test_left_right_swap_in_one_view_is_undone_by_continuity():
+def test_left_right_flip_in_one_view_is_undone_without_history():
     cams, X = target_cams(), standing_skeleton()
     for flipped in ("A", "B"):
-        pipe = Pipeline(cams, smoothing=False)
-        pipe.process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
         a, b = pose_from_points(cams["A"], X), pose_from_points(cams["B"], X)
-        out = pipe.process(1.033, _flip(a) if flipped == "A" else a, _flip(b) if flipped == "B" else b)
+        out = Pipeline(cams, smoothing=False).process(1.0, _flip(a) if flipped == "A" else a,
+                                                      _flip(b) if flipped == "B" else b)
         assert out.swapped == flipped
         np.testing.assert_allclose(out.frame.joints, X, atol=1e-6)
         assert out.raw[flipped].lm2d[11][0] == (a if flipped == "A" else b).lm2d[11][0]  # raw left untouched
 
 
-def test_no_swap_without_a_recent_3d_frame():
+def test_both_views_flipped_is_undone():
     cams, X = target_cams(), standing_skeleton()
-    b = _flip(pose_from_points(cams["B"], X))
-    out = Pipeline(cams, smoothing=False).process(1.0, pose_from_points(cams["A"], X), b)
-    assert out.swapped is None
+    out = Pipeline(cams, smoothing=False).process(
+        1.0, _flip(pose_from_points(cams["A"], X)), _flip(pose_from_points(cams["B"], X)))
+    assert out.swapped == "AB"
+    np.testing.assert_allclose(out.frame.joints, X, atol=1e-6)
+
+
+def test_wrong_start_does_not_lock_in():
+    cams, X = target_cams(), standing_skeleton()
+    pipe = Pipeline(cams, smoothing=False)
+    for k in range(5):  # B flipped while the person is first picked up
+        pipe.process(k / 30, pose_from_points(cams["A"], X), _flip(pose_from_points(cams["B"], X)))
+    for k in range(5, 10):  # MediaPipe corrects itself
+        out = pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+        assert out.swapped is None
+        np.testing.assert_allclose(out.frame.joints, X, atol=1e-6)
+
+
+def test_noisy_world_landmarks_do_not_trigger_flips():
+    cams, X = target_cams(), standing_skeleton()
+    rng = np.random.default_rng(3)
+    pipe = Pipeline(cams, smoothing=False)
+    for k in range(20):
+        a = pose_from_points(cams["A"], X, noise_px=1.0, rng=rng)
+        b = pose_from_points(cams["B"], X, noise_px=1.0, rng=rng)
+        a.world = a.world + rng.normal(0, 0.04, a.world.shape)
+        b.world = b.world + rng.normal(0, 0.04, b.world.shape)
+        assert pipe.process(k / 30, a, b).swapped is None

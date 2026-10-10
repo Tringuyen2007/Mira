@@ -44,6 +44,15 @@ def resolution_warning(cfg: CameraConfig, actual_size) -> str | None:
     return f"camera {cfg.name} delivers {w}x{h} but is configured for {cfg.width}x{cfg.height}"
 
 
+def camera_problem(cfg: CameraConfig, error: str | None, actual_size) -> str | None:
+    """Why this camera can't be trusted for calibration or 3D right now, or None if it can."""
+    if error:
+        return error
+    if actual_size is None:
+        return f"camera {cfg.name} (index {cfg.index}) has not delivered a frame yet"
+    return resolution_warning(cfg, actual_size)
+
+
 class Camera(threading.Thread):
     def __init__(self, name: str, index: int, width: int = 1280, height: int = 720, fps: int = 30):
         super().__init__(daemon=True, name=f"camera-{name}")

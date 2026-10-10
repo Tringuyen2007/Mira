@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import queue
+import time
 
 import numpy as np
 
-from vision.capture import Camera, resolution_warning
+from vision.capture import Camera, camera_problem, resolution_warning
 from vision.config import CameraConfig
 from vision.pairing import Pair, Pairer, SkewStats
 from vision.pose import PoseWorker, model_path
@@ -46,6 +47,15 @@ class LiveSource:
 
     def __exit__(self, *exc) -> None:
         self.stop()
+
+    def wait_ready(self, timeout: float = 5.0) -> list[str]:
+        """Wait for every camera to deliver a frame; return the problems that make 3D untrustworthy."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end and any(c.actual_size is None and not c.error for c in self.cameras.values()):
+            time.sleep(0.05)
+        problems = [camera_problem(self.cams[n], c.error, c.actual_size) for n, c in self.cameras.items()]
+        problems += [w.error for w in self.workers.values()]
+        return [p for p in problems if p]
 
     def poll(self, timeout: float = 0.01) -> list[Pair]:
         out: list[Pair] = []

@@ -120,13 +120,23 @@ def format_checks(checks: list[Check]) -> str:
     return "\n".join(lines)
 
 
+def outputs_from_recording(path, cams: dict[str, CameraConfig]) -> list[PipelineOutput]:
+    """Re-triangulate a recording with the current calibration, unsmoothed so jitter stays visible."""
+    from vision.replay import replay_outputs
+
+    return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
+
+
 def _live_outputs(cams, model: str, seconds: float):
     from vision.capture import mono_to_unix
     from vision.live import LiveSource
 
     outputs = []
-    pipeline = Pipeline(cams)
+    pipeline = Pipeline(cams, smoothing=False)  # smoothing would hide the jitter these checks measure
     with LiveSource(cams, model) as src:
+        problems = src.wait_ready()
+        if problems:
+            raise SystemExit("cannot run checks: " + "; ".join(problems))
         print("Stand still on the mat, facing Mira, arms by your sides. Starting in 2 s ...")
         start = time.monotonic()
         while time.monotonic() - start < 2.0 + seconds:
@@ -146,9 +156,7 @@ def main() -> int:
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
     if args.from_path:
-        from vision.replay import replay_outputs
-
-        outputs, fps = list(replay_outputs(args.from_path, retriangulate=True, cams=cams, realtime=False)), None
+        outputs, fps = outputs_from_recording(args.from_path, cams), None
     else:
         outputs, fps = _live_outputs(cams, args.model, args.seconds)
     checks = run_checks(outputs, cams, mat, fps)
