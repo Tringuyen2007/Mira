@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.add_event_enricher(cue_library.enrich_cue_event)
     voice = SessionVoice(hub, sessions, live=bridge.live)
     bridge.subscribe_events(voice.on_event)
-    coach = SessionCoach(hub, sessions)
+    coach = SessionCoach(hub, sessions, bridge, incident_open=lambda sid: sid in guardian.incidents)
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
 

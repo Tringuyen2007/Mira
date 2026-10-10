@@ -14,6 +14,8 @@ Two layers:
 While the Safety Guardian holds the session (an open incident, a `paused` event, a confirmed fall or a
 pain report >= 7) the Coach makes no adaptation at all and never resumes anything.
 
+Adaptations that change the workout are sent to the engine on the reverse channel
+(`bridge.send_to_engine`): `end_set_early`, `extend_rest`, `adjust_next_set`, `skip_next_exercise`.
 Every adaptation is written through `server.db.writes.insert_agent_action` (agent="coach", fire-and-forget)
 and announced on the hub as `coach_adapt {action, detail}`. A shortened set or a skipped exercise also
 raises a `kind="coach"` notification through the F7 notifications module when it is present.
@@ -24,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import time
 from collections import Counter
 from collections.abc import Callable, Coroutine
@@ -56,6 +59,10 @@ _LIMIT_RANGE = {"min_reps": (1, 100), "max_reps": (1, 100), "min_rest_s": (0, 90
 
 # Cues the model may pick: form and encouragement only. Safety and flow cues (check_in, pause, resume,
 # im_ok_thanks, countdowns, set_start, ...) belong to the engine and the Guardian.
+# Body part a pain report applies to when the client does not say (payload.body_part wins).
+EXERCISE_BODY_PART: dict[str, str] = {"squat": "knee", "glute_bridge": "hip"}
+_BODY_PART_RE = re.compile(r"^[a-z][a-z_]{0,31}$")
+
 FOCUS_CUES: tuple[str, ...] = ("knees_out", "knee_cave_l", "knee_cave_r", "trunk_lean", "depth_more",
                                "slow_down", "good_rep", "encouragement")
 
@@ -213,9 +220,11 @@ def _data_message(data: dict[str, Any]) -> dict[str, Any]:
 
 
 class SessionCoach:
-    def __init__(self, hub: Any, sessions: SessionRegistry, db_provider: Callable[[], Any | None] = _default_db,
+    def __init__(self, hub: Any, sessions: SessionRegistry, bridge: Any | None = None,
+                 db_provider: Callable[[], Any | None] = _default_db,
                  incident_open: Callable[[str], bool] = _default_incident_open) -> None:
         self.hub = hub
+        self.bridge = bridge
         self.sessions = sessions
         self.db_provider = db_provider
         self.incident_open = incident_open
@@ -351,7 +360,7 @@ class SessionCoach:
             return  # already at the ceiling: nothing new to log
         st.hr_rest_bonus = applied - limits["min_rest_s"]
         self._adapt(sid, "extend_rest", {"bpm": bpm, "hr_limit": hr_limit, "requested_rest_s": requested,
-                                         "applied_rest_s": applied})
+                                         "applied_rest_s": applied}, engine={"rest_s": applied})
 
     async def _on_fatigue(self, sid: str, st: _SessionState) -> None:
         if self._held(sid, st) or st.fatigue_set == st.current_set:
@@ -368,7 +377,8 @@ class SessionCoach:
         if cue is not None:
             self.hub.emit("cue", {"session_id": sid, "t": round(time.time(), 3), **cue})
         self._adapt(sid, "end_set_early", {"set": st.current_set, "reps_done": reps_done,
-                                           "min_reps": limits["min_reps"], "reason": "fatigue"})
+                                           "min_reps": limits["min_reps"], "reason": "fatigue"},
+                    engine={"set": st.current_set, "reason": "fatigue"})
         session = self.sessions.get(sid)
         self._spawn(_notify(
             "coach", "low", session.profile.therapist_id if session else None,
@@ -387,12 +397,17 @@ class SessionCoach:
             return
         session = self.sessions.get(sid)
         exercise_id = session.exercise_id if session else ev.get("exercise_id")
-        self._adapt(sid, "skip_next_exercise", {"exercise_id": exercise_id, "pain_level": level})
+        body_part = ev["payload"].get("body_part")
+        if not (isinstance(body_part, str) and _BODY_PART_RE.match(body_part)):
+            body_part = EXERCISE_BODY_PART.get(str(exercise_id), exercise_id)
+        self._adapt(sid, "skip_next_exercise", {"body_part": body_part, "exercise_id": exercise_id,
+                                                "pain_level": level},
+                    engine={"body_part": body_part, "reason": "pain"})
         self._spawn(_notify(
             "coach", "low" if level == PAIN_SKIP_MIN else "normal",
             session.profile.therapist_id if session else None, session.patient_id if session else None,
             "Pain reported during exercise",
-            f"Pain level {level}/10 reported; the next {exercise_id or 'exercise'} set was skipped.",
+            f"Pain level {level}/10 reported; the next {body_part or 'exercise'} exercise was skipped.",
             source_id=sid, dedupe_key=f"coach:pain:{sid}:{ev.get('t')}"))
 
     # ---- between-set agent ------------------------------------------------------------------
@@ -494,7 +509,7 @@ class SessionCoach:
             return {"error": "no reps or rest_s given"}
         if self._stale(sid, st, gen):
             return {"error": "rest window over"}
-        self._adapt(sid, "adjust_next_set", detail)
+        self._adapt(sid, "adjust_next_set", detail, engine=applied)
         return applied
 
     def _choose_focus_cue(self, sid: str, st: _SessionState, gen: int, cue_id: str) -> dict[str, Any]:
@@ -509,11 +524,14 @@ class SessionCoach:
 
     # ---- logging + the coach_adapt event -----------------------------------------------------
 
-    def _adapt(self, sid: str, action: str, detail: dict[str, Any]) -> None:
+    def _adapt(self, sid: str, action: str, detail: dict[str, Any], engine: dict[str, Any] | None = None) -> None:
+        """Log + announce one adaptation; `engine` (if given) also tells the engine to apply it."""
         session = self.sessions.get(sid)
         patient_id = session.patient_id if session else None
         log.info("coach adapted", extra={"session_id": sid, "action": action, "detail": detail})
         self.hub.emit("coach_adapt", {"session_id": sid, "t": round(time.time(), 3), "action": action,
                                       "detail": detail})
+        if engine is not None and self.bridge is not None:
+            self.bridge.send_to_engine({"type": action, "session_id": sid, **engine})
         writes.fire(writes.insert_agent_action(self.db_provider(), "coach", action, patient_id=patient_id,
                                                session_id=sid, detail=detail))
