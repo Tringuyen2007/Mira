@@ -313,9 +313,10 @@ class SafetyGuardian:
     def _check_in(self, inc: Incident) -> None:
         inc.checkins += 1
         sid = inc.session_id
+        now = round(time.time(), 3)
         self.hub.emit("cue", {"id": templates.CHECKIN_CUE_ID, "text": templates.CHECKIN_TEXT,
-                              "audio_url": templates.CHECKIN_AUDIO_URL, "session_id": sid})
-        self.hub.emit("haptic", {"pattern": templates.CHECKIN_HAPTIC, "session_id": sid})
+                              "audio_url": templates.CHECKIN_AUDIO_URL, "session_id": sid, "t": now})
+        self.hub.emit("haptic", {"pattern": templates.CHECKIN_HAPTIC, "session_id": sid, "t": now})
 
     async def log(self, inc: Incident, step: str, payload: dict[str, Any] | None = None) -> None:
         """One alert step: alerts row (fire-and-forget) + `alert` WS event + JSON log + hooks. Never yields."""
@@ -325,7 +326,7 @@ class SafetyGuardian:
             "alert_id": inc.alert_id, "kind": inc.kind, "step": step, "patient_id": inc.patient_id,
             "session_id": inc.session_id, "call_id": inc.call_id,
             "message": templates.alert_message(inc.kind, step, p.first_name, p.pronoun_subj),
-            "show_call_911": inc.state == "escalated",
+            "show_call_911": inc.state == "escalated", "t": round(time.time(), 3),
         })
         log.info(f"alert {step}", extra={"alert_id": inc.alert_id, "session_id": inc.session_id,
                                          "call_id": inc.call_id, "kind": inc.kind, "step": step,

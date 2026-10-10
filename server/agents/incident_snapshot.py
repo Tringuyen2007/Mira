@@ -202,7 +202,7 @@ def _posture_sentence(s: dict[str, Any]) -> str:
         bare = f"{_cap(subj)} {verb} {phrase}."
     if s.get("moving") is True:
         return f"{lead} {_be(subj)} moving."
-    if s.get("still_s") is not None:
+    if s.get("still_s"):
         return f"{lead} {_have(subj)} barely moved for {s['still_s']} seconds."
     return bare
 

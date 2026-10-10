@@ -113,7 +113,7 @@ class RetellNotifier:
                 await self._log_step(inc, "call_failed", {k: v for k, v in out.items() if k.startswith("error")})
                 await self.maybe_call_therapist(inc)
                 return out
-            out["contact_call_id"] = call_id
+            out["contact_call_id"] = inc.call_id = call_id
             self._start_watch(inc, call_id)
         except Exception as exc:  # noqa: BLE001 - escalation must never raise into the Guardian
             out["error"] = repr(exc)[:300]
