@@ -9,26 +9,31 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from server.agents.safety_guardian import SafetyGuardian
 from server.api import demo, health
 from server.config import REPO_ROOT, cfg
 from server.engine_bridge import EngineBridge
-from server.hub import Hub
+from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
 from server.notify import webhooks
+from server.notify.retell_client import RetellNotifier
 from server.security import TunnelFilterMiddleware, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
 
-# Client → server message types accepted on /ws/events (§4.3); anything else is dropped.
+# Client → server message types accepted on /ws/events (§4.3); anything else is dropped. Engine events
+# (fall, fall_status, gesture, …) can never come from a client.
 CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health"})
 MAX_CLIENT_MSG_KEYS = 32
+CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
 
 
@@ -56,6 +61,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge = EngineBridge(hub, asyncio.get_running_loop(), session_provider=current_session_id)
     state = AppState(cfg, hub, bridge, sessions)
     state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats})
+    notifier = RetellNotifier()
+    guardian = SafetyGuardian(hub, bridge, notifier, sessions, cfg.CHECKIN_TIMEOUT_S, alert_hooks=state.on_alert_step)
+    bridge.subscribe_events(guardian.on_event)
+    state.guardian, state.notifier = guardian, notifier
+    state.stat_providers["notifier"] = notifier.stats
     set_state(state)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
@@ -64,12 +74,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await notifier.stop()
+        await guardian.stop()
         await bridge.stop()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
         set_state(None)
         log.info("stopped")
         shutdown_logging()
+
+
+def _client_event_handler() -> Callable[[dict[str, Any]], None]:
+    """Per-connection handler for /ws/events: rate-limited, then filtered by `_on_client_event`."""
+    limiter = RateLimiter(CLIENT_MSGS_PER_S)
+
+    def handle(msg: dict[str, Any]) -> None:
+        if not limiter.allow():
+            if limiter.dropped == 1 or limiter.dropped % 100 == 0:
+                log.warning("client over rate limit, dropping", extra={"dropped": limiter.dropped})
+            return
+        _on_client_event(msg)
+
+    return handle
 
 
 def _on_client_event(msg: dict[str, Any]) -> None:
@@ -118,7 +144,7 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket) -> None:
-        await _serve_ws(ws, "events", _on_client_event)
+        await _serve_ws(ws, "events", _client_event_handler())
 
     _mount_static(app)
     return app

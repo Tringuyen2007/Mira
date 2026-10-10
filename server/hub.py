@@ -77,6 +77,27 @@ def pose_payload(frame: dict[str, Any]) -> dict[str, Any]:
     return {k: _round(frame[k]) for k in POSE_FIELDS if k in frame}
 
 
+class RateLimiter:
+    """Token bucket: `rate` messages per second with bursts up to `rate`. One per client connection."""
+
+    def __init__(self, rate: float, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self.rate = rate
+        self._tokens = rate
+        self._clock = clock
+        self._last = clock()
+        self.dropped = 0
+
+    def allow(self) -> bool:
+        now = self._clock()
+        self._tokens = min(self.rate, self._tokens + (now - self._last) * self.rate)
+        self._last = now
+        if self._tokens >= 1.0:
+            self._tokens -= 1.0
+            return True
+        self.dropped += 1
+        return False
+
+
 class Hub:
     def __init__(self, *, ping_interval_s: float = PING_INTERVAL_S, pose_hz: float = POSE_HZ,
                  clock: Callable[[], float] = time.monotonic) -> None:
