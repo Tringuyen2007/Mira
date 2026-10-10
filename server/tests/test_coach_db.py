@@ -19,6 +19,7 @@ from server.db.pool import Database
 from server.state import SessionRegistry
 from server.tests.dbutil import fresh_database, prepare, ro_dsn
 from server.tests.test_coach import FakeBridge, FakeHub, _script
+from server.tests.test_scheduler import _trap_app_pool
 
 NOW = datetime.now(UTC)
 # (days ago, reps_done, pain_pre, pain_post, effort) for Maya's past sessions, oldest first
@@ -124,3 +125,41 @@ async def test_adaptation_is_written_to_agent_actions(db: Database) -> None:
                           (uuid.UUID(session.session_id),))
     assert [(r["agent"], r["action"]) for r in rows] == [("coach", "extend_rest")]
     assert rows[0]["detail"]["applied_rest_s"] <= DEFAULT_LIMITS["max_rest_s"]
+
+
+async def test_set_done_pass_reads_only_through_copilot_ro(db: Database) -> None:
+    """A full set_done pass (limits + get_history + adaptation): every read is copilot_ro; the app pool runs
+    only writes.py."""
+    registry, session = await _live_session(db)
+    written: list[str] = []
+    seen: list[dict[str, Any]] = []
+
+    def fake(messages: list[dict[str, Any]], tools: Any) -> gemini.Reply:
+        seen.extend(m["content"] for m in messages if m.get("role") == "tool" and m.get("name") == "get_history")
+        return _script(("get_history", {}), ("adjust_next_set", {"reps": 12}))(messages, tools)
+
+    gemini.register_fake("coach", fake)
+    hub = FakeHub()
+    coach = SessionCoach(hub, registry, FakeBridge(), db_provider=lambda: db)
+    with pytest.MonkeyPatch.context() as mp:  # undone before the fixture's own cleanup
+        _trap_app_pool(db, mp, written)
+        await coach.on_event({"type": "set_done", "session_id": session.session_id, "set": 1, "reps": 10,
+                              "exercise_id": "squat"})
+        await coach.drain()
+        await asyncio.gather(*writes._tasks)
+    assert [h["reps_done"] for h in seen[0]["sessions"]] == [30, 28, 26]
+    assert hub.of("coach_adapt")
+    assert written and all(w.startswith("INSERT INTO agent_actions") for w in written)
+
+
+async def test_without_copilot_ro_the_coach_uses_defaults(dsn: str) -> None:
+    database = Database(dsn)  # no COPILOT_DSN: the Coach never falls back to the owner pool
+    await database.open()
+    try:
+        registry = SessionRegistry()
+        session = await registry.start("maya", "squat")
+        coach = SessionCoach(FakeHub(), registry, db_provider=lambda: database)
+        assert await coach._history(session) == []
+        assert await coach._load_limits(session.session_id, "squat") == DEFAULT_LIMITS
+    finally:
+        await database.close()

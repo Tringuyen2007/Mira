@@ -16,6 +16,7 @@ pain report >= 7) the Coach makes no adaptation at all and never resumes anythin
 
 Adaptations that change the workout are sent to the engine on the reverse channel
 (`bridge.send_to_engine`): `end_set_early`, `extend_rest`, `adjust_next_set`, `skip_next_exercise`.
+History and prescription limits are read as copilot_ro (`Database.ro_fetch`; defaults without COPILOT_DSN).
 Every adaptation is written through `server.db.writes.insert_agent_action` (agent="coach", fire-and-forget)
 and announced on the hub as `coach_adapt {action, detail}`. A shortened set or a skipped exercise also
 raises a `kind="coach"` notification through the F7 notifications module when it is present.
@@ -312,7 +313,8 @@ class SessionCoach:
         try:
             from server.db import queries
 
-            rows = await asyncio.wait_for(queries.prescriptions(db, session.patient_id), PROFILE_TIMEOUT_S)
+            rows = await asyncio.wait_for(queries.ro_prescriptions(db, session.patient_id, PROFILE_TIMEOUT_S),
+                                          PROFILE_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 - missing/slow prescription -> sane defaults
             log.info("coach: using default limits", extra={"session_id": sid, "error": repr(exc)})
             return dict(DEFAULT_LIMITS)
@@ -486,7 +488,8 @@ class SessionCoach:
             from server.db import queries
 
             rows = await asyncio.wait_for(
-                queries.recent_sessions(db, session.patient_id, limit=HISTORY_SESSIONS + 1), PROFILE_TIMEOUT_S)
+                queries.ro_recent_sessions(db, session.patient_id, HISTORY_SESSIONS + 1, PROFILE_TIMEOUT_S),
+                PROFILE_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 - history is best-effort
             log.info("coach: history unavailable", extra={"session_id": session.session_id, "error": repr(exc)})
             return []

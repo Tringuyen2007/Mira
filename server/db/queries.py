@@ -138,10 +138,20 @@ async def get_patient(db: Database, patient_id: str) -> dict[str, Any] | None:
         WHERE p.id = %s""", (patient_id,))
 
 
+RECENT_SESSIONS_SQL = ("SELECT id, exercise_id, started_at, ended_at, reps_done, pain_pre, pain_post, effort, "
+                       "shared, simulated FROM sessions WHERE patient_id = %s ORDER BY started_at DESC LIMIT %s")
+PRESCRIPTIONS_SQL = ("SELECT * FROM prescriptions WHERE patient_id = %s AND (%s OR active) "
+                     "ORDER BY exercise_id, version DESC")
+
+
 async def recent_sessions(db: Database, patient_id: str, limit: int = 10) -> list[dict[str, Any]]:
-    return await db.fetch("SELECT id, exercise_id, started_at, ended_at, reps_done, pain_pre, pain_post, effort, "
-                          "shared, simulated FROM sessions WHERE patient_id = %s ORDER BY started_at DESC LIMIT %s",
-                          (patient_id, limit))
+    return await db.fetch(RECENT_SESSIONS_SQL, (patient_id, limit))
+
+
+async def ro_recent_sessions(db: Database, patient_id: str, limit: int = 10,
+                             timeout_s: float = 1.5) -> list[dict[str, Any]]:
+    """recent_sessions as copilot_ro (agents read only through the read-only role)."""
+    return await db.ro_fetch(RECENT_SESSIONS_SQL, (patient_id, limit), timeout_s=timeout_s)
 
 
 async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> dict[str, Any] | None:
@@ -160,8 +170,12 @@ async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> 
 
 
 async def prescriptions(db: Database, patient_id: str, history: bool = False) -> list[dict[str, Any]]:
-    return await db.fetch("SELECT * FROM prescriptions WHERE patient_id = %s AND (%s OR active) "
-                          "ORDER BY exercise_id, version DESC", (patient_id, history))
+    return await db.fetch(PRESCRIPTIONS_SQL, (patient_id, history))
+
+
+async def ro_prescriptions(db: Database, patient_id: str, timeout_s: float = 1.5) -> list[dict[str, Any]]:
+    """The active prescriptions as copilot_ro (agents read only through the read-only role)."""
+    return await db.ro_fetch(PRESCRIPTIONS_SQL, (patient_id, False), timeout_s=timeout_s)
 
 
 # ---- alerts ------------------------------------------------------------------------------------------------
