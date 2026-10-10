@@ -60,8 +60,12 @@ class FakeGuard:
 def notified(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
 
-    async def create(**kwargs: Any) -> int:
-        calls.append(kwargs)
+    async def create(kind: str, severity: str, therapist_id: str, patient_id: str | None, title: str,
+                     body: str | None, link: str | None, source_table: str | None, source_id: str | None,
+                     dedupe_key: str | None) -> int:  # F7's exact signature: a wrong keyword raises
+        calls.append(dict(kind=kind, severity=severity, therapist_id=therapist_id, patient_id=patient_id,
+                          title=title, body=body, link=link, source_table=source_table, source_id=source_id,
+                          dedupe_key=dedupe_key))
         return len(calls)
 
     module = types.ModuleType("server.notify.notifications")

@@ -243,8 +243,11 @@ def tools() -> list[dict[str, Any]]:
 
 # ---- notifications (F7) ------------------------------------------------------------------------------------
 
-async def notify(**kwargs: Any) -> int | None:
-    """server.notify.notifications.create(...) when F7 is present; a no-op returning None otherwise. Never raises."""
+async def notify(*, kind: str, severity: str, therapist_id: str, patient_id: str | None, title: str,
+                 body: str | None, link: str | None, source_table: str | None, source_id: str | None,
+                 dedupe_key: str | None) -> int | None:
+    """F7's server.notify.notifications.create(...) with exactly its keyword arguments, when that module is
+    present; a no-op returning None otherwise. Never raises."""
     try:
         from server.notify import notifications  # type: ignore[attr-defined]
     except ImportError:
@@ -253,9 +256,11 @@ async def notify(**kwargs: Any) -> int | None:
     if create is None:
         return None
     try:
-        return await create(**kwargs)
+        return await create(kind=kind, severity=severity, therapist_id=therapist_id, patient_id=patient_id,
+                            title=title, body=body, link=link, source_table=source_table, source_id=source_id,
+                            dedupe_key=dedupe_key)
     except Exception as exc:  # noqa: BLE001 - a notification failure must never stop an agent run
-        log.warning("notification failed", extra={"kind": kwargs.get("kind"), "error": repr(exc)})
+        log.warning("notification failed", extra={"kind": kind, "error": repr(exc)})
         return None
 
 

@@ -3,6 +3,8 @@ milestones and proof that every read goes through copilot_ro (the app pool only 
 
 from __future__ import annotations
 
+import ast
+import inspect
 import sys
 import types
 from collections.abc import AsyncIterator, Iterator
@@ -113,8 +115,12 @@ def notified(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Stand-in for F7's server.notify.notifications.create (records calls, returns an id)."""
     calls: list[dict[str, Any]] = []
 
-    async def create(**kwargs: Any) -> int:
-        calls.append(kwargs)
+    async def create(kind: str, severity: str, therapist_id: str, patient_id: str | None, title: str,
+                     body: str | None, link: str | None, source_table: str | None, source_id: str | None,
+                     dedupe_key: str | None) -> int:  # F7's exact signature: a wrong keyword raises
+        calls.append(dict(kind=kind, severity=severity, therapist_id=therapist_id, patient_id=patient_id,
+                          title=title, body=body, link=link, source_table=source_table, source_id=source_id,
+                          dedupe_key=dedupe_key))
         return len(calls)
 
     module = types.ModuleType("server.notify.notifications")
@@ -307,9 +313,27 @@ async def test_high_severity_kinds_notify_and_milestones(db: Database, notified:
     assert result["milestones"] == 1 and result["notifications"] == len(insights)
 
 
+NOTIFY_ARGS = {"kind": "milestone", "severity": "low", "therapist_id": "okafor", "patient_id": "maya",
+               "title": "t", "body": "b", "link": None, "source_table": None, "source_id": None, "dedupe_key": "k"}
+
+
 async def test_notify_is_a_noop_without_the_notifications_module(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "server.notify.notifications", None)  # import → ImportError
-    assert await insight.notify(kind="milestone") is None
+    assert await insight.notify(**NOTIFY_ARGS) is None
+
+
+async def test_notify_passes_exactly_f7_create_keywords(notified: list[dict[str, Any]]) -> None:
+    """The plan's F7 interface: create(kind, severity, therapist_id, patient_id, title, body, link, source_table,
+    source_id, dedupe_key). The stand-in has that exact signature, and so must the real one once merged."""
+    expected = ["kind", "severity", "therapist_id", "patient_id", "title", "body", "link", "source_table",
+                "source_id", "dedupe_key"]
+    assert list(inspect.signature(insight.notify).parameters) == expected
+    assert await insight.notify(**NOTIFY_ARGS) == 1 and notified == [NOTIFY_ARGS]
+    f7 = Path(insight.__file__).resolve().parents[1] / "notify" / "notifications.py"
+    if f7.exists():  # F7 merged: its module-level create must take the same arguments
+        [create] = [n for n in ast.parse(f7.read_text()).body
+                    if isinstance(n, ast.AsyncFunctionDef) and n.name == "create"]
+        assert [a.arg for a in create.args.args + create.args.kwonlyargs] == expected
 
 
 # ---- read-only proof ------------------------------------------------------------------------------------------
