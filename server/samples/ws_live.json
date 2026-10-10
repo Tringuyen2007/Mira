@@ -1,0 +1,17 @@
+{
+  "t": 1791662226.795,
+  "phase": "active",
+  "exercise_id": "squat",
+  "rep": 7,
+  "reps_target": 10,
+  "set": 1,
+  "sets_target": 3,
+  "countdown": null,
+  "main_angle": 104.0,
+  "load_l_pct": 56.5,
+  "load_conf": 0.949,
+  "hr": 103,
+  "flags": [],
+  "cue_id": "knees_out",
+  "paused": false
+}

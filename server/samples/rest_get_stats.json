@@ -1,0 +1,25 @@
+{
+  "uptime_s": 7.3,
+  "hub": {
+    "clients": {"pose": 1, "live": 1, "events": 1, "notifications": 0},
+    "published": {"pose": 169, "live": 67, "events": 11, "notifications": 0},
+    "dropped": {"pose": 0, "live": 0, "events": 0, "notifications": 0},
+    "pose_throttled": 34,
+    "slow_disconnects": 0
+  },
+  "bridge": {
+    "source": "mock",
+    "mode": "thread",
+    "running": true,
+    "fps": 30.0,
+    "frames_total": 203,
+    "events_total": 11,
+    "seq_gaps": 0,
+    "dropped": 0,
+    "engine_restarts": 0,
+    "ring_frames": 203,
+    "ring_span_s": 6.73,
+    "subscriber_errors": 0,
+    "event_loop_lag_ms": {"p50": 1.0, "p95": 2.0, "max": 2.0, "samples": 66}
+  }
+}
