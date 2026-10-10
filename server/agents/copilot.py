@@ -40,7 +40,7 @@ from server.ai import gemini
 from server.ai.prompts import load_prompt
 from server.ai.validators import check_banned, check_numbers, extract_numbers
 from server.config import REPO_ROOT, cfg
-from server.db import writes
+from server.db import queries, writes
 from server.db.pool import Database, DBError
 from server.logging_setup import get_logger
 
@@ -298,9 +298,27 @@ def demo_cache_paths() -> list[Path]:
     return [Path(cfg.DATA_DIR) / DEMO_CACHE_NAME, REPO_ROOT / "data" / DEMO_CACHE_NAME]
 
 
-async def cached_demo_answer() -> dict[str, Any] | None:
-    """The cached answer to the demo question (read off the event loop), or None."""
-    return await asyncio.to_thread(_read_demo_cache)
+# The cached answer promises a card; it is only kept when a pending proposal is actually returned with it.
+PROPOSAL_PROMISE_RE = re.compile(r"I drafted a plan proposal[^\n]*")
+NO_PROPOSAL_TEXT = "A plan proposal can be drafted on request."
+
+
+async def cached_demo_answer(db: Database | None = None) -> dict[str, Any] | None:
+    """The cached answer to the demo question (read off the event loop), or None. `proposals` holds the pending
+    proposals for the patients the answer names, so the dashboard can open the card it mentions; with none
+    (or no database) the sentence promising a card is replaced."""
+    cached = await asyncio.to_thread(_read_demo_cache)
+    if cached is None:
+        return None
+    ids: list[int] = []
+    if db is not None:
+        try:
+            ids = await queries.pending_proposal_ids_named_in(db, cached["answer"])
+        except DBError as exc:
+            log.warning("cached answer: pending proposals unavailable", extra={"error": str(exc)})
+    if not ids:
+        cached["answer"] = PROPOSAL_PROMISE_RE.sub(NO_PROPOSAL_TEXT, cached["answer"])
+    return {**cached, "proposals": ids}
 
 
 def _read_demo_cache() -> dict[str, Any] | None:
@@ -360,7 +378,7 @@ class Copilot:
                   use_cache: bool = True) -> dict[str, Any]:
         demo = use_cache and is_demo_question(question)
         if demo and cfg.COPILOT_CACHED_DEMO:
-            cached = await cached_demo_answer()
+            cached = await cached_demo_answer(self.db)
             if cached is not None:
                 return cached
         msgs: list[dict[str, Any]] = [user_message(question, patient_id, mode)]
@@ -404,7 +422,7 @@ class Copilot:
             msgs += [reply.as_message(), tool_message(call, content)]
         log.warning("copilot fell back", extra={"reason": reason[:200]})
         if demo:
-            cached = await cached_demo_answer()
+            cached = await cached_demo_answer(self.db)
             if cached is not None:
                 return cached
         return {**fallback_answer(sql_log, reason), "proposals": proposals}

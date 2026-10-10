@@ -355,6 +355,38 @@ async def test_committed_demo_cache_is_real_data() -> None:
     assert "Maya" in cached["answer"]
 
 
+async def test_cached_answer_proposals_match_its_text(db: Database, sim: tuple[str, dict[str, Any]],
+                                                     tmp_path: Path) -> None:
+    """The cache says "I drafted a plan proposal": it returns that pending card, or drops the sentence."""
+    url, _ = sim
+    path = tmp_path / "data" / "copilot_demo.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"question": DEMO_QUESTION, "answer": {
+        "answer": "1. Maya Ellis (right side): compensating.\nI drafted a plan proposal for you to review: a rest day.",
+        "charts": [], "evidence": [], "sql": []}}))
+    with psycopg.connect(url, autocommit=True) as conn:  # no pending card from earlier tests
+        conn.execute("UPDATE plan_proposals SET status = 'dismissed' WHERE status = 'pending'")
+
+    for source in (None, db):  # no database / a database without a pending card for Maya
+        out = await cached_demo_answer(source)
+        assert out is not None and out["cached"] is True and out["proposals"] == []
+        assert "I drafted" not in out["answer"] and out["answer"].endswith("A plan proposal can be drafted on request.")
+        assert out["answer"].startswith("1. Maya Ellis")
+
+    pid = _new_proposal(url, {"exercise_id": "squat", "rest_days_between": 1})
+    try:
+        out = await cached_demo_answer(db)
+        assert out is not None and out["proposals"] == [pid]
+        assert out["answer"].endswith("I drafted a plan proposal for you to review: a rest day.")
+    finally:
+        _sql_exec(url, "UPDATE plan_proposals SET status = 'dismissed' WHERE id = %s", pid)
+
+
+def _sql_exec(url: str, query: str, *params: Any) -> None:
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(query, params)
+
+
 # ---- proposals & drafts ----------------------------------------------------------------------------------
 
 async def test_create_plan_proposal_validates_the_change(db: Database, script: Any) -> None:

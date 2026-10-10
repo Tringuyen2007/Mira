@@ -200,6 +200,14 @@ async def ro_prescriptions(db: Database, patient_id: str, timeout_s: float = 1.5
     return await db.ro_fetch(PRESCRIPTIONS_SQL, (patient_id, False), timeout_s=timeout_s)
 
 
+async def pending_proposal_ids_named_in(db: Database, text: str) -> list[int]:
+    """Pending plan proposals (newest first) for the patients whose full name appears in `text`."""
+    rows = await db.fetch("SELECT pp.id FROM plan_proposals pp JOIN patients p ON p.id = pp.patient_id "
+                          "WHERE pp.status = 'pending' AND strpos(%s, p.name) > 0 "
+                          "ORDER BY pp.created_at DESC, pp.id DESC LIMIT 5", (text,), timeout_s=2)
+    return [int(r["id"]) for r in rows]
+
+
 # ---- alerts ------------------------------------------------------------------------------------------------
 
 async def alert_steps(db: Database, open_only: bool = True, days: int = 30) -> list[dict[str, Any]]:
