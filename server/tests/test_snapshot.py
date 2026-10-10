@@ -179,3 +179,18 @@ def test_call_variables_survive_a_broken_profile_and_an_unusable_time() -> None:
     assert all(isinstance(v, str) and v for v in variables.values())
     assert variables["contact_name"] == "there"
     assert snap.time_local(float("nan")) and snap.time_local(1.7e12)
+
+
+def test_demo_patient_phone_reaches_the_voicemail(monkeypatch: pytest.MonkeyPatch) -> None:
+    from server.config import reload_config
+
+    monkeypatch.setenv("DEMO_PATIENT_PHONE", "+15550100333")
+    reload_config()
+    inc = with_snapshot(incident(), lying_frames(5))
+    variables = snap.call_variables(inc, "Linh")
+    assert variables["patient_phone"] == "+15550100333"
+    assert "Please call Maya at +15550100333." in render_opening(variables)["voicemail"]
+    monkeypatch.setenv("DEMO_PATIENT_PHONE", "")
+    reload_config()
+    variables = snap.call_variables(incident(), "Linh")
+    assert "Please call Maya at the number you have for her." in render_opening(variables)["voicemail"]

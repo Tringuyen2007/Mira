@@ -29,7 +29,7 @@ SECRET_FIELDS = (
     "ELEVEN_API_KEY",
     "RETELL_API_KEY",
 )
-PHONE_FIELDS = ("RETELL_FROM_NUMBER", "DEMO_EMERGENCY_PHONE", "DEMO_THERAPIST_PHONE")
+PHONE_FIELDS = ("RETELL_FROM_NUMBER", "DEMO_EMERGENCY_PHONE", "DEMO_THERAPIST_PHONE", "DEMO_PATIENT_PHONE")
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,7 @@ class Config:
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None
     DEMO_THERAPIST_PHONE: str | None = None
+    DEMO_PATIENT_PHONE: str | None = None  # Maya's phone in the default profile ({{patient_phone}})
 
     INSIGHT_ENABLED: bool = True
     COPILOT_CACHED_DEMO: bool = False

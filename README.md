@@ -70,7 +70,7 @@ and walks `call_registered → call_ongoing → call_ended` over `SIM_CALL_DURAT
 can be rehearsed for free:
 
 ```bash
-MIRA_SOURCE=mock:fall CHECKIN_TIMEOUT_S=15 SIM_CALL_DURATION_S=30 MOCK_FALL_RESPONDS_AT=45 make run
+MIRA_SOURCE=mock:fall CHECKIN_TIMEOUT_S=15 SIM_CALL_DURATION_S=30 MOCK_FALL_RESPONDS_AT=25 make run
 # logs: detected → checked_in → escalated → call_registered → call_ongoing → patient_responded
 #       → call_update → call_ended → closed   (exactly one escalation)
 ```
@@ -79,10 +79,15 @@ The Retell agent "Mira Safety Caller" is configured from code, exactly per TRI.m
 
 ```bash
 python -m server.notify.retell_setup            # dry run: prints the LLM / agent / number payloads
-python -m server.notify.retell_setup --apply    # create or update (by name), bind the number, verify
+python -m server.notify.retell_setup --apply    # create/update (by name), publish, pin the number, verify
 ```
 
-`--apply` is free (it never places a call) and prints the agent id for `RETELL_AGENT_ID`.
+`--apply` is free (it never places a call). Retell only edits an agent's latest *draft*, so `--apply`
+writes the draft (opening a new one from the published version when needed), **publishes** it and binds
+the number's outbound agent to that exact version number (not `"latest"`, which would be whatever draft
+someone last edited in the dashboard). It prints `RETELL_AGENT_ID` and `RETELL_AGENT_VERSION`; calls pass
+both as `override_agent_id` / `override_agent_version`. The LLM also has an `end_call` tool so the agent
+can hang up once the contact has said what they will do.
 
 ## Retell live calls: BLOCKED (no spend approved) — exact manual steps to enable
 
@@ -91,10 +96,13 @@ configured (`--apply` above); nothing else in the code changes for live calls. T
 
 1. Get approval to spend Retell credits, then check the balance in the Retell dashboard (Billing).
 2. In `.env` set `RETELL_API_KEY`, `RETELL_FROM_NUMBER` (E.164, the number bought in Retell) and run
-   `python -m server.notify.retell_setup --apply`; it must end with `21/21 fields verified`.
-3. Put the printed id in `.env` as `RETELL_AGENT_ID=agent_...`.
+   `python -m server.notify.retell_setup --apply`; it must end with `24/24 fields verified`.
+3. Put the printed values in `.env` as `RETELL_AGENT_ID=agent_...` and `RETELL_AGENT_VERSION=<n>`
+   (re-copy the version after every `--apply`).
 4. Set `DEMO_EMERGENCY_PHONE` (and `DEMO_THERAPIST_PHONE` for the voicemail/no-answer fallback call) to
-   phones you own, in E.164. Save the Retell number as a contact "Mira Alert" on those phones.
+   phones you own, in E.164. Save the Retell number as a contact "Mira Alert" on those phones. Set
+   `DEMO_PATIENT_PHONE` (E.164) so the voicemail and prompt give Maya's number; without it they say
+   "the number you have for her".
 5. Set `CALLS_DISABLED=0` and start the server. The startup log line shows `CALLS_DISABLED: false`;
    `/stats` → `notifier.mode` must be `live` (it stays `log_only` if any of the three Retell values is missing).
 6. Trigger one staged fall (`MIRA_SOURCE=mock:fall`, or `DEMO_TOOLS_ENABLED=1` + `POST /demo/trigger_fall`)
