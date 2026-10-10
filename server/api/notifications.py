@@ -1,15 +1,16 @@
 """Dashboard notification REST (§8.7.4): panel list, bell badge, read, read-all, ack.
 
-Works without a database: reads and writes hit `state.notifications`'s in-memory rows (see
-`server/notify/notifications.py`). Token-protected like every other router, but never depends on
-`require_db` — the one deliberate difference from `server/api/alerts.py`.
+With a database, reads come from the `notifications` table (history and unread state survive a restart);
+without one, from `state.notifications`'s in-memory rows (see `server/notify/notifications.py`).
+Token-protected like every other router, but never depends on `require_db` — the one deliberate
+difference from `server/api/alerts.py`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from server.state import get_state
@@ -33,16 +34,17 @@ def _service() -> Any:
 
 
 @router.get("/notifications")
-async def list_notifications(unread: bool = False, limit: int = 50, since_id: int | None = None,
+async def list_notifications(unread: bool = False, limit: int = Query(50, ge=1, le=500),
+                             since_id: int | None = Query(None, ge=0),
                              therapist_id: str | None = None) -> dict[str, Any]:
-    rows = _service().list_notifications(therapist_id=therapist_id, unread=unread, since_id=since_id,
-                                         limit=limit)
+    rows = await _service().list_notifications(therapist_id=therapist_id, unread=unread, since_id=since_id,
+                                               limit=limit)
     return {"notifications": rows}
 
 
 @router.get("/notifications/count")
 async def notifications_count(therapist_id: str | None = None) -> dict[str, int]:
-    return _service().count(therapist_id)
+    return await _service().count(therapist_id)
 
 
 @router.post("/notifications/{notification_id}/read")

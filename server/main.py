@@ -27,7 +27,7 @@ from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
 from server.engine_bridge import EngineBridge
-from server.hub import Hub, RateLimiter, to_json
+from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
 from server.notify import webhooks
 from server.notify.notifications import NotificationService
@@ -155,7 +155,7 @@ def _parse_since_id(raw: str | None) -> int | None:
     if not raw:
         return None
     try:
-        return int(raw)
+        return max(0, int(raw))
     except ValueError:
         return None
 
@@ -212,15 +212,11 @@ def create_app() -> FastAPI:
         await ws.accept()
         since_id = _parse_since_id(ws.query_params.get("since_id"))
         therapist_id = ws.query_params.get("therapist_id") or None
-
-        async def replay() -> None:
-            service = get_state().notifications
-            if service is None:
-                return
-            for row in service.list_notifications(therapist_id=therapist_id, since_id=since_id, limit=None):
-                await ws.send_text(to_json({"type": "notification", **row}))
-
-        await get_state().hub.connect("notifications", ws, on_connect=replay)
+        service = get_state().notifications
+        if service is None:
+            await ws.close(code=1011)
+            return
+        await service.serve(ws, since_id=since_id, therapist_id=therapist_id)
 
     _mount_static(app)
     return app
