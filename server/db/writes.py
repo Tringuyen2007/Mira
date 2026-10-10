@@ -253,17 +253,30 @@ async def archive_finished_days(db: Database | None, older_than_days: int = 31) 
 
 # ---- notifications (§8.7) ------------------------------------------------------------------------------
 
+NOTIFICATION_INSERT_SQL = (
+    "INSERT INTO notifications (kind, severity, therapist_id, patient_id, title, body, link, source_table, "
+    "source_id, dedupe_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+    "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id")
+
+
 async def insert_notification(db: Database | None, kind: str, severity: str, therapist_id: str,
                               patient_id: str | None, title: str, body: str | None, link: str | None,
                               source_table: str | None, source_id: str | None, dedupe_key: str | None
                               ) -> int | None:
     """Returns the new id, or None if dedupe_key was already used (or on failure)."""
-    sql = ("INSERT INTO notifications (kind, severity, therapist_id, patient_id, title, body, link, source_table, "
-           "source_id, dedupe_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-           "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id")
-    return await _safe(db, "insert_notification", lambda d: _id(d.fetchrow(
-        sql, (kind, severity, therapist_id, patient_id, title, body, link, source_table, source_id, dedupe_key))),
+    return await _safe(db, "insert_notification", lambda d: insert_notification_or_raise(
+        d, kind, severity, therapist_id, patient_id, title, body, link, source_table, source_id, dedupe_key),
         None, kind=kind)
+
+
+async def insert_notification_or_raise(db: Database, kind: str, severity: str, therapist_id: str,
+                                       patient_id: str | None, title: str, body: str | None, link: str | None,
+                                       source_table: str | None, source_id: str | None, dedupe_key: str | None
+                                       ) -> int | None:
+    """Same INSERT, but raises DBError on failure so the caller can tell a duplicate (None) from a failed
+    write (notifications.create() still delivers an urgent row live when the database is down)."""
+    return await _id(db.fetchrow(NOTIFICATION_INSERT_SQL, (kind, severity, therapist_id, patient_id, title, body,
+                                                           link, source_table, source_id, dedupe_key)))
 
 
 async def mark_notification_read(db: Database | None, notification_id: int) -> bool:
@@ -278,9 +291,11 @@ async def mark_notification_ack(db: Database | None, notification_id: int, acked
                        False)
 
 
-async def mark_all_notifications_read(db: Database | None, therapist_id: str) -> int | None:
-    sql = "UPDATE notifications SET read_at = now() WHERE therapist_id = %s AND read_at IS NULL"
-    return await _safe(db, "mark_all_notifications_read", lambda d: d.execute(sql, (therapist_id,)), None)
+async def mark_all_notifications_read(db: Database | None, therapist_id: str | None) -> int | None:
+    """therapist_id=None marks every therapist's unread rows read."""
+    sql = ("UPDATE notifications SET read_at = now() "
+           "WHERE read_at IS NULL AND (%(t)s::text IS NULL OR therapist_id = %(t)s)")
+    return await _safe(db, "mark_all_notifications_read", lambda d: d.execute(sql, {"t": therapist_id}), None)
 
 
 # ---- helpers ---------------------------------------------------------------------------------------------
