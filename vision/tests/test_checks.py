@@ -1,0 +1,61 @@
+import numpy as np
+
+from vision.checks import (
+    bone_length_stats, format_checks, knee_angle_deg, marker_center_distances, run_checks,
+    triangulate_marker_centers,
+)
+from vision.config import MatConfig
+from vision.frames import project
+from vision.pipeline import Pipeline
+from vision.tests.synth import pose_from_points, standing_skeleton, target_cams
+
+MAT = MatConfig()
+
+
+def _cams():
+    cams = target_cams()
+    for cam in cams.values():
+        cam.intrinsics_rms = 0.3
+        cam.marker_obs = {i: project(c, cam.K, cam.dist, cam.R, cam.t) for i, c in MAT.marker_corners().items()}
+    return cams
+
+
+def test_bone_lengths_and_knee_angle():
+    X = standing_skeleton()
+    stats = bone_length_stats(np.stack([X] * 20))
+    assert abs(stats["thigh_l"][0] - np.linalg.norm(X[23] - X[25])) < 1e-12 and stats["thigh_l"][1] < 1e-12
+    assert 170 < knee_angle_deg(X, "l") < 180
+    bent = X.copy()
+    bent[25] = bent[23] + [0, -0.43, 0]  # thigh vertical
+    bent[27] = bent[25] + [0, 0, -0.43]  # shin horizontal: 90° at the knee
+    assert abs(knee_angle_deg(bent, "l") - 90) < 1e-6
+
+
+def test_marker_centres_and_distances():
+    cams = _cams()
+    centers = triangulate_marker_centers(cams["A"], cams["B"])
+    np.testing.assert_allclose(centers[0], MAT.marker_centers()[0], atol=1e-3)
+    dists = {label: (m, e) for label, m, e in marker_center_distances(centers, MAT)}
+    assert abs(dists["0–2"][1] - 1.52) < 1e-9 and abs(dists["0–1"][1] - 0.40) < 1e-9
+    assert abs(dists["0–2"][0] - 1.52) < 2e-3
+
+
+def test_run_checks_all_pass_on_clean_synthetic_data():
+    cams, X = _cams(), standing_skeleton()
+    rng = np.random.default_rng(0)
+    pipe = Pipeline(cams)
+    outs = [pipe.process(k / 30, pose_from_points(cams["A"], X, noise_px=0.3, rng=rng),
+                         pose_from_points(cams["B"], X, noise_px=0.3, rng=rng), 0.005) for k in range(40)]
+    checks = run_checks(outs, cams, MAT, fps={"A": 30.0, "B": 29.5})
+    names = {c.name for c in checks}
+    assert {"lens RMS A", "frames tracked in 3D", "mean body reprojection", "thigh_l length std",
+            "standing knee angle l", "median triangulation angle", "marker distance 0–2",
+            "pair skew p95", "capture fps A"} <= names
+    failed = [c for c in checks if c.passed is False]
+    assert failed == [], format_checks(failed)
+    assert "PASS" in format_checks(checks)
+
+
+def test_run_checks_with_no_outputs():
+    checks = run_checks([], {}, MAT)
+    assert all(c.passed is None for c in checks)

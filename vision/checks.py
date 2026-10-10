@@ -1,0 +1,160 @@
+"""Numeric sanity checks for the 3D skeleton.
+
+    python -m vision.checks               # 5 s live: stand still, facing Mira, in view of both cameras
+    python -m vision.checks --from FILE   # on a recording, re-triangulated with the current calibration
+"""
+from __future__ import annotations
+
+import argparse
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+from vision.config import CameraConfig, MatConfig, load_cameras, load_mat
+from vision.pipeline import Pipeline, PipelineOutput
+from vision.triangulate import triangulate_points
+
+BONES_CHECKED = {"thigh_l": (23, 25), "thigh_r": (24, 26), "shin_l": (25, 27), "shin_r": (26, 28)}
+KNEE = {"l": (23, 25, 27), "r": (24, 26, 28)}
+MARKER_PAIRS = [(0, 2), (1, 3), (0, 1), (2, 3)]
+
+
+@dataclass
+class Check:
+    name: str
+    value: float | None
+    unit: str
+    target: str
+    passed: bool | None  # None = could not be measured
+
+
+def bone_length_stats(seq: np.ndarray) -> dict[str, tuple[float, float]]:
+    out = {}
+    for name, (i, j) in BONES_CHECKED.items():
+        lengths = np.linalg.norm(seq[:, i] - seq[:, j], axis=1)
+        lengths = lengths[np.isfinite(lengths)]
+        out[name] = (float(lengths.mean()), float(lengths.std())) if len(lengths) >= 10 else (float("nan"), float("nan"))
+    return out
+
+
+def knee_angle_deg(joints: np.ndarray, side: str) -> float:
+    hip, knee, ankle = (joints[k] for k in KNEE[side])
+    u, v = hip - knee, ankle - knee
+    with np.errstate(invalid="ignore"):
+        c = u @ v / (np.linalg.norm(u) * np.linalg.norm(v))
+    return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
+
+
+def triangulate_marker_centers(cam_a: CameraConfig, cam_b: CameraConfig) -> dict[int, np.ndarray]:
+    obs_a, obs_b = cam_a.marker_obs or {}, cam_b.marker_obs or {}
+    out = {}
+    for i in sorted(set(obs_a) & set(obs_b)):
+        X, _, _ = triangulate_points(obs_a[i], obs_b[i], cam_a, cam_b)
+        out[i] = X.mean(axis=0)
+    return out
+
+
+def marker_center_distances(centers: dict[int, np.ndarray], mat: MatConfig) -> list[tuple[str, float, float]]:
+    known = mat.marker_centers()
+    return [(f"{i}–{j}", float(np.linalg.norm(centers[i] - centers[j])), float(np.linalg.norm(known[i] - known[j])))
+            for i, j in MARKER_PAIRS if i in centers and j in centers]
+
+
+def _check(name, value, unit, target, test) -> Check:
+    if value is None or not np.isfinite(value):
+        return Check(name, None, unit, target, None)
+    return Check(name, float(value), unit, target, bool(test(value)))
+
+
+def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat: MatConfig,
+               fps: dict[str, float] | None = None) -> list[Check]:
+    checks = []
+    for n in ("A", "B"):
+        rms = cams[n].intrinsics_rms if n in cams else None
+        checks.append(_check(f"lens RMS {n}", rms, "px", "< 0.5", lambda v: v < 0.5))
+
+    n3d = sum(o.frame.tracking == "3d" for o in outputs)
+    frac = 100.0 * n3d / len(outputs) if outputs else None
+    checks.append(_check("frames tracked in 3D", frac, "%", "≥ 90", lambda v: v >= 90))
+
+    tris = [o.tri for o in outputs if o.tri is not None]
+    errs = np.concatenate([t.reproj_err[t.ok] for t in tris]) if tris else np.empty(0)
+    checks.append(_check("mean body reprojection", float(errs.mean()) if errs.size else None, "px", "≤ 5", lambda v: v <= 5))
+
+    seq = np.stack([o.frame.joints for o in outputs if o.frame.tracking == "3d"]) if n3d else None
+    stats = bone_length_stats(seq) if seq is not None else {k: (float("nan"),) * 2 for k in BONES_CHECKED}
+    for name, (_, std) in stats.items():
+        checks.append(_check(f"{name} length std", std * 100, "cm", "< 1.0", lambda v: v < 1.0))
+    for side in ("l", "r"):
+        vals = [knee_angle_deg(j, side) for j in seq] if seq is not None else []
+        vals = [v for v in vals if np.isfinite(v)]
+        checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
+                             lambda v: 170 <= v <= 180))
+
+    angles = np.concatenate([t.angle_deg[t.ok] for t in tris]) if tris else np.empty(0)
+    checks.append(_check("median triangulation angle", float(np.median(angles)) if angles.size else None, "°", "60–100",
+                         lambda v: 60 <= v <= 100))
+
+    if "A" in cams and "B" in cams and cams["A"].calibrated and cams["B"].calibrated:
+        centers = triangulate_marker_centers(cams["A"], cams["B"])
+        for label, measured, expected in marker_center_distances(centers, mat):
+            checks.append(_check(f"marker distance {label}", measured * 100, "cm", f"{expected * 100:.1f} ± 2",
+                                 lambda v, e=expected: abs(v / 100 - e) <= 0.02))
+
+    skews = [abs(o.skew_s) * 1000 for o in outputs if o.skew_s is not None]
+    checks.append(_check("pair skew p95", float(np.percentile(skews, 95)) if skews else None, "ms", "≤ 33",
+                         lambda v: v <= 33))
+    for n, v in sorted((fps or {}).items()):
+        checks.append(_check(f"capture fps {n}", v, "fps", "≥ 20", lambda x: x >= 20))
+    return checks
+
+
+def format_checks(checks: list[Check]) -> str:
+    lines = [f"{'check':32s} {'value':>12s}  {'target':14s} result"]
+    for c in checks:
+        value = "n/a" if c.value is None else f"{c.value:.2f} {c.unit}"
+        result = {True: "PASS", False: "FAIL", None: "--"}[c.passed]
+        lines.append(f"{c.name:32s} {value:>12s}  {c.target:14s} {result}")
+    return "\n".join(lines)
+
+
+def _live_outputs(cams, model: str, seconds: float):
+    from vision.capture import mono_to_unix
+    from vision.live import LiveSource
+
+    outputs = []
+    pipeline = Pipeline(cams)
+    with LiveSource(cams, model) as src:
+        print("Stand still on the mat, facing Mira, arms by your sides. Starting in 2 s ...")
+        start = time.monotonic()
+        while time.monotonic() - start < 2.0 + seconds:
+            for pair in src.poll(0.01):
+                out = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s)
+                if time.monotonic() - start >= 2.0:
+                    outputs.append(out)
+        fps = {n: s["fps"] for n, s in src.stats().items()}
+    return outputs, fps
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--seconds", type=float, default=5.0)
+    p.add_argument("--from", dest="from_path", type=Path)
+    p.add_argument("--model", default="full", choices=["full", "heavy"])
+    args = p.parse_args()
+    cams, mat = load_cameras(), load_mat()
+    if args.from_path:
+        from vision.replay import replay_outputs
+
+        outputs, fps = list(replay_outputs(args.from_path, retriangulate=True, cams=cams, realtime=False)), None
+    else:
+        outputs, fps = _live_outputs(cams, args.model, args.seconds)
+    checks = run_checks(outputs, cams, mat, fps)
+    print(format_checks(checks))
+    return 0 if all(c.passed is not False for c in checks) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
