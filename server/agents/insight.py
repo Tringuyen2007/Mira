@@ -176,7 +176,8 @@ WHERE r.first_day >= time_bucket(INTERVAL '1 day', now(), '{TZ}') - make_interva
 ORDER BY r.patient_id, r.exercise_id"""
 
 PATIENTS_SQL = "SELECT id, name, therapist_id FROM patients"
-EXISTING_KEYS_SQL = "SELECT dedupe_key FROM memory_events WHERE dedupe_key = ANY(%(keys)s)"
+EXISTING_KEYS_SQL = ("SELECT dedupe_key, evidence->>'exercise_id' AS exercise_id FROM memory_events "
+                     "WHERE dedupe_key = ANY(%(keys)s)")
 
 # ---- step 2: read-only agent tools (copilot_ro, scoped to the candidate's patient) ----------------------------
 
@@ -324,6 +325,11 @@ def _first_last(values: list[Any]) -> tuple[Any, Any]:
     return (present[0], present[-1]) if present else (None, None)
 
 
+def _compensation_key(cand: Candidate) -> str:
+    """The compensation key of the same patient and week (a compensation note this week subsumes asymmetry)."""
+    return f"{cand.patient_id}:compensation:{cand.dedupe_key.rsplit(':', 1)[-1]}"
+
+
 @dataclass
 class Candidate:
     patient_id: str
@@ -456,6 +462,10 @@ class InsightAgent:
                 cand = build(row)
                 cand.dedupe_key = f"{cand.patient_id}:{kind}:{week}"
                 found.append(cand)
+        # Compensation subsumes rising asymmetry for the same patient + exercise (one note, not two).
+        compensating = {(c.patient_id, c.exercise_id) for c in found if c.kind == "compensation"}
+        found = [c for c in found
+                 if not (c.kind == "asymmetry_worse" and (c.patient_id, c.exercise_id) in compensating)]
         # Patient-level keys: keep the first candidate per key (rule order, then patient/exercise order).
         unique: dict[str, Candidate] = {}
         for cand in found:
@@ -465,9 +475,13 @@ class InsightAgent:
     async def new_candidates(self, candidates: list[Candidate]) -> list[Candidate]:
         if not candidates:
             return []
-        rows = await self._ro(EXISTING_KEYS_SQL, {"keys": [c.dedupe_key for c in candidates]})
-        existing = {r["dedupe_key"] for r in rows}
-        return [c for c in candidates if c.dedupe_key not in existing]
+        keys = [c.dedupe_key for c in candidates]
+        keys += [_compensation_key(c) for c in candidates if c.kind == "asymmetry_worse"]
+        rows = await self._ro(EXISTING_KEYS_SQL, {"keys": keys})
+        existing = {r["dedupe_key"]: r["exercise_id"] for r in rows}
+        return [c for c in candidates if c.dedupe_key not in existing
+                and not (c.kind == "asymmetry_worse" and _compensation_key(c) in existing
+                         and existing[_compensation_key(c)] == c.exercise_id)]
 
     # ---- step 2 ---------------------------------------------------------------------------------------
 

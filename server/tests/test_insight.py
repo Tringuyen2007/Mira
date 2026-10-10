@@ -160,6 +160,25 @@ async def test_compensation_rule(db: Database) -> None:
     assert comp.severity == "high"
 
 
+async def test_compensation_subsumes_asymmetry_for_the_same_exercise(db: Database, dsn: str) -> None:
+    agent = InsightAgent(db, use_ai=False)
+    kinds = _by(await agent.find_candidates(), "t_comp")
+    assert "compensation" in kinds and "asymmetry_worse" not in kinds  # its asymmetry rises too (2 → 10)
+    # A compensation note written earlier this week also suppresses a later asymmetry candidate (same exercise).
+    week = iso_week()
+    asym = Candidate("t_asym", "asymmetry_worse", "squat", {"exercise_id": "squat"}, "x",
+                     dedupe_key=f"t_asym:asymmetry_worse:{week}")
+    other = Candidate("t_asym", "asymmetry_worse", "bridge", {"exercise_id": "bridge"}, "x",
+                      dedupe_key=f"t_asym:asymmetry_worse:{week}")
+    assert await agent.new_candidates([asym]) == [asym]
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO memory_events (patient_id, kind, message, evidence, dedupe_key, agent) "
+                     "VALUES ('t_asym', 'compensation', 'x', %s, %s, 'insight')",
+                     (Jsonb({"exercise_id": "squat"}), f"t_asym:compensation:{week}"))
+    assert await agent.new_candidates([asym]) == []
+    assert await agent.new_candidates([other]) == [other]
+
+
 async def test_pain_rule(db: Database) -> None:
     cands = await InsightAgent(db, use_ai=False).find_candidates()
     pain = _by(cands, "t_pain")["pain"]

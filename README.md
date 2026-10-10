@@ -146,7 +146,8 @@ during back-to-back runs on the 900k-frame history).
 - **Insight** (`server/agents/insight.py`, §7.4): five SQL rules find candidates (depth gain ≥ 10° vs 3 weeks
   ago; asymmetry rising and compensation = depth up ≥ 5° while affected-leg load falls ≥ 2 points, both as
   least-squares trends over ≥ 3 session days in the last 14 days; pain_post ≥ 5 in the last 7 days; ≥ 3
-  prescribed session days missed in the last 14). Each is deduped by `<patient>:<kind>:<ISO week>`. New ones are
+  prescribed session days missed in the last 14). Each is deduped by `<patient>:<kind>:<ISO week>`; a
+  compensation candidate (or note this week) for a patient + exercise suppresses its asymmetry note. New ones are
   investigated by Gemini (smart model, background priority, ≤ 5 tool steps, read-only patient-scoped tools); the
   note is number-checked against the evidence stored with it, else the SQL-only note is written.
   Compensation and pain notes raise a `high` dashboard notification (kind `insight`).
