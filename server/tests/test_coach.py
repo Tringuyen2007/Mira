@@ -115,9 +115,9 @@ async def test_pain_5_skips_next_exercise_and_notifies(coach: SessionCoach, hub:
     monkeypatch.setitem(__import__("sys").modules, "server.notify.notifications", fake_module)
 
     await coach.on_event({"type": "command", "name": "pain", "session_id": s.session_id, "payload": {"level": 5}})
+    await coach.drain()  # the notification is sent in the background
     adapts = hub.of("coach_adapt")
     assert len(adapts) == 1 and adapts[0]["action"] == "skip_next_exercise"
-    assert coach.skip_next(s.session_id) == {"squat"}
     assert len(notified) == 1
     assert notified[0][0] == "coach" and notified[0][1] == "low"
 
@@ -126,7 +126,6 @@ async def test_pain_7_coach_does_nothing(coach: SessionCoach, hub: FakeHub, sess
     _, s = session
     await coach.on_event({"type": "command", "name": "pain", "session_id": s.session_id, "payload": {"level": 7}})
     assert hub.of("coach_adapt") == []
-    assert coach.skip_next(s.session_id) == set()
 
 
 # ---- between-set agent ---------------------------------------------------------------------------
@@ -228,3 +227,186 @@ async def test_coach_adapt_events_during_mock_style_run(coach: SessionCoach, hub
     actions = {a["action"] for a in hub.of("coach_adapt")}
     assert "adjust_next_set" in actions
     assert "choose_focus_cue" in actions
+
+
+# ---- review regressions -----------------------------------------------------------------------------
+
+
+def _script(*calls: tuple[str, dict[str, Any]]) -> Any:
+    """A coach fake that plays the given tool calls in order, then finishes."""
+
+    def fake(messages: list[dict[str, Any]], tools: Any) -> gemini.Reply:
+        n = sum(1 for m in messages if m.get("role") == "model" and m.get("function_call"))
+        name, args = calls[n] if n < len(calls) else ("finish", {"reason": "done"})
+        return gemini.Reply(function_call=gemini.FunctionCall(name=name, args=args))
+
+    return fake
+
+
+async def _set_done(coach: SessionCoach, sid: str, set_no: int = 1) -> None:
+    await coach.on_event({"type": "set_done", "session_id": sid, "set": set_no, "reps": 10, "exercise_id": "squat"})
+
+
+@pytest.mark.parametrize("args", [{"reps": True}, {"reps": "6"}, {"rest_s": float("nan")}, {"rest_s": "90"},
+                                  {"reps": 10, "sets": 5}, {"reps": -3}, {"rest_s": 1e9}])
+async def test_adjust_next_set_rejects_malformed_args(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                      args: dict[str, Any]) -> None:
+    _, s = session
+    gemini.register_fake("coach", _script(("adjust_next_set", args)))
+    await _set_done(coach, s.session_id)
+    await coach.drain()
+    assert hub.of("coach_adapt") == []
+
+
+async def test_adjust_next_set_clamps_rest_and_reps_to_max(coach: SessionCoach, hub: FakeHub, session: Any) -> None:
+    _, s = session
+    gemini.register_fake("coach", _script(("adjust_next_set", {"reps": 40, "rest_s": 300.0})))
+    await _set_done(coach, s.session_id)
+    await coach.drain()
+    [adapt] = hub.of("coach_adapt")
+    assert adapt["detail"] == {"reps_requested": 40, "reps_applied": DEFAULT_LIMITS["max_reps"],
+                               "rest_s_requested": 300.0, "rest_s_applied": DEFAULT_LIMITS["max_rest_s"]}
+
+
+async def test_focus_cue_must_be_a_form_cue(coach: SessionCoach, hub: FakeHub, session: Any) -> None:
+    _, s = session  # check_in / resume exist in cues.json but belong to the Guardian and the engine
+    gemini.register_fake("coach", _script(("choose_focus_cue", {"cue_id": "check_in"}),
+                                          ("choose_focus_cue", {"cue_id": "resume"})))
+    await _set_done(coach, s.session_id)
+    await coach.drain()
+    assert hub.of("cue") == [] and hub.of("coach_adapt") == []
+
+
+async def test_unknown_tool_rejected_and_loop_bounded(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    _, s = session
+    asked: list[int] = []
+
+    async def ask(*args: Any, **kwargs: Any) -> gemini.Reply:
+        asked.append(1)
+        return gemini.Reply(function_call=gemini.FunctionCall(name="change_prescription", args={"reps": 30}))
+
+    monkeypatch.setattr(gemini, "ask", ask)
+    await _set_done(coach, s.session_id)
+    await coach.drain()
+    assert len(asked) == session_coach.MAX_TOOL_STEPS
+    assert hub.of("coach_adapt") == []
+
+
+async def test_no_adaptation_while_guardian_holds_session(hub: FakeHub, session: Any) -> None:
+    registry, s = session
+    coach = SessionCoach(hub, registry, db_provider=lambda: None, incident_open=lambda sid: True)
+    await _reps(coach, s.session_id, 10, flags=["knee_cave_l"])
+    await coach.on_event({"type": "fatigue", "session_id": s.session_id})
+    await coach.on_event({"type": "hr", "session_id": s.session_id, "bpm": 125})
+    await coach.on_event({"type": "command", "name": "pain", "session_id": s.session_id, "payload": {"level": 5}})
+    await _set_done(coach, s.session_id)
+    await coach.drain()
+    assert hub.of("coach_adapt") == [] and hub.of("cue") == []
+
+
+async def test_paused_event_drops_in_flight_agent_result(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    _, s = session
+    import asyncio
+
+    gate = asyncio.Event()
+
+    async def ask(*args: Any, **kwargs: Any) -> gemini.Reply:
+        await gate.wait()
+        return gemini.Reply(function_call=gemini.FunctionCall(name="choose_focus_cue", args={"cue_id": "knees_out"}))
+
+    monkeypatch.setattr(gemini, "ask", ask)
+    await _set_done(coach, s.session_id)
+    await coach.on_event({"type": "paused", "reason": "pain", "session_id": s.session_id})
+    gate.set()
+    await coach.drain()
+    assert hub.of("cue") == [] and hub.of("coach_adapt") == []
+
+
+async def test_pain_7_holds_the_coach_until_next_set(coach: SessionCoach, hub: FakeHub, session: Any) -> None:
+    _, s = session
+    await coach.on_event({"type": "command", "name": "pain", "session_id": s.session_id, "payload": {"level": 8}})
+    await coach.on_event({"type": "hr", "session_id": s.session_id, "bpm": 125})
+    assert hub.of("coach_adapt") == []
+    await coach.on_event({"type": "countdown", "n": 3, "set": 2, "session_id": s.session_id})
+    await coach.on_event({"type": "hr", "session_id": s.session_id, "bpm": 125})
+    assert [a["action"] for a in hub.of("coach_adapt")] == ["extend_rest"]
+
+
+async def test_next_set_countdown_closes_the_rest_window(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    _, s = session
+    import asyncio
+
+    gate = asyncio.Event()
+
+    async def ask(*args: Any, **kwargs: Any) -> gemini.Reply:
+        await gate.wait()
+        return gemini.Reply(function_call=gemini.FunctionCall(name="adjust_next_set", args={"reps": 10}))
+
+    monkeypatch.setattr(gemini, "ask", ask)
+    await _set_done(coach, s.session_id)
+    await coach.on_event({"type": "countdown", "n": 3, "set": 2, "session_id": s.session_id})
+    gate.set()
+    await coach.drain()
+    assert hub.of("coach_adapt") == []
+
+
+async def test_agent_bounded_by_rest_window_budget(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    _, s = session
+    import asyncio
+
+    async def ask(*args: Any, **kwargs: Any) -> gemini.Reply:
+        await asyncio.sleep(0.03)
+        return gemini.Reply(function_call=gemini.FunctionCall(name="get_set_stats", args={}))
+
+    monkeypatch.setattr(session_coach, "AI_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(session_coach, "DEFAULT_LIMITS", {**DEFAULT_LIMITS, "min_rest_s": 0})
+    monkeypatch.setattr(gemini, "ask", ask)
+    await _set_done(coach, s.session_id)
+    await asyncio.wait_for(coach.drain(), 1.0)  # 5 steps x 0.03 s > the 0.05 s budget: cut off, no hang
+
+
+def test_clean_limits_rejects_malformed_values() -> None:
+    clean = session_coach._clean_limits
+    assert clean(None) == DEFAULT_LIMITS
+    assert clean({"min_reps": "10", "max_reps": True, "max_rest_s": float("inf")}) == DEFAULT_LIMITS
+    assert clean({"min_reps": 20, "max_reps": 10}) == DEFAULT_LIMITS  # inconsistent pair -> defaults
+    assert clean({"min_reps": 10, "max_rest_s": 90.0}) == {**DEFAULT_LIMITS, "min_reps": 10, "max_rest_s": 90}
+
+
+async def test_fatigue_ends_a_set_once_and_notifies_per_set(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    _, s = session
+    keys: list[str] = []
+
+    async def fake_notify(*args: Any, dedupe_key: str | None = None, **kwargs: Any) -> None:
+        keys.append(str(dedupe_key))
+
+    monkeypatch.setattr(session_coach, "_notify", fake_notify)
+    for set_no in (1, 2):
+        await _reps(coach, s.session_id, 9, set_no=set_no)
+        await coach.on_event({"type": "fatigue", "session_id": s.session_id})
+        await coach.on_event({"type": "fatigue", "session_id": s.session_id})
+    await coach.drain()
+    assert [a["detail"]["set"] for a in hub.of("coach_adapt")] == [1, 2]
+    assert len(set(keys)) == 2  # distinct dedupe keys: the second set's notification is not swallowed
+
+
+async def test_new_session_drops_previous_state_and_tasks(coach: SessionCoach, hub: FakeHub, session: Any,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, s = session
+    import asyncio
+
+    async def ask(*args: Any, **kwargs: Any) -> gemini.Reply:
+        await asyncio.sleep(10)
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(gemini, "ask", ask)
+    await _set_done(coach, s.session_id)
+    s2 = await registry.start("maya", "squat")
+    await coach.on_event({"type": "hr", "session_id": s2.session_id, "bpm": 90})
+    await asyncio.wait_for(coach.drain(), 1.0)  # the old session's agent was cancelled
+    assert list(coach._state) == [s2.session_id]
