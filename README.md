@@ -1,44 +1,130 @@
 # Mira server
 
 FastAPI server for the Mira physical-therapy device: WebSocket streams for the device and dashboard,
-the engine bridge (mock / replay / live vision), and the REST API.
+the engine bridge (mock / replay / live vision), the safety path (fall check-in, emergency call), the AI agents
+and the REST API. This README is everything a new developer needs; the team plan (TRI.md, kept by Tri) has the
+design background, but no setup step depends on it.
 
-## Setup
+## Prerequisites
+
+| Tool | Why | Get it |
+|---|---|---|
+| Python **3.12** | the server (MediaPipe wheels need 3.12) | `uv python install 3.12` ([uv](https://docs.astral.sh/uv/)) or the python.org installer |
+| Docker Desktop | the local TimescaleDB (`make db-local`) and the DB tests (they **skip silently** without it) | docker.com → Docker Desktop, start it once |
+| `make` | the commands below | macOS: `xcode-select --install`; Linux: your package manager |
+| git | clone | |
+
+No cloud account or API key is needed to run the server, the mock streams or the tests.
+
+## Quick start
 
 ```bash
-python3.12 -m venv .venv            # Python 3.12 (MediaPipe wheels)
+git clone <repo-url> Mira && cd Mira
+python3.12 -m venv .venv                       # or: uv venv --python 3.12 .venv
 .venv/bin/pip install -r server/requirements.txt
-cp .env.example .env                 # then set MIRA_API_TOKEN to a long random string
+cp .env.example .env
+python3 -c "import secrets;print(secrets.token_urlsafe(32))"   # paste as MIRA_API_TOKEN in .env
+make run                                       # http://localhost:8000/health → {"status": "ok"}
+make test                                      # ~70 s; Docker must be running for the DB tests
+make db-local                                  # optional: local TimescaleDB with 75 days of simulated history
 ```
 
-Generate a token with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`.
+`MIRA_API_TOKEN` is required: the server **refuses to start** without one, with the `.env.example`
+placeholder, or with a token shorter than 24 characters (anyone on the hall Wi-Fi could otherwise drive the API).
 The server starts without any external keys and without a database (`MIRA_SOURCE=mock` is the default).
+Use `make ... VENV=/path/to/venv` if your virtual environment lives elsewhere.
+
+The tests never read your `.env` (`server/tests/conftest.py` sets `MIRA_SKIP_DOTENV=1` before importing the
+config), never call Gemini, ElevenLabs or Retell, and never touch Tiger Cloud.
 
 ## Database (Tiger Data / TimescaleDB)
 
 The server runs without a database; set `TIGER_DSN` to persist frames, sessions, reps and alerts.
-Every setup step is a script (TRI.md §5.11), so a database is rebuilt, never restored from a dump.
+Every setup step is a script, so a database is rebuilt, never restored from a dump.
+
+### Local (Docker)
 
 ```bash
-# Local fallback: start (or reuse) the mira-db Docker container on :55432 and rebuild the `mira` database
-COPILOT_RO_PASSWORD=... make db-local          # schema → rollup → roles → seed → 900k simulated frames
-                                               # → refresh → Data Guard check 3 → compress → policy → jobs
-# Tiger Cloud (or any DSN): same steps, no drop
-make db-setup DSN="postgres://tsdbadmin:...@<host>:<port>/tsdb?sslmode=require"
+make db-local     # start (or reuse) the mira-db container on :55432, then rebuild the `mira` database:
+                  # schema → rollup → roles → seed → 900k simulated frames → refresh → Data Guard check 3
+                  # → compress → columnstore policy → jobs   (~30-40 s, prints a step log)
 ```
 
-Then point the server at it, e.g. `TIGER_DSN=postgresql://postgres:mira@localhost:55432/mira` and
-`COPILOT_DSN=postgresql://copilot_ro:<COPILOT_RO_PASSWORD>@localhost:55432/mira`.
-`make db-local` takes ~30 s and prints a step log (rows, wall time, compression ratio, jobs).
-`make db-setup` is idempotent: steps already done are skipped. Use `make ... VENV=/path/to/venv` as needed.
+Then in `.env`:
+
+```bash
+TIGER_DSN=postgresql://postgres:mira@localhost:55432/mira
+COPILOT_DSN=postgresql://copilot_ro:mira-local-ro@localhost:55432/mira
+```
+
+**The local `copilot_ro` password is always `mira-local-ro`.** `copilot_ro` is a cluster-wide role, so
+`make db-local`, `make demo-data` and the DB tests all set it to that fixed value (`LOCAL_RO_PASSWORD` in the
+Makefile, `RO_PASSWORD` in `server/tests/dbutil.py`); a local app using it keeps working after `make test`, and the
+Tiger password is never copied into the local container. `make db-local` drops and rebuilds `mira` each time.
+
+### Tiger Cloud (free trial)
+
+1. Sign up at [console.cloud.timescale.com](https://console.cloud.timescale.com) (Tiger Data, 30-day trial, no card).
+2. **Create service** → PostgreSQL with the TimescaleDB extension (time-series), the region nearest you,
+   the smallest size. When it is ready, copy the connection string from the service's **Connection info**
+   (user `tsdbadmin`; the password is shown once, so save it now).
+3. Pick a strong password for the read-only role and put both in `.env`:
+
+   ```bash
+   TIGER_DSN=postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require
+   COPILOT_RO_PASSWORD=<new strong password>
+   COPILOT_DSN=postgres://copilot_ro:<that password>@<host>:<port>/tsdb?sslmode=require
+   ```
+4. `make db-setup DSN="postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require"` (the owner DSN, in
+   quotes). It is idempotent: steps already done are skipped, and `roles.sql` (step 3) is re-applied every time.
+
+**Re-run `make db-setup` (and `make db-local`) after any change to `server/db/roles.sql`.** Existing databases
+keep their old grants otherwise. The server checks this at startup (one WARNING `copilot_ro grants are stale`
+naming each missing grant) and `/health/data` → `copilot_ro_grants` shows the same list and turns `failing`.
+Manual check: `SELECT has_table_privilege('copilot_ro','pose_frames','SELECT'),
+has_column_privilege('copilot_ro','patients','emergency_contact_phone','SELECT')` must return `true, false`.
 
 Individual pieces: `python -m server.db.apply_sql <file.sql> <dsn>` (one statement per round trip, autocommit),
 `python -m server.db.seed <dsn>`, `python -m server.sim.simulate_history --dsn <dsn> --seed 42`,
 `python -m server.db.compress_history <dsn>`. The simulator writes the Copilot eval answers to
-`server/sim/expected.json`.
+`server/sim/expected.json`. `server.db.setup` loads `.env` (through `server.config`) like the server does.
 
 DB tests use the local container (`MIRA_TEST_ADMIN_DSN`, default `postgresql://postgres:mira@localhost:55432/postgres`),
 create a throwaway database each and skip when it is unreachable. They never touch Tiger Cloud.
+
+## API keys (all optional)
+
+Without keys every service uses its fallback (fake Gemini, captions + recorded MP3s, log-only calls).
+
+| Key | Where to click | `.env` |
+|---|---|---|
+| Gemini | [aistudio.google.com](https://aistudio.google.com) → **Get API key** → **Create API key** (free tier) | `GEMINI_API_KEY=...`, `GEMINI_MODE=live` |
+| ElevenLabs | [elevenlabs.io](https://elevenlabs.io) → profile menu → **API Keys** → **Create**; **Voices** → pick a voice (e.g. "Sarah") → **Copy voice ID** | `ELEVEN_API_KEY=...`, `ELEVEN_VOICE_ID=...` |
+| Retell | [dashboard.retellai.com](https://dashboard.retellai.com) → **API Keys** → copy the key; **Phone Numbers** → **Buy number** (US) | `RETELL_API_KEY=...`, `RETELL_FROM_NUMBER=+1...` |
+
+Then configure the Retell agent from code (free, never places a call):
+
+```bash
+.venv/bin/python -m server.notify.retell_setup            # dry run: prints the LLM / agent / number payloads
+.venv/bin/python -m server.notify.retell_setup --apply    # create/update, publish, bind the number, verify
+```
+
+It must end with `N/N fields verified` and prints `RETELL_AGENT_ID` and `RETELL_AGENT_VERSION` for `.env`.
+Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" below).
+
+## Kill switches
+
+| Variable | Default | Effect |
+|---|---|---|
+| `DB_DISABLED=1` | 0 | run without the database even if `TIGER_DSN` is set (reads return 503, streams keep working) |
+| `GEMINI_MODE` | `fake` | `fake` = no Gemini requests; `replay` = saved answers from `data/ai_cache/`; `live` = real requests |
+| `GEMINI_DISABLED=1` | 0 | every AI caller uses its fallback (templates, SQL-only notes, cached demo answer) |
+| `ELEVEN_DISABLED=1` | 0 | no ElevenLabs requests; captions and already-recorded MP3s only |
+| `CALLS_DISABLED=1` | 1 | log-only call simulator, no Retell calls, no credits spent |
+| `INSIGHT_ENABLED=0` | 1 | no scheduled Insight agent / milestones |
+| `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
+| `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
+| `DEMO_TOOLS_ENABLED=1` | 0 | enables `POST /demo/trigger_fall` (rehearsals only) |
 
 ## Run
 
@@ -48,7 +134,25 @@ make test
 ```
 
 Always exactly **one** server process (`--workers 1`): live state is in memory.
-Use `make run VENV=/path/to/venv` if your virtual environment lives elsewhere.
+
+## Troubleshooting
+
+- **`RuntimeError: MIRA_API_TOKEN ...; refusing to start`**: set a generated token (Quick start).
+- **DB tests show as skipped**: Docker Desktop isn't running or `mira-db` isn't up; run `make db-local` once.
+- **`password authentication failed for user "copilot_ro"` locally**: your local `COPILOT_DSN` must use
+  `mira-local-ro`; `make db-local` resets the role to it.
+- **`/health/data` is `failing` with `copilot_ro_grants` problems, or Data Guard errors say `permission denied`**:
+  the database has old grants; re-run `make db-setup DSN=...` (Tiger) or `make db-local` (local).
+- **`/stats` → `notifier.mode` is `log_only`** although `CALLS_DISABLED=0`: one of `RETELL_API_KEY`,
+  `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID` is missing.
+- **Gemini answers are templates / `fallback` is set**: `GEMINI_MODE` is `fake`, the key is missing, or the
+  daily budget is used up (`/stats` → `ai`); background agents are refused from 85 % of the budget.
+- **Port 55432 already in use**: another Postgres container; `make db-local DB_LOCAL_PORT=55433` and update the DSNs
+  (the tests then need `MIRA_TEST_ADMIN_DSN=postgresql://postgres:mira@localhost:55433/postgres`).
+- **A tunnel (cloudflared/ngrok) for the Retell webhook**: do **not** rewrite the Host header
+  (no cloudflared `httpHostHeader`, no ngrok `--host-header=rewrite`). The tunnel filter recognises tunnel
+  traffic by `PUBLIC_WEBHOOK_HOST`; with a rewritten Host it looks like LAN traffic and only the token protects
+  the API.
 
 ## Try it
 
@@ -65,7 +169,14 @@ WebSockets take the token in the query string (browsers can't set headers on Web
 ws://localhost:8000/ws/pose?token=$TOKEN     # 25 Hz pose
 ws://localhost:8000/ws/live?token=$TOKEN     # ~10 Hz session state
 ws://localhost:8000/ws/events?token=$TOKEN   # events; send client messages here too
+ws://localhost:8000/ws/notifications?token=$TOKEN&since_id=0   # therapist notifications (replay + live)
 ```
+
+A wrong or missing token closes any WebSocket with code 1008 before it is accepted.
+
+Session replay (needs a database): `GET /sessions/{id}/frames?downsample=300` gives the lttb knee curve;
+`downsample=0` gives full-rate frames, at most 9,000 per page. A full page carries `next_t0`; request again with
+`t0=<next_t0>` (and the same `t1`) until `next_t0` is `null`.
 
 Rehearse an emergency: `MIRA_SOURCE=mock:fall` (fall after 20 s, `fall_status` every 2 s,
 optional thumbs up `MOCK_FALL_RESPONDS_AT` seconds after the fall), or with `DEMO_TOOLS_ENABLED=1`:
@@ -79,7 +190,7 @@ Example payloads for every WebSocket message and REST response are in `server/sa
 
 ## Frame contract: joint angles
 
-`angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (TRI.md §4.5) are **flexion in degrees**:
+`angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (the team plan's frame contract) are **flexion in degrees**:
 0 = straight joint, larger = deeper bend (flexion = 180 minus the interior angle between the two bones).
 A standing person reads about 5, the bottom of a squat about 70-90, and a "90 degree squat target" means 90 degrees of
 knee flexion. The database rollup (`max_knee`, `p95_knee` = deepest bend), the simulator, `/ws/live`
@@ -201,13 +312,15 @@ python -m server.agents.copilot --write-demo-cache                 # refresh dat
 
 Stage backup: `COPILOT_CACHED_DEMO=1` answers "Which of my patients are compensating?" instantly from
 `data/copilot_demo.json` (`DATA_DIR` copy wins), and the same file is the fallback if Gemini is unavailable. The
+served answer's `proposals` lists the pending proposal cards for the patients it names; with none (or no database)
+its "I drafted a plan proposal" sentence becomes "A plan proposal can be drafted on request." The
 committed file was produced by `--write-demo-cache` with `GEMINI_MODE=fake` against a freshly simulated history
 (seed 42): the real guarded SQL on copilot_ro, no hand-written numbers. Dates and numbers are relative to the day
 the history was simulated, so on the day of the demo run ONE command and commit both files:
 
 ```bash
-COPILOT_RO_PASSWORD=... make demo-data   # fresh local history for today → server/sim/expected.json, then
-                                         # data/copilot_demo.json (fake model, real SQL); refuses a wrong ranking
+make demo-data   # fresh local history for today → server/sim/expected.json, then
+                 # data/copilot_demo.json (fake model, real SQL on copilot_ro / mira-local-ro); refuses a wrong ranking
 ```
 
 It rebuilds the local `mira` database (like `make db-local`). Load Tiger the same day (`make db-setup`) so the
@@ -216,9 +329,10 @@ live answer matches the cache.
 Evals (not part of `make test`): 10 questions with answers from `server/sim/expected.json`.
 
 ```bash
-make evals                                   # GEMINI_MODE from env/.env; fake mode is free and must pass 10/10
+MIRA_EVAL_RO_DSN=postgresql://copilot_ro:mira-local-ro@localhost:55432/mira \
+  GEMINI_MODE=fake make evals                # after make db-local; free, must pass 10/10
 MIRA_EVAL_DSN=postgresql://postgres:mira@localhost:55432/mira \
-MIRA_EVAL_RO_DSN=postgresql://copilot_ro:<password>@localhost:55432/mira \
+MIRA_EVAL_RO_DSN=postgresql://copilot_ro:mira-local-ro@localhost:55432/mira \
 GEMINI_MODE=live make evals EVAL_ARGS="--only compensating -v"   # live: ~2-5 smart requests per question
 ```
 
@@ -232,8 +346,8 @@ With a database (`TIGER_DSN`), the lifespan starts `server/agents/scheduler.py`:
 | Insight agent + milestones | `INSIGHT_DELAY_S` (120) after startup, then every `INSIGHT_INTERVAL_S` (900) | `copilot_ro` only (`COPILOT_DSN`) | `memory_events` (writes.py) |
 
 Background agents read only through `copilot_ro` and write only through the fixed functions in
-`server/db/writes.py` (a test traps the app pool during a full pass of both jobs). **Grant deviation from TRI.md
-§9.3:** `roles.sql` also grants `copilot_ro` SELECT on `pose_frames`, `daily_progress_archive`, `data_checks` and
+`server/db/writes.py` (a test traps the app pool during a full pass of both jobs). **Grant deviation from the team plan's
+role design:** `roles.sql` also grants `copilot_ro` SELECT on `pose_frames`, `daily_progress_archive`, `data_checks` and
 daily_progress's materialization hypertable (looked up in a re-runnable `DO` block), because the Data Guard's
 checks 1-4 read them and the project rule is that background agents read only through the read-only role. It
 still has no access to `alerts`, `agent_actions`, `ai_calls`, `notifications` or `therapists`, and the Copilot
@@ -246,7 +360,7 @@ Kill switches: `DATA_GUARD_ENABLED=0`, `INSIGHT_ENABLED=0`. A failing run is log
 `scheduler`) and the schedule carries on. All DB work is on the async pools (measured event-loop lag p95 ≈ 1 ms
 during back-to-back runs on the 900k-frame history).
 
-- **Insight** (`server/agents/insight.py`, §7.4): five SQL rules find candidates (depth gain ≥ 10° vs 3 weeks
+- **Insight** (`server/agents/insight.py`): five SQL rules find candidates (depth gain ≥ 10° vs 3 weeks
   ago; asymmetry rising and compensation = depth up ≥ 5° while affected-leg load falls ≥ 2 points, both as
   least-squares trends over ≥ 3 session days in the last 14 days; pain_post ≥ 5 in the last 7 days; ≥ 3
   prescribed session days missed in the last 14). Each is deduped by `<patient>:<kind>:<ISO week>`; a
@@ -275,8 +389,9 @@ The Safety Guardian (`server/agents/safety_guardian.py`) watches the event strea
 opens an incident. It plays the check-in cue and haptic, then waits `CHECKIN_TIMEOUT_S` for a thumbs up,
 raised hand or **I'm OK**. With no answer it builds the incident snapshot (ring buffer + cached profile,
 no AI, no database) and calls the emergency contact through Retell. While the call is live, meaningful
-changes (she responded, sat up, still not moving after another 30 s, heart rate changed by more than
-15 bpm) are pushed into the call: at most one update every 10 s, never the same fact twice. Every step
+changes (she responded, sat up, lay down again, still not moving after another 30 s, heart rate changed by more
+than 15 bpm) are pushed into the call: at most one update every 10 s, never the same fact twice in a row (each
+kind of fact is compared with the last value pushed, so lying → sitting → lying is said again). Every step
 is an `alert` event on `/ws/events`, a JSON log line with `alert_id`/`call_id`, an `alerts` row (when a
 database is configured) and a call to each `state.on_alert_step` hook.
 
@@ -291,7 +406,7 @@ MIRA_SOURCE=mock:fall CHECKIN_TIMEOUT_S=15 SIM_CALL_DURATION_S=30 MOCK_FALL_RESP
 #       → call_update → call_ended → closed   (exactly one escalation)
 ```
 
-The Retell agent "Mira Safety Caller" is configured from code, exactly per TRI.md §8.3:
+The Retell agent "Mira Safety Caller" is configured from code (the team plan's call design):
 
 ```bash
 python -m server.notify.retell_setup            # dry run: prints the LLM / agent / number payloads
@@ -305,14 +420,14 @@ someone last edited in the dashboard). It prints `RETELL_AGENT_ID` and `RETELL_A
 both as `override_agent_id` / `override_agent_version`. The LLM also has an `end_call` tool so the agent
 can hang up once the contact has said what they will do.
 
-## Dashboard notifications (§8.7)
+## Dashboard notifications
 
 One backend turns alerts, call progress, Insight notes, Copilot proposals, milestones, Coach
 adaptations and Data Guard failures into therapist notifications with unread state, acknowledgement,
 history and real-time delivery. `server/notify/notifications.py: create(kind, severity, therapist_id,
 patient_id, title, body, link, source_table, source_id, dedupe_key) -> int | None` is the **only**
 producer API — every agent (and F7 itself, from the Guardian's `on_alert_step` hooks) calls it, never
-the database directly. It applies the §8.5 policy (quiet hours 9 PM–8 AM America/Chicago except
+the database directly. It applies the notification policy (quiet hours 9 PM–8 AM America/Chicago except
 urgent, at most 1 non-urgent push per patient per local day — the row is still stored either way, only
 the `push` flag on it changes), stores the row (`ON CONFLICT (dedupe_key) DO NOTHING`, so a step is
 never notified twice) and publishes `{"type": "notification", ...row}` on the hub's `"notifications"`
@@ -358,24 +473,59 @@ when the socket is down: poll `GET /notifications?since_id=` every 10 s.
 
 ## Retell live calls: BLOCKED (no spend approved) — exact manual steps to enable
 
-Live calls cost Retell credits (about $0.07–0.15 per minute), so they are off. The agent is already
-configured (`--apply` above); nothing else in the code changes for live calls. To enable them:
+**What is blocked:** placing a real phone call. Every real call spends the existing Retell credit balance
+(about $0.07–0.15 per minute), and the owner has not approved spending it. So `CALLS_DISABLED=1` stays on and the
+log-only simulator stands in for the call; no code change is needed to switch.
 
-1. Get approval to spend Retell credits, then check the balance in the Retell dashboard (Billing).
-2. In `.env` set `RETELL_API_KEY`, `RETELL_FROM_NUMBER` (E.164, the number bought in Retell) and run
-   `python -m server.notify.retell_setup --apply`; it must end with `24/24 fields verified`.
-3. Put the printed values in `.env` as `RETELL_AGENT_ID=agent_...` and `RETELL_AGENT_VERSION=<n>`
-   (re-copy the version after every `--apply`).
-4. Set `DEMO_EMERGENCY_PHONE` (and `DEMO_THERAPIST_PHONE` for the voicemail/no-answer fallback call) to
-   phones you own, in E.164. Save the Retell number as a contact "Mira Alert" on those phones. Set
-   `DEMO_PATIENT_PHONE` (E.164) so the voicemail and prompt give Maya's number; without it they say
-   "the number you have for her".
-5. Set `CALLS_DISABLED=0` and start the server. The startup log line shows `CALLS_DISABLED: false`;
-   `/stats` → `notifier.mode` must be `live` (it stays `log_only` if any of the three Retell values is missing).
-6. Trigger one staged fall (`MIRA_SOURCE=mock:fall`, or `DEMO_TOOLS_ENABLED=1` + `POST /demo/trigger_fall`)
-   and run the TRI.md §8.3.1 test-call checklist. Print one real `client.call.retrieve(call_id)` to confirm
-   the SDK attribute names (`call_status`, `call_analysis.custom_analysis_data`, `disconnection_reason`).
-7. Set `CALLS_DISABLED=1` again after the rehearsal.
+**Already done (free, no call placed):** the "Mira Safety Caller" agent and its LLM are configured from code
+(`retell_setup --apply`), published as **version 1**, and the Retell number's outbound agent is bound to that
+version. The code paths for a live call (create, poll, live updates, post-call analysis) are covered by tests
+with a fake client.
+
+**To enable, in order:**
+
+1. Get the owner's approval to spend Retell credits; check the balance in the Retell dashboard (Billing).
+2. In `.env`: `RETELL_API_KEY`, `RETELL_FROM_NUMBER` (E.164, the bought number), `RETELL_AGENT_ID=agent_...`
+   (printed by `retell_setup --apply`) and `RETELL_AGENT_VERSION=1`. If you ever re-run `--apply`, copy the newly
+   printed version instead.
+3. Set `DEMO_EMERGENCY_PHONE` to a real phone you own, in E.164 (e.g. `+17135550123`, not `713-555-0123`).
+   Optionally `DEMO_THERAPIST_PHONE` (no-answer / voicemail fallback call) and `DEMO_PATIENT_PHONE`. Save the
+   Retell number as a contact "Mira Alert" on those phones so it isn't shown as spam.
+4. Set `CALLS_DISABLED=0` (and `CHECKIN_TIMEOUT_S=15` for a shorter wait).
+5. Start a staged fall, either `MIRA_SOURCE=mock:fall make run` (falls 20 s after start), or `make run` with
+   `DEMO_TOOLS_ENABLED=1` and then
+   `curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}' localhost:8000/demo/trigger_fall`.
+   The startup log shows `CALLS_DISABLED: false`, and `/stats` → `notifier.mode` must be `live`
+   (`log_only` means a Retell value is missing). Don't respond on the mat until the phone rings.
+6. Work through the test-call checklist:
+   - [ ] The phone rings within ~10 s of escalation, and caller ID shows "Mira Alert" (not "Spam Likely").
+   - [ ] The opening starts ~1 s after you answer and isn't cut off.
+   - [ ] **No raw `{{…}}` is spoken** (a variable name doesn't match or wasn't sent).
+   - [ ] The situation takes about 15–20 s (3–4 sentences).
+   - [ ] Numbers and times sound natural ("one hundred twelve", "three forty-two PM").
+   - [ ] Ask "Is she moving now?": it answers from the current status, or says Mira can't tell.
+   - [ ] Give a thumbs up on the mat mid-call (or `MOCK_FALL_RESPONDS_AT`): you hear "Update: …" within seconds.
+   - [ ] Say "Yes, I'll go check on her": after hang-up the `alerts` rows show `acknowledged`.
+   - [ ] Let it go to voicemail once: it leaves the fixed message; `disconnection_reason = voicemail_reached`.
+   - [ ] Only **one** call per incident, even if the fall event fires twice.
+   - [ ] Print one real call once, to confirm the SDK attribute names the poller reads:
+     ```bash
+     .venv/bin/python -c "from retell import Retell; from server.config import cfg; c=Retell(api_key=cfg.RETELL_API_KEY).call.retrieve('<call_id>'); print(c.call_status, c.disconnection_reason, getattr(c.call_analysis,'custom_analysis_data',None))"
+     ```
+7. Set `CALLS_DISABLED=1` again afterwards.
+
+**Verify** (with a database): the incident's steps, in order, from the `alerts` table:
+
+```sql
+SELECT time, step, channel, payload
+FROM alerts
+WHERE alert_id = (SELECT alert_id FROM alerts ORDER BY time DESC LIMIT 1)
+ORDER BY time;
+-- expect: detected → checked_in → escalated (payload.retell.contact_call_id = the call id) → call_registered
+--         → call_ongoing → call_update … → acknowledged → call_ended → closed
+```
+
+Without a database the same steps are JSON log lines in `logs/server.log` (search for the `alert_id`).
 
 Optional webhook: Retell dashboard → Settings → webhook URL `https://<tunnel>/retell/webhook` and
 `PUBLIC_WEBHOOK_HOST=<tunnel host>`. Polling stays the source of truth; webhook events only add
