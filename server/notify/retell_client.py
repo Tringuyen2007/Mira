@@ -33,6 +33,10 @@ NOT_CONNECTED_RETRY_S = 60.0
 FINAL_STATUSES = ("ended", "not_connected", "error")
 NO_ANSWER_REASONS = ("voicemail_reached", "dial_no_answer", "dial_busy", "dial_failed")
 SIM_RING_S = 2.0
+# Per-request limits: the SDK default (60 s read, 2 internal retries) could hold an escalation for minutes.
+CREATE_TIMEOUT_S = 10.0
+RETRIEVE_TIMEOUT_S = 5.0
+UPDATE_TIMEOUT_S = 5.0
 SIM_ANALYSIS_DELAY_S = 1.0
 
 
@@ -118,6 +122,8 @@ class RetellNotifier:
         except Exception as exc:  # noqa: BLE001 - escalation must never raise into the Guardian
             out["error"] = repr(exc)[:300]
             log.exception("escalation failed", extra={"alert_id": inc.alert_id})
+            if "contact_call_id" not in out:
+                await self._log_step(inc, "call_failed", {"error": out["error"]})
         return out
 
     async def _place_call(self, inc: Incident, role: str, to_number: str, variables: dict[str, str],
@@ -168,13 +174,17 @@ class RetellNotifier:
         return self._client_obj
 
     def _create_call(self, alert_id: str, role: str, to_number: str, variables: dict[str, str], suffix: str) -> str:
+        # The published version retell_setup bound to the number; without it Retell picks the agent's default.
+        version = {"override_agent_version": cfg.RETELL_AGENT_VERSION} if cfg.RETELL_AGENT_VERSION is not None else {}
         call = self._client().call.create_phone_call(
             from_number=cfg.RETELL_FROM_NUMBER,
             to_number=to_number,
             override_agent_id=cfg.RETELL_AGENT_ID,
+            **version,
             retell_llm_dynamic_variables=variables,
             metadata={"alert_id": alert_id, "role": role},
             idempotency_key=f"{alert_id}:{role}{suffix}",  # a retry can never place a second call
+            timeout=CREATE_TIMEOUT_S,
         )
         return str(call.call_id)
 
@@ -215,7 +225,7 @@ class RetellNotifier:
                         await self._log_step(inc, f"call_{view.status}", {
                             "call_id": call_id, "disconnection_reason": view.disconnection_reason or None})
                         if view.status == "ongoing" and self.guardian is not None:
-                            await self.guardian.flush_updates(inc)  # updates queued while it was ringing
+                            self.guardian.flush_updates(inc)  # updates queued while it was ringing
                     if view.status in FINAL_STATUSES and (view.analysis is not None or view.status != "ended"):
                         next_call = await self._after_call(inc, call_id, view)
                         if next_call is None:
@@ -227,12 +237,16 @@ class RetellNotifier:
         except asyncio.CancelledError:
             cancelled = True
             raise
+        except Exception:  # noqa: BLE001 - logged, then the incident is still closed below
+            log.exception("call watcher failed", extra={"alert_id": inc.alert_id, "call_id": call_id})
         finally:
             if not cancelled:
-                if not done:  # analysis never arrived: still record what we know
-                    await self._log_step(inc, "call_watch_timeout", {"call_id": call_id, "seen": sorted(seen)})
-                if self.guardian is not None:
-                    await self.guardian.close(inc)
+                try:
+                    if not done:  # analysis never arrived: still record what we know
+                        await self._log_step(inc, "call_watch_timeout", {"call_id": call_id, "seen": sorted(seen)})
+                finally:
+                    if self.guardian is not None:
+                        await self.guardian.close(inc)
 
     async def _after_call(self, inc: Incident, call_id: str, view: CallView) -> str | None:
         """Acknowledge, retry once if not connected, or fall back to the therapist. Returns a new call id to watch."""
@@ -258,7 +272,7 @@ class RetellNotifier:
         if sim is not None:
             return sim.view(asyncio.get_running_loop().time())
         try:
-            call = await asyncio.to_thread(self._client().call.retrieve, call_id)
+            call = await asyncio.to_thread(self._client().call.retrieve, call_id, timeout=RETRIEVE_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001 - keep polling; the watcher has its own time limit
             log.warning("call.retrieve failed", extra={"call_id": call_id, "error": repr(exc)})
             return None
@@ -286,7 +300,7 @@ class RetellNotifier:
         else:
             try:
                 await asyncio.to_thread(self._client().call.update_live, inc.call_id, call_control=call_control,
-                                        fields_to_override=fields_to_override)
+                                        fields_to_override=fields_to_override, timeout=UPDATE_TIMEOUT_S)
             except Exception as exc:  # noqa: BLE001 - e.g. the call just ended; the facts stay in alerts
                 log.warning("update_live failed", extra={"alert_id": inc.alert_id, "call_id": inc.call_id,
                                                          "error": repr(exc)})

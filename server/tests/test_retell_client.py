@@ -37,7 +37,8 @@ class FakeCalls:
         self.created.append(kwargs)
         return SimpleNamespace(call_id=f"call_{len(self.created)}")
 
-    def retrieve(self, call_id: str) -> Any:
+    def retrieve(self, call_id: str, *, timeout: float | None = None) -> Any:
+        assert timeout is not None  # never the SDK's 60 s default on the safety path
         steps = self.script[call_id]
         i = min(self.polls.get(call_id, 0), len(steps) - 1)
         self.polls[call_id] = i + 1
@@ -146,7 +147,8 @@ async def test_live_mode_places_one_call_with_the_exact_sdk_arguments(monkeypatc
     assert len(calls.created) == 1
     created = calls.created[0]
     assert created["from_number"] == "+15550100999" and created["to_number"] == CONTACT_PHONE
-    assert created["override_agent_id"] == "agent_test"
+    assert created["override_agent_id"] == "agent_test" and "override_agent_version" not in created
+    assert created["timeout"] == 10.0  # never the SDK's 60 s default on the safety path
     assert created["idempotency_key"] == f"{inc.alert_id}:emergency_contact"
     assert created["metadata"] == {"alert_id": inc.alert_id, "role": "emergency_contact"}
     assert all(isinstance(v, str) and v for v in created["retell_llm_dynamic_variables"].values())
@@ -158,6 +160,7 @@ async def test_live_mode_places_one_call_with_the_exact_sdk_arguments(monkeypatc
     assert update["call_control"]["additional_context"].startswith("UPDATE ")
     assert update["call_control"]["additional_context"].endswith(": Maya just pressed I'm OK on her phone.")
     assert update["fields_to_override"] == {"override_dynamic_variables": {"current_status": "Responded."}}
+    assert update["timeout"] == 5.0
     assert steps[-4:] == ["call_update", "call_ended", "acknowledged", "closed"]
 
 
@@ -216,3 +219,30 @@ async def test_webhook_events_are_recorded_on_the_matching_incident() -> None:
     assert steps.count("webhook_call_started") == 1
     await notifier.stop()
     await guardian.stop()
+
+
+async def test_live_calls_pin_the_published_agent_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_env(monkeypatch)
+    monkeypatch.setenv("RETELL_AGENT_VERSION", "3")
+    reload_config()
+    calls = FakeCalls({"call_1": [("ended", {"data": {"will_check_on_patient": True}})]})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.01)
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)
+    assert calls.created[0]["override_agent_version"] == 3
+
+
+async def test_a_crashing_watcher_still_closes_the_incident(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_env(monkeypatch)
+    calls = FakeCalls({"call_1": [("ended", {"data": {}})]})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.01)
+
+    async def boom(*args: Any) -> None:
+        raise RuntimeError("bug in _after_call")
+
+    notifier._after_call = boom  # type: ignore[method-assign]
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)
+    assert sid not in guardian.incidents

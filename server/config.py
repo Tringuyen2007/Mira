@@ -60,6 +60,7 @@ class Config:
     RETELL_API_KEY: str | None = None
     RETELL_FROM_NUMBER: str | None = None
     RETELL_AGENT_ID: str | None = None
+    RETELL_AGENT_VERSION: int | None = None  # published version bound to the number (printed by retell_setup)
     CALLS_DISABLED: bool = True
     SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
 
