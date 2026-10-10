@@ -26,16 +26,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from server.agents.copilot import Copilot
+from server.agents.copilot import EXPECTED_PATH, Copilot, ro_dsn_from
 from server.ai import gemini
 from server.ai.validators import extract_numbers
 from server.config import cfg
 from server.db.pool import Database
 
-EXPECTED_PATH = Path(__file__).resolve().parents[1] / "sim" / "expected.json"
 LOCAL_DSN = "postgresql://postgres:mira@localhost:55432/mira"
 DEPTH_TOL = 2.0  # progress_v's p95 is a percentile sketch; the simulator's key is computed exactly
 LOAD_TOL = 1.0
@@ -166,15 +165,6 @@ EVALS: list[Eval] = [
 
 
 # ---- runner ----------------------------------------------------------------------------------------------------
-
-def ro_dsn_from(dsn: str) -> str | None:
-    password = os.environ.get("COPILOT_RO_PASSWORD")
-    if not password:
-        return None
-    parts = urlsplit(dsn)
-    host = parts.netloc.rsplit("@", 1)[-1]
-    return urlunsplit((parts.scheme, f"copilot_ro:{password}@{host}", parts.path, parts.query, parts.fragment))
-
 
 async def run(dsn: str, ro_dsn: str, only: list[str] | None = None) -> list[dict[str, Any]]:
     expected = json.loads(EXPECTED_PATH.read_text(encoding="utf-8"))

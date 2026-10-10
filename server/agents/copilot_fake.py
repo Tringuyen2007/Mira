@@ -14,6 +14,7 @@ from server.ai.gemini import FunctionCall, Reply
 
 WINDOW_DAYS = 21
 TODAY = "(now() AT TIME ZONE 'America/Chicago')::date"
+# Trends use completed local days only: a live session today (a partial day) must not reorder the ranking.
 
 _TREND = f"""
 WITH w AS (
@@ -23,7 +24,7 @@ WITH w AS (
          count(*) OVER (PARTITION BY v.patient_id) AS days
   FROM progress_v v JOIN patients p ON p.id = v.patient_id
   WHERE v.exercise_id = 'squat' AND {{where}}
-    AND v.day >= {TODAY} - {WINDOW_DAYS})
+    AND v.day >= {TODAY} - {WINDOW_DAYS} AND v.day < {TODAY})
 SELECT patient_id, name, affected_side, max(days) AS days,
        round(avg(p95_knee) FILTER (WHERE first_n <= 3)::numeric, 1) AS depth_from,
        round(avg(p95_knee) FILTER (WHERE last_n <= 3)::numeric, 1) AS depth_to,
@@ -67,7 +68,8 @@ def series_sql(patient_id: str) -> str:
     return f"""
 SELECT day::date AS day, round(p95_knee::numeric, 1) AS p95_knee,
        round(affected_load_pct::numeric, 1) AS affected_load_pct
-FROM progress_v WHERE patient_id = '{patient_id}' AND exercise_id = 'squat' AND day >= {TODAY} - {WINDOW_DAYS}
+FROM progress_v WHERE patient_id = '{patient_id}' AND exercise_id = 'squat'
+  AND day >= {TODAY} - {WINDOW_DAYS} AND day < {TODAY}
 ORDER BY day"""
 
 
@@ -76,7 +78,8 @@ def pain_sql(patient_id: str) -> str:
 WITH d AS (
   SELECT (started_at AT TIME ZONE 'America/Chicago')::date AS day, max(pain_post) AS pain_post
   FROM sessions
-  WHERE patient_id = '{patient_id}' AND exercise_id = 'squat' AND started_at >= now() - INTERVAL '{WINDOW_DAYS} days'
+  WHERE patient_id = '{patient_id}' AND exercise_id = 'squat'
+    AND (started_at AT TIME ZONE 'America/Chicago')::date BETWEEN {TODAY} - {WINDOW_DAYS} AND {TODAY} - 1
   GROUP BY 1),
 t AS (SELECT day, pain_post, coalesce(day - lag(day) OVER (ORDER BY day) = 1, false) AS after_training_day FROM d)
 SELECT after_training_day, count(*) AS days, round(avg(pain_post), 1) AS avg_pain_post
@@ -87,7 +90,7 @@ def load_week_sql(where: str) -> str:
     return f"""
 SELECT p.name, p.affected_side, count(*) AS days, round(avg(v.affected_load_pct)::numeric, 1) AS affected_load_pct
 FROM progress_v v JOIN patients p ON p.id = v.patient_id
-WHERE {where} AND v.exercise_id = 'squat' AND v.day >= {TODAY} - 6
+WHERE {where} AND v.exercise_id = 'squat' AND v.day >= {TODAY} - 6 AND v.day < {TODAY}
 GROUP BY p.name, p.affected_side"""
 
 
@@ -193,8 +196,8 @@ def _compensation(ctx: Ctx) -> Reply:
     answer = (f"{_count_word(len(ranking))} patient{'s are' if len(ranking) != 1 else ' is'} compensating over the "
               f"last {WINDOW_DAYS} days (depth improving while load on the affected leg drops), most first:\n"
               + "\n".join(lines))
-    evidence = [f"progress_v (squat, last {WINDOW_DAYS} days): mean of the first vs last 3 session days of p95_knee "
-                "and affected_load_pct"]
+    evidence = [f"progress_v (squat, last {WINDOW_DAYS} completed days): mean of the first vs last 3 session days of "
+                "p95_knee and affected_load_pct"]
     if True in pain and False in pain:
         answer += (f"\n{top['name']}'s pain after back-to-back training days averaged "
                    f"{_num(pain[True]['avg_pain_post'])}/10, versus {_num(pain[False]['avg_pain_post'])}/10 otherwise.")
@@ -283,7 +286,7 @@ def _load(ctx: Ctx) -> Reply:
     r = rows[0]
     return _final(f"{r['name']}'s average load on the affected ({r['affected_side']}) leg this week is "
                   f"{_num(r['affected_load_pct'])}% of body weight, over {r['days']} squat days.",
-                  ["progress_v.affected_load_pct (squat), last 7 local days"])
+                  ["progress_v.affected_load_pct (squat), last 7 local days, today's partial day not counted"])
 
 
 def _weekly_review(ctx: Ctx) -> Reply:

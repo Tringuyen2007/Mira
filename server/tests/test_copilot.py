@@ -534,3 +534,26 @@ def test_database_failure_mid_approval_rolls_everything_back(client: TestClient,
     assert _versions(url) == before
     r = client.post(f"/proposals/{pid}/approve", json={"therapist_id": "okafor"}, headers=AUTH)
     assert r.status_code == 200 and r.json()["prescription"]["sets"] == 2
+
+
+async def test_a_live_session_today_does_not_reorder_the_ranking(db: Database,
+                                                                sim: tuple[str, dict[str, Any]]) -> None:
+    """Trends use completed days: today's partial progress_v row (a live mock session) is left out."""
+    url, expected = sim
+    with psycopg.connect(url, autocommit=True) as conn:  # Maya, today: shallow and leaning on the affected leg
+        conn.execute("INSERT INTO pose_frames (time, patient_id, session_id, exercise_id, knee_l, knee_r, "
+                     "load_l_pct, confidence) SELECT now() - i * INTERVAL '10 ms', 'maya', "
+                     "'00000000-0000-0000-0000-00000000f4f4', 'squat', 20, 20, 15, 0.95 "
+                     "FROM generate_series(1, 300) AS i")
+    try:
+        today = await db.fetch("SELECT 1 FROM progress_v WHERE patient_id = 'maya' "
+                               "AND day >= (now() AT TIME ZONE 'America/Chicago')::date")
+        assert today, "the real-time aggregate should show today's partial day"
+        out = await Copilot(db).ask(DEMO_QUESTION, use_cache=False)
+    finally:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("DELETE FROM pose_frames WHERE session_id = '00000000-0000-0000-0000-00000000f4f4'")
+    ranking = expected["compensating_ranking"]["ranking"]
+    positions = [out["answer"].index(r["name"]) for r in ranking]
+    assert positions == sorted(positions) and out["answer"].index("Maya") == positions[0]
+    assert _mentions(out["answer"], ranking[0]["affected_load_to"])

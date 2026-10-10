@@ -32,7 +32,8 @@ read-only. If asked to delete or change records, say you can't (read-only) and o
   smoothness, quality (1 good, 0.5 fix form, 0 poor), flags (text[] of form rules, e.g. 'trunk_lean').
 - form_events: time, patient_id, session_id, rep, rule_id, severity, duration_s.
 - memory_events: notes from the Insight agent: patient_id, time, kind, message, evidence, acknowledged.
-- patients: id, name, age, affected_side ('left'|'right'|'none'), condition, therapist_id, created_at.
+- patients: id, name, age, affected_side ('left'|'right'|'none'), condition, therapist_id, created_at. Name the
+  columns: `SELECT *` on patients and contact details are refused.
 - prescriptions: patient_id, exercise_id, version, sets, reps, targets (jsonb, e.g. {"knee_deg": 90,
   "sessions_per_week": 5}), limits, active (only the active version is the current plan).
 Nothing else is readable. Patients are identified by id ('maya', 'p02', …); match names with ILIKE.
@@ -40,6 +41,8 @@ Nothing else is readable. Patients are identified by id ('maya', 'p02', …); ma
 ## Domain hints
 - Compensation = squat depth (p95_knee) improving while load on the affected side (affected_load_pct) drops.
   Compare the mean of the first 3 vs the last 3 squat days in the window (default: the last 21 days).
+- Trends use completed days only: end every window yesterday (`day < today`), because today's progress_v row
+  is a partial day that changes while a session runs.
 - Missed days: patients train `sessions_per_week` days per week; in the last 14 days (yesterday back) that
   is 2 × sessions_per_week scheduled days. Count distinct local days with a session.
 - Fewer than 2 days of data for a patient is "not enough data" — say so instead of describing a trend.
@@ -55,7 +58,8 @@ WITH w AS (
          count(*) OVER (PARTITION BY v.patient_id) AS days
   FROM progress_v v JOIN patients p ON p.id = v.patient_id
   WHERE v.exercise_id = 'squat' AND v.affected_load_pct IS NOT NULL
-    AND v.day >= (now() AT TIME ZONE 'America/Chicago')::date - 21)
+    AND v.day >= (now() AT TIME ZONE 'America/Chicago')::date - 21
+    AND v.day < (now() AT TIME ZONE 'America/Chicago')::date)
 SELECT patient_id, name, max(days) AS days,
        round(avg(p95_knee) FILTER (WHERE first_n <= 3)::numeric, 1) AS depth_from,
        round(avg(p95_knee) FILTER (WHERE last_n <= 3)::numeric, 1) AS depth_to,
@@ -70,6 +74,7 @@ SELECT day::date AS day, round(p95_knee::numeric, 1) AS p95_knee,
        round(affected_load_pct::numeric, 1) AS affected_load_pct
 FROM progress_v WHERE patient_id = 'maya' AND exercise_id = 'squat'
   AND day >= (now() AT TIME ZONE 'America/Chicago')::date - 21
+  AND day < (now() AT TIME ZONE 'America/Chicago')::date
 ORDER BY day
 ```
 Load on the affected leg this week:
@@ -78,6 +83,7 @@ SELECT p.name, count(*) AS days, round(avg(v.affected_load_pct)::numeric, 1) AS 
 FROM progress_v v JOIN patients p ON p.id = v.patient_id
 WHERE p.name ILIKE 'maya%' AND v.exercise_id = 'squat'
   AND v.day >= (now() AT TIME ZONE 'America/Chicago')::date - 6
+  AND v.day < (now() AT TIME ZONE 'America/Chicago')::date
 GROUP BY p.name
 ```
 
