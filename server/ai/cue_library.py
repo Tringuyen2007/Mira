@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import random
+import re
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,10 @@ FIXED_CUES: dict[str, list[str]] = {
 
 DEFAULT_PATH = REPO_ROOT / "data" / "cues" / "cues.json"
 
+# Cue ids become MP3 file names served from /audio: plain names only, never a path.
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SAFE_FILE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}\.mp3$")
+
 
 def cues_path() -> Path:
     return Path(cfg.DATA_DIR) / "cues" / "cues.json"
@@ -83,7 +88,7 @@ def rule_cue_ids(rules_dir: Path | None = None) -> dict[str, str]:
             continue
         items = data.get("rules", [data]) if isinstance(data, dict) else data
         for item in items if isinstance(items, list) else []:
-            if isinstance(item, dict) and isinstance(item.get("id"), str):
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and _SAFE_NAME_RE.match(item["id"]):
                 desc = item.get("cue") or item.get("message") or item.get("description") or item["id"]
                 found[item["id"]] = str(desc)
     return found
@@ -111,6 +116,7 @@ class CueLibrary:
         except (OSError, ValueError):
             log.warning("cue library unreadable, using fixed lines only", extra={"path": str(source)})
             entries = {}
+        entries = _clean_entries(entries, source)
         for cue_id, lines in FIXED_CUES.items():
             entries.setdefault(cue_id, [{"text": t, "file": f"{cue_id}_{i + 1}.mp3"} for i, t in enumerate(lines)])
         return cls(entries, mp3_dir(), rng)
@@ -135,6 +141,23 @@ class CueLibrary:
                 "audio_url": f"/audio/{file}" if file and file in self._voiced else None}
 
 
+def _clean_entries(raw: Any, source: Path) -> dict[str, list[dict[str, str]]]:
+    """Keep well-formed variants only: a text, and a plain .mp3 file name (or none)."""
+    entries: dict[str, list[dict[str, str]]] = {}
+    if not isinstance(raw, dict):
+        log.warning("cue library is not an object, ignoring it", extra={"path": str(source)})
+        return entries
+    for cue_id, lines in raw.items():
+        if not isinstance(cue_id, str) or not _SAFE_NAME_RE.match(cue_id) or not isinstance(lines, list):
+            continue
+        kept = [{"text": e["text"], **({"file": e["file"]} if isinstance(e.get("file"), str)
+                                       and _SAFE_FILE_RE.match(e["file"]) else {})}
+                for e in lines if isinstance(e, dict) and isinstance(e.get("text"), str) and e["text"].strip()]
+        if kept:
+            entries[cue_id] = kept
+    return entries
+
+
 _library: CueLibrary | None = None
 
 
@@ -153,6 +176,21 @@ def reload() -> CueLibrary:
 
 def pick(cue_id: str) -> dict[str, Any] | None:
     return library().pick(cue_id)
+
+
+def enrich_cue_event(msg: dict[str, Any]) -> None:
+    """Bridge event enricher: give every `cue {id}` event its caption `text` and `audio_url` (TRI §6.5).
+
+    The library variant wins; an id the library does not know keeps what the engine sent.
+    """
+    if msg.get("type") != "cue":
+        return
+    cue_id = msg.get("id")
+    picked = pick(cue_id) if isinstance(cue_id, str) else None
+    if picked is not None:
+        msg["text"], msg["audio_url"] = picked["text"], picked["audio_url"]
+    msg.setdefault("text", None)
+    msg.setdefault("audio_url", None)
 
 
 class _Variants(RootModel[dict[str, list[str]]]):
@@ -204,6 +242,8 @@ async def generate_audio() -> dict[str, int]:
     done = failed = chars = 0
     for lines in lib.entries.values():
         for entry in lines:
+            if "file" not in entry:
+                continue
             dest = mp3_dir() / entry["file"]
             if dest.is_file():
                 continue
@@ -219,7 +259,7 @@ async def generate_audio() -> dict[str, int]:
 def missing_audio_chars() -> int:
     lib = CueLibrary.load()
     return sum(len(e["text"]) for lines in lib.entries.values() for e in lines
-               if not (mp3_dir() / e["file"]).is_file())
+               if "file" in e and not (mp3_dir() / e["file"]).is_file())
 
 
 def _write_json(path: Path, data: Any) -> None:

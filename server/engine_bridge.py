@@ -34,6 +34,7 @@ Message = dict[str, Any]
 Emit = Callable[[Message], None]
 FrameCallback = Callable[[Message], None]
 EventCallback = Callable[[Message], Awaitable[None]]
+EventEnricher = Callable[[Message], None]
 
 FRAME_HZ = 30.0
 LIVE_HZ = 10.0
@@ -44,6 +45,7 @@ LAG_WINDOW = 600  # samples: 60 s at one sample per 0.1 s
 LAG_WARN_P95_MS = 50.0
 FALL_STATUS_EVERY_S = 2.0
 MOCK_FALL_AT_S = 20.0
+MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
 JOIN_TIMEOUT_S = 2.0
 
 # Reverse-channel message types understood by the mock source (beyond incident_closed).
@@ -346,8 +348,14 @@ class MockSource:
         self._t0 = time.time()
         next_tick = time.monotonic()
         prev_program_s = -1e-9
+        arrived = False
         while not stop.is_set():
             self._drain(inbox)
+            # The mock patient steps in front of the device once per run, a few seconds after start (so clients
+            # that connect at boot see the greeting); the squat program starts on arrival.
+            if not arrived and self._sim_s >= MOCK_ARRIVE_AT_S:
+                arrived = True
+                self._emit(emit, {"type": "arrived", "patient_id": cfg.MOCK_PATIENT_ID})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
                 self._auto_fall_done = True
                 self._start_fall(self.responds_at_s)
@@ -358,8 +366,9 @@ class MockSource:
             else:
                 pose = _program_pose(self._program_s)
                 body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
-                events = self._events_between(prev_program_s, self._program_s)
-                prev_program_s = self._program_s
+                events = list(self._events_between(prev_program_s, self._program_s)) if arrived else []
+                if arrived:
+                    prev_program_s = self._program_s
             self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
             for ev in events:
                 self._emit(emit, ev)
@@ -367,7 +376,7 @@ class MockSource:
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
             self._sim_s += dt
-            if self._fall is None:
+            if self._fall is None and arrived:
                 self._program_s += dt
             next_tick += dt / self.speed
             delay = next_tick - time.monotonic()
@@ -666,6 +675,7 @@ class EngineBridge:
 
         self._frame_subs: list[FrameCallback] = []
         self._event_subs: list[_EventSubscriber] = []
+        self._enrichers: list[EventEnricher] = []
         self._tasks: list[asyncio.Task[None]] = []
         self._running = False
         self._stop: Any = None
@@ -780,6 +790,11 @@ class EngineBridge:
         if self._running:
             self._start_subscriber(sub)
 
+    def add_event_enricher(self, fn: EventEnricher) -> None:
+        """`fn(event)` may add fields to every event before the hub and subscribers see it. Runs on the loop
+        for each event, so it must be fast and must not block (in-memory lookups only)."""
+        self._enrichers.append(fn)
+
     def inject(self, msg: Message) -> None:
         """Route a non-engine message (WS client, demo tools) like an engine event. Call on the loop."""
         msg = dict(msg)
@@ -857,6 +872,11 @@ class EngineBridge:
                     self._subscriber_failed("frame subscriber failed")
             return
         self._events_total += 1
+        for fn in self._enrichers:
+            try:
+                fn(msg)
+            except Exception:  # noqa: BLE001 - an enricher bug must not stop the stream
+                self._subscriber_failed("event enricher failed")
         self.live.on_event(msg)
         self.hub.publish("events", msg)
         for sub in self._event_subs:

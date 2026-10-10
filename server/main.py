@@ -15,7 +15,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from server.ai import gemini
+from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import demo, health
 from server.config import REPO_ROOT, cfg
@@ -62,6 +62,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if state.db is not None:
         await gemini.seed_budget(state.db)
 
+    await asyncio.to_thread(cue_library.reload)  # load cues.json off the loop; picks are in memory after
+    bridge.add_event_enricher(cue_library.enrich_cue_event)
     voice = SessionVoice(hub, sessions, live=bridge.live)
     bridge.subscribe_events(voice.on_event)
 

@@ -215,3 +215,38 @@ async def test_process_mode(run_bridge: Callable[..., Any]) -> None:
     await asyncio.sleep(0.5)
     assert len(got.of_type("fall_status")) == count
     assert bridge.stats()["mode"] == "process"
+
+
+async def test_mock_emits_arrived_once_before_the_program(run_bridge: Callable[..., Any]) -> None:
+    _, got = await run_bridge(source="mock", speed=15)
+    await wait_until(lambda: len(got.of_type("countdown")) >= 1)
+    arrived = got.of_type("arrived")
+    program = [e["type"] for e in got.events if e["type"] != "hr"]
+    assert len(arrived) == 1 and program[0] == "arrived", "the squat program starts after the patient arrives"
+    assert arrived[0]["session_id"] == SESSION and arrived[0]["patient_id"] == "maya"
+
+
+async def test_event_enricher_runs_before_hub_and_subscribers(run_bridge: Callable[..., Any]) -> None:
+    published: list[dict[str, Any]] = []
+    bridge = EngineBridge(Hub(), asyncio.get_running_loop(), source="mock", session_provider=lambda: SESSION)
+    bridge.hub.publish = lambda channel, msg: published.append(dict(msg)) if channel == "events" else None
+    got = Collector(bridge)
+
+    def broken(msg: dict[str, Any]) -> None:
+        raise RuntimeError("enricher bug")
+
+    def add_text(msg: dict[str, Any]) -> None:
+        if msg["type"] == "cue":
+            msg["text"] = "enriched"
+
+    bridge.add_event_enricher(broken)
+    bridge.add_event_enricher(add_text)
+    await bridge.start()
+    try:
+        bridge.inject({"type": "cue", "id": "knees_out"})
+        await wait_until(lambda: bool(got.of_type("cue")))
+    finally:
+        await bridge.stop()
+    assert [m["text"] for m in published if m["type"] == "cue"] == ["enriched"]
+    assert got.of_type("cue")[0]["text"] == "enriched"
+    assert bridge.stats()["subscriber_errors"] >= 1

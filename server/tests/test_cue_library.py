@@ -113,3 +113,31 @@ async def test_generate_audio_only_missing(monkeypatch: pytest.MonkeyPatch) -> N
                      "Thanks for letting me know you're okay."]
     assert result == {"generated": 3, "failed": 0, "chars": sum(map(len, calls))}
     assert cue_library.pick("c") is not None and cue_library.pick("c")["audio_url"]  # type: ignore[index]
+
+
+def test_enrich_cue_event_adds_text_and_audio(tmp_path: Path) -> None:
+    cue_library.reload()
+    msg: dict[str, Any] = {"type": "cue", "id": "knees_out", "text": "engine text", "audio_url": "/audio/x.mp3"}
+    cue_library.enrich_cue_event(msg)
+    lines = [e["text"] for e in cue_library.library().entries["knees_out"]]
+    assert msg["text"] in lines and msg["audio_url"] is None  # no MP3 generated in tests
+    unknown: dict[str, Any] = {"type": "cue", "id": "not_a_cue"}
+    cue_library.enrich_cue_event(unknown)
+    assert unknown == {"type": "cue", "id": "not_a_cue", "text": None, "audio_url": None}
+    other: dict[str, Any] = {"type": "rep"}
+    cue_library.enrich_cue_event(other)
+    assert other == {"type": "rep"}
+
+
+def test_unsafe_cue_ids_and_files_are_ignored(tmp_path: Path) -> None:
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "r.json").write_text(json.dumps({"rules": [{"id": "../../evil"}, {"id": "ok_rule"}]}))
+    assert set(cue_library.rule_cue_ids(rules)) == {"ok_rule"}
+    lib_file = tmp_path / "cues.json"
+    lib_file.write_text(json.dumps({"good": [{"text": "Hi", "file": "../../x.mp3"}, {"text": "Yo", "file": "good_2.mp3"},
+                                             {"nope": 1}],
+                                    "../bad": [{"text": "x", "file": "bad_1.mp3"}]}))
+    lib = cue_library.CueLibrary.load(lib_file)
+    assert "../bad" not in lib.entries
+    assert lib.entries["good"] == [{"text": "Hi"}, {"text": "Yo", "file": "good_2.mp3"}]
