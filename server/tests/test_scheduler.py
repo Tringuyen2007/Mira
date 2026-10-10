@@ -1,0 +1,282 @@
+"""Scheduler: runs on its timers, survives exceptions, cancels cleanly, notifies Data Guard failures, and keeps
+event-loop lag low while Data Guard + Insight run against a real local database. Also GET /health/data and
+POST /insight/run."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+import time
+import types
+from collections.abc import Callable, Iterator
+from typing import Any
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from server.agents.scheduler import Scheduler
+from server.db import writes
+from server.db.pool import Database
+from server.engine_bridge import LagMonitor
+from server.sim.simulate_history import simulate
+from server.tests.conftest import AUTH
+from server.tests.dbutil import fresh_database, prepare, ro_dsn
+
+FAST = {"guard_delay_s": 0, "guard_interval_s": 0.05, "insight_delay_s": 0, "insight_interval_s": 0.05}
+
+
+class FakeDB:
+    def __init__(self, available: bool = True) -> None:
+        self.available = available
+
+    async def fetch(self, sql: str, params: Any = None, **_: Any) -> list[dict[str, Any]]:
+        assert sql.startswith("SELECT id FROM therapists")
+        return [{"id": "okafor"}]
+
+
+class FakeGuard:
+    def __init__(self, results: list[dict[str, Any]] | None = None, fail_first: int = 0, hang: bool = False) -> None:
+        self.calls = 0
+        self.fail_first = fail_first
+        self.hang = hang
+        self.results = results or [{"check_name": "raw_vs_summary", "status": "ok", "details": {}}]
+
+    async def run_all(self) -> list[dict[str, Any]]:
+        self.calls += 1
+        if self.hang:
+            await asyncio.sleep(3600)
+        if self.calls <= self.fail_first:
+            raise RuntimeError("boom")
+        return self.results
+
+
+@pytest.fixture
+def notified(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    async def create(**kwargs: Any) -> int:
+        calls.append(kwargs)
+        return len(calls)
+
+    module = types.ModuleType("server.notify.notifications")
+    module.create = create  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "server.notify.notifications", module)
+    import server.notify
+
+    monkeypatch.setattr(server.notify, "notifications", module, raising=False)
+    return calls
+
+
+def _counter() -> tuple[list[int], Callable[[], Any]]:
+    calls: list[int] = []
+
+    async def job() -> dict[str, Any]:
+        calls.append(1)
+        return {"written": 0}
+
+    return calls, job
+
+
+async def test_jobs_run_on_their_timers_and_stop() -> None:
+    guard = FakeGuard()
+    insight_calls, insight = _counter()
+    sched = Scheduler(FakeDB(), guard=guard, insight=insight, guard_enabled=True, insight_enabled=True, **FAST)
+    sched.start()
+    await asyncio.sleep(0.3)
+    await sched.stop()
+    assert guard.calls >= 3 and len(insight_calls) >= 3
+    stats = sched.stats()
+    assert stats["data_guard"]["runs"] == guard.calls and stats["data_guard"]["failures"] == 0
+    assert stats["data_guard"]["last_result"] == {"raw_vs_summary": "ok"}
+    assert stats["insight"]["last_result"] == {"written": 0}
+    calls_after_stop = guard.calls
+    await asyncio.sleep(0.15)
+    assert guard.calls == calls_after_stop
+
+
+async def test_first_run_waits_for_the_delay() -> None:
+    guard = FakeGuard()
+    sched = Scheduler(FakeDB(), guard=guard, insight=_counter()[1], guard_enabled=True, insight_enabled=False,
+                      guard_delay_s=0.3, guard_interval_s=10)
+    sched.start()
+    await asyncio.sleep(0.1)
+    assert guard.calls == 0 and sched.stats()["data_guard"]["next_run_at"] > time.time()
+    await asyncio.sleep(0.35)
+    assert guard.calls == 1
+    await sched.stop()
+
+
+async def test_disabled_jobs_never_run() -> None:
+    guard = FakeGuard()
+    insight_calls, insight = _counter()
+    sched = Scheduler(FakeDB(), guard=guard, insight=insight, guard_enabled=False, insight_enabled=False, **FAST)
+    sched.start()
+    await asyncio.sleep(0.15)
+    await sched.stop()
+    assert guard.calls == 0 and insight_calls == []
+    assert await sched.run_insight_now() == {"skipped": "INSIGHT_ENABLED is off"}
+
+
+async def test_loop_survives_exceptions() -> None:
+    guard = FakeGuard(fail_first=2)
+    sched = Scheduler(FakeDB(), guard=guard, insight=_counter()[1], guard_enabled=True, insight_enabled=False, **FAST)
+    sched.start()
+    await asyncio.sleep(0.3)
+    await sched.stop()
+    stats = sched.stats()["data_guard"]
+    assert stats["failures"] == 2 and stats["runs"] >= 1 and stats["last_error"] is None
+
+
+async def test_stop_cancels_a_run_in_progress() -> None:
+    guard = FakeGuard(hang=True)
+    sched = Scheduler(FakeDB(), guard=guard, insight=_counter()[1], guard_enabled=True, insight_enabled=False, **FAST)
+    sched.start()
+    await asyncio.sleep(0.05)
+    assert sched.stats()["data_guard"]["running"]
+    started = time.perf_counter()
+    await sched.stop()
+    assert time.perf_counter() - started < 0.5
+    assert not sched._tasks and not sched.stats()["data_guard"]["running"]
+    await sched.stop()  # idempotent
+
+
+async def test_data_guard_skipped_while_database_unavailable() -> None:
+    guard = FakeGuard()
+    sched = Scheduler(FakeDB(available=False), guard=guard, guard_enabled=True, insight_enabled=False)
+    assert await sched.run_data_guard() is None
+    assert guard.calls == 0 and sched.jobs["data_guard"].skipped == 1
+
+
+async def test_data_guard_failures_become_normal_notifications(notified: list[dict[str, Any]]) -> None:
+    guard = FakeGuard(results=[
+        {"check_name": "refresh_ran", "status": "ok", "details": {}},
+        {"check_name": "raw_vs_summary", "status": "fail", "details": {"mismatches": 1}},
+        {"check_name": "frozen_unchanged", "status": "error", "details": {"error": "timeout"}},
+    ])
+    sched = Scheduler(FakeDB(), guard=guard, guard_enabled=True, insight_enabled=False)
+    await sched.run_data_guard()
+    assert [(n["kind"], n["severity"], n["source_id"]) for n in notified] == [
+        ("data_guard", "normal", "raw_vs_summary"), ("data_guard", "normal", "frozen_unchanged")]
+    first = notified[0]
+    assert first["therapist_id"] == "okafor" and first["patient_id"] is None
+    assert first["title"] == "Data Guard: raw_vs_summary fail" and '"mismatches": 1' in first["body"]
+    assert first["dedupe_key"].startswith("data_guard:raw_vs_summary:") and first["dedupe_key"].endswith(":okafor")
+
+
+async def test_on_demand_insight_waits_for_a_scheduled_run() -> None:
+    order: list[str] = []
+    gate = asyncio.Event()
+
+    async def insight() -> dict[str, Any]:
+        order.append("start")
+        await gate.wait()
+        order.append("end")
+        return {"written": 1}
+
+    sched = Scheduler(FakeDB(), guard=FakeGuard(), insight=insight, guard_enabled=False, insight_enabled=True,
+                      insight_delay_s=0, insight_interval_s=60)
+    sched.start()
+    await asyncio.sleep(0.02)
+    on_demand = asyncio.create_task(sched.run_insight_now())
+    await asyncio.sleep(0.02)
+    assert order == ["start"]  # the on-demand pass waits for the scheduled one
+    gate.set()
+    assert await on_demand == {"written": 1}
+    assert order == ["start", "end", "start", "end"]
+    await sched.stop()
+
+
+# ---- real database: Data Guard + Insight on the loop, lag measured ---------------------------------------------
+
+@pytest.fixture(scope="module")
+def sim_dsn() -> Iterator[str]:
+    with fresh_database() as url:
+        prepare(url)
+        simulate(url, seed=42, days=21, patients=5)
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("CALL refresh_continuous_aggregate('daily_progress', NULL, NULL)")
+        yield url
+
+
+async def test_event_loop_lag_while_guard_and_insight_run(sim_dsn: str, notified: list[dict[str, Any]]) -> None:
+    db = Database(sim_dsn, ro_dsn(sim_dsn))
+    await db.open()
+    monitor = LagMonitor(interval_s=0.02, window=10_000)
+    lag_task = asyncio.create_task(monitor.run())
+    sched = Scheduler(db, guard_enabled=True, insight_enabled=True, guard_delay_s=0, guard_interval_s=0.2,
+                      insight_delay_s=0, insight_interval_s=0.2)
+    try:
+        sched.start()
+        await asyncio.sleep(3.0)  # back-to-back runs every 0.2 s while the monitor samples every 20 ms
+        on_demand = await sched.run_insight_now()
+    finally:
+        await sched.stop()
+        lag_task.cancel()
+        await asyncio.gather(lag_task, return_exceptions=True)
+    stats = sched.stats()
+    lag = monitor.stats()
+    print(f"\nevent loop lag ms: {lag}; data_guard runs {stats['data_guard']['runs']} "
+          f"(last {stats['data_guard']['last_duration_ms']} ms), insight runs {stats['insight']['runs']} "
+          f"(last {stats['insight']['last_duration_ms']} ms)")
+    try:
+        assert stats["data_guard"]["runs"] >= 3 and stats["insight"]["runs"] >= 3
+        assert stats["data_guard"]["failures"] == 0 and stats["insight"]["failures"] == 0
+        assert lag["samples"] >= 50 and lag["p95"] is not None and lag["p95"] < 50
+        assert on_demand is not None and on_demand["new"] == 0  # everything was written by the first pass
+        rows = await db.fetch("SELECT kind, evidence->>'note_source' AS source FROM memory_events "
+                              "WHERE patient_id = 'maya'")
+        assert {"compensation", "depth_gain"} <= {r["kind"] for r in rows}
+        assert {r["source"] for r in rows} == {"ai"}
+        checks = {r["check_name"]: r["status"] for r in await db.fetch(
+            "SELECT DISTINCT ON (check_name) check_name, status FROM data_checks ORDER BY check_name, time DESC")}
+        assert checks["raw_vs_summary"] == "ok" and checks["missing_summaries"] == "ok"
+        assert any(n["kind"] == "insight" and n["patient_id"] == "maya" for n in notified)
+    finally:
+        await db.close()
+
+
+# ---- HTTP: /health/data and /insight/run ----------------------------------------------------------------------
+
+def test_health_data_without_database(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    body = client.get("/health/data", headers=AUTH).json()
+    assert body["status"] == "unavailable" and body["checks"] == [] and "no database" in body["reason"]
+    assert client.get("/health/data").status_code == 401
+    assert client.post("/insight/run", headers=AUTH).status_code == 503
+
+
+@pytest.fixture(scope="module")
+def api_dsn() -> Iterator[str]:
+    with fresh_database() as url:
+        prepare(url)
+        yield url
+
+
+def test_health_data_reports_latest_check_per_name(make_client: Callable[..., TestClient], api_dsn: str) -> None:
+    client = make_client(TIGER_DSN=api_dsn, COPILOT_DSN=ro_dsn(api_dsn), INSIGHT_ENABLED="1")
+    body = client.get("/health/data", headers=AUTH).json()
+    assert body["status"] == "unavailable" and body["reason"] == "the Data Guard has not run yet"
+    assert body["scheduler"]["enabled"] is False  # DATA_GUARD_ENABLED=0 in the test baseline
+
+    async def insert(rows: list[tuple[str, str, dict[str, Any], float]]) -> None:
+        db = Database(api_dsn)
+        await db.open()
+        for name, status, details, ago in rows:
+            await writes.insert_data_check(db, name, status, details, time=time.time() - ago)
+        await db.close()
+
+    asyncio.run(insert([("raw_vs_summary", "fail", {"mismatches": 2}, 900),
+                        ("raw_vs_summary", "ok", {"mismatches": 0}, 10),
+                        ("refresh_ran", "ok", {}, 10)]))
+    body = client.get("/health/data", headers=AUTH).json()
+    assert body["status"] == "ok"
+    assert {c["check_name"]: c["status"] for c in body["checks"]} == {"raw_vs_summary": "ok", "refresh_ran": "ok"}
+    assert body["checks"][0]["details"] == {"mismatches": 0} and body["last_run"]
+
+    asyncio.run(insert([("frozen_unchanged", "fail", {"changed_or_missing": 1}, 0)]))
+    assert client.get("/health/data", headers=AUTH).json()["status"] == "failing"
+
+    run = client.post("/insight/run", headers=AUTH)
+    assert run.status_code == 200 and run.json()["errors"] == [] and run.json()["candidates"] == 0
+    assert client.get("/stats", headers=AUTH).json()["scheduler"]["insight"]["runs"] == 1

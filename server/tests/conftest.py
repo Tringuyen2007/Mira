@@ -35,6 +35,9 @@ BASELINE_ENV = {
     "RETELL_AGENT_ID": "",
     "RETELL_AGENT_VERSION": "",
     "CALLS_DISABLED": "1",
+    # background jobs only run in the tests that turn them on
+    "INSIGHT_ENABLED": "0",
+    "DATA_GUARD_ENABLED": "0",
 }
 
 

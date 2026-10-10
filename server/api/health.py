@@ -9,6 +9,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
+from server.db import queries
+from server.db.pool import DBError
 from server.logging_setup import get_logger
 from server.security import require_token
 from server.state import get_state
@@ -42,6 +44,26 @@ async def stats() -> dict[str, Any]:
     return out
 
 
+FAILING_STATUSES = ("fail", "error")
+
+
 @router.get("/health/data", dependencies=[Depends(require_token)])
 async def health_data() -> dict[str, Any]:
-    return {"status": "unavailable", "checks": []}
+    """Latest Data Guard result per check (from data_checks) and an overall ok | failing | unavailable."""
+    state = get_state()
+    out: dict[str, Any] = {"status": "unavailable", "checks": [], "last_run": None}
+    if state.scheduler is not None:
+        out["scheduler"] = state.scheduler.stats().get("data_guard")
+    if state.db is None:
+        return {**out, "reason": "no database (TIGER_DSN unset or DB_DISABLED=1)"}
+    try:
+        rows = await queries.latest_data_checks(state.db)
+    except DBError as exc:
+        return {**out, "reason": str(exc)}
+    if not rows:
+        return {**out, "reason": "the Data Guard has not run yet"}
+    checks = [{"check_name": r["check_name"], "status": r["status"], "details": r["details"],
+               "time": r["time"].isoformat()} for r in rows]
+    failing = any(c["status"] in FAILING_STATUSES for c in checks)
+    return {**out, "status": "failing" if failing else "ok", "checks": checks,
+            "last_run": max(r["time"] for r in rows).isoformat()}

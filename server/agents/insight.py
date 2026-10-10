@@ -182,7 +182,8 @@ EXISTING_KEYS_SQL = "SELECT dedupe_key FROM memory_events WHERE dedupe_key = ANY
 
 FIXED_QUERIES: dict[str, str] = {
     "progress": f"""
-        SELECT to_char(day AT TIME ZONE '{TZ}', 'YYYY-MM-DD') AS day, exercise_id, round(p95_knee::numeric, 1) AS p95_knee,
+        SELECT to_char(day AT TIME ZONE '{TZ}', 'YYYY-MM-DD') AS day, exercise_id,
+               round(p95_knee::numeric, 1) AS p95_knee,
                round(affected_load_pct::numeric, 1) AS affected_load_pct,
                round(avg_asymmetry::numeric, 1) AS avg_asymmetry, round(avg_trunk_lean::numeric, 1) AS avg_trunk_lean
         FROM progress_v WHERE patient_id = %(pid)s AND day >= now() - make_interval(days => %(days)s)

@@ -16,9 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from server.agents.safety_guardian import SafetyGuardian
+from server.agents.scheduler import Scheduler
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, patients, prescriptions
+from server.api import insight as insight_api
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
@@ -95,6 +97,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     set_state(state)
     if state.db is not None:
         await gemini.seed_budget(state.db)
+    scheduler: Scheduler | None = None
+    if db is not None:
+        scheduler = Scheduler(db)
+        scheduler.start()
+        state.scheduler = scheduler
+        state.stat_providers["scheduler"] = scheduler.stats
 
     await asyncio.to_thread(cue_library.reload)  # load cues.json off the loop; picks are in memory after
     bridge.add_event_enricher(cue_library.enrich_cue_event)
@@ -107,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if scheduler is not None:
+            await scheduler.stop()
         await notifier.stop()
         await guardian.stop()
         await bridge.stop()
@@ -171,7 +181,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(demo.router)
-    for module in (sessions_api, patients, prescriptions, calibration, alerts):
+    for module in (sessions_api, patients, prescriptions, calibration, alerts, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
 
