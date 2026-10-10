@@ -18,6 +18,18 @@ BONES = [
 ]
 
 
+# person's-left landmark -> matching right landmark
+LR_PAIRS = {1: 4, 2: 5, 3: 6, 7: 8, 9: 10, **{k: k + 1 for k in range(11, 32, 2)}}
+
+
+def swap_left_right(arr: np.ndarray) -> np.ndarray:
+    """Exchange left/right landmark rows (undoes a MediaPipe left/right flip)."""
+    out = np.array(arr, copy=True)
+    for left, right in LR_PAIRS.items():
+        out[left], out[right] = arr[right], arr[left]
+    return out
+
+
 def to_json_array(a) -> list | None:
     """Array -> nested lists with NaN/inf as None (JSON has no NaN)."""
     if a is None:

@@ -5,7 +5,7 @@ import numpy as np
 
 from vision.config import CameraConfig
 from vision.frames import look_at_pose, project
-from vision.types import PoseResult
+from vision.types import LR_PAIRS, PoseResult, swap_left_right  # noqa: F401 (re-exported for tests)
 
 K_DEFAULT = np.array([[900.0, 0, 640], [0, 900, 360], [0, 0, 1]])
 
@@ -18,7 +18,6 @@ _LEFT = {
     23: (0.10, 0.95, 0.0), 25: (0.11, 0.52, 0.02), 27: (0.11, 0.09, 0.0),
     29: (0.11, 0.04, -0.05), 31: (0.12, 0.02, 0.15),
 }
-_MIRROR = {1: 4, 2: 5, 3: 6, 7: 8, 9: 10, **{k: k + 1 for k in range(11, 32, 2)}}
 
 
 def standing_skeleton() -> np.ndarray:
@@ -26,15 +25,8 @@ def standing_skeleton() -> np.ndarray:
     X[0] = (0.0, 1.60, 0.10)
     for left, p in _LEFT.items():
         X[left] = p
-        X[_MIRROR[left]] = (-p[0], p[1], p[2])
+        X[LR_PAIRS[left]] = (-p[0], p[1], p[2])
     return X
-
-
-def swap_left_right(arr: np.ndarray) -> np.ndarray:
-    out = np.array(arr, copy=True)
-    for left, right in _MIRROR.items():
-        out[left], out[right] = arr[right], arr[left]
-    return out
 
 
 def make_cam(name, eye, target=(0.0, 0.8, 0.0), dist=None, K=None) -> CameraConfig:
