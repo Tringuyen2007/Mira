@@ -459,3 +459,78 @@ def test_proposals_without_database(make_client: Callable[..., TestClient]) -> N
     client = make_client()
     assert client.get("/proposals", headers=AUTH).status_code == 503
     assert client.post("/proposals/1/approve", json={"therapist_id": "okafor"}, headers=AUTH).status_code == 503
+
+
+# ---- atomic decisions (F4 review) ----------------------------------------------------------------------------
+
+def _versions(url: str) -> list[tuple[Any, ...]]:
+    return _sql(url, "SELECT version, active FROM prescriptions WHERE patient_id = 'maya' AND exercise_id = 'squat' "
+                     "ORDER BY version")
+
+
+def test_failed_approval_changes_nothing(client: TestClient, sim: tuple[str, dict[str, Any]]) -> None:
+    url, _ = sim
+    pid = _new_proposal(url, {"exercise_id": "lunge", "sets": 2})  # valid shape, but not an active exercise
+    before = _versions(url)
+    r = client.post(f"/proposals/{pid}/approve", json={"therapist_id": "okafor"}, headers=AUTH)
+    assert r.status_code == 409 and "not an active prescription" in r.json()["detail"]
+    assert _sql(url, "SELECT status, decided_by FROM plan_proposals WHERE id = %s", pid) == [("pending", None)]
+    assert _versions(url) == before
+    assert not _sql(url, "SELECT 1 FROM agent_actions WHERE (detail->>'proposal_id')::int = %s", pid)
+
+
+async def test_concurrent_approvals_make_exactly_one_version(db: Database, sim: tuple[str, dict[str, Any]]) -> None:
+    import asyncio
+
+    from server.db import writes
+
+    url, _ = sim
+    pid = _new_proposal(url, {"exercise_id": "squat", "reps": 9})
+    before = _versions(url)
+    results = await asyncio.gather(*(writes.decide_proposal_and_apply(
+        db, pid, "approved", "okafor", exercise_id="squat", reps=9) for _ in range(4)), return_exceptions=True)
+    wins = [r for r in results if isinstance(r, dict)]
+    assert len(wins) == 1 and all(isinstance(r, writes.ProposalConflict) for r in results if r not in wins)
+    after = _versions(url)
+    assert len(after) == len(before) + 1 and [a for _, a in after].count(True) == 1
+    assert wins[0]["prescription"]["created_by"] == f"proposal:{pid}" and wins[0]["prescription"]["reps"] == 9
+    assert len(_sql(url, "SELECT 1 FROM agent_actions WHERE action = 'proposal_approved' "
+                         "AND (detail->>'proposal_id')::int = %s", pid)) == 1
+
+
+def test_other_therapists_cannot_decide(client: TestClient, sim: tuple[str, dict[str, Any]]) -> None:
+    url, _ = sim
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("INSERT INTO therapists (id, name) VALUES ('other', 'Dr. Other') ON CONFLICT DO NOTHING")
+    pid = _new_proposal(url, {"exercise_id": "squat", "sets": 3})
+    r = client.post(f"/proposals/{pid}/dismiss", json={"therapist_id": "other"}, headers=AUTH)
+    assert r.status_code == 403
+    assert _sql(url, "SELECT status FROM plan_proposals WHERE id = %s", pid) == [("pending",)]
+
+
+def test_targets_cannot_hide_drill_lists() -> None:
+    with pytest.raises(ValueError):
+        PlanChange(exercise_id="squat", targets={"add": "weight"})
+
+
+def test_database_failure_mid_approval_rolls_everything_back(client: TestClient,
+                                                             sim: tuple[str, dict[str, Any]]) -> None:
+    url, _ = sim
+    pid = _new_proposal(url, {"exercise_id": "squat", "sets": 2})
+    before = _versions(url)
+    with psycopg.connect(url, autocommit=True) as conn:  # the LAST write of the transaction fails
+        conn.execute("CREATE FUNCTION fail_action() RETURNS trigger LANGUAGE plpgsql AS "
+                     "$$ BEGIN RAISE EXCEPTION 'boom'; END $$")
+        conn.execute("CREATE TRIGGER fail_action BEFORE INSERT ON agent_actions FOR EACH ROW "
+                     "EXECUTE FUNCTION fail_action()")
+    try:
+        r = client.post(f"/proposals/{pid}/approve", json={"therapist_id": "okafor"}, headers=AUTH)
+    finally:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("DROP TRIGGER fail_action ON agent_actions")
+            conn.execute("DROP FUNCTION fail_action()")
+    assert r.status_code == 503
+    assert _sql(url, "SELECT status, decided_by FROM plan_proposals WHERE id = %s", pid) == [("pending", None)]
+    assert _versions(url) == before
+    r = client.post(f"/proposals/{pid}/approve", json={"therapist_id": "okafor"}, headers=AUTH)
+    assert r.status_code == 200 and r.json()["prescription"]["sets"] == 2

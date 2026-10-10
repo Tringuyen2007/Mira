@@ -210,28 +210,94 @@ async def new_prescription_version(db: Database | None, patient_id: str, exercis
 
     async def run(d: Database) -> dict[str, Any] | None:
         async with d.connection() as conn, conn.transaction():
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"rx:{patient_id}:{exercise_id}",))
-            cur = await conn.execute(
-                "SELECT version, sets, reps, targets, limits, rule_overrides FROM prescriptions "
-                "WHERE patient_id = %s AND exercise_id = %s ORDER BY active DESC, version DESC LIMIT 1",
-                (patient_id, exercise_id))
-            prev = await cur.fetchone()
-            if prev is None and (sets is None or reps is None):
-                raise InvalidInput("sets and reps are required for a new exercise")
-            base = prev or {"version": 0, "targets": {}, "limits": {}, "rule_overrides": {}}
-            await conn.execute("UPDATE prescriptions SET active = false WHERE patient_id = %s AND exercise_id = %s "
-                               "AND active", (patient_id, exercise_id))
-            cur = await conn.execute(
-                "INSERT INTO prescriptions (patient_id, exercise_id, version, sets, reps, targets, limits, "
-                "rule_overrides, active, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, %s) RETURNING *",
-                (patient_id, exercise_id, base["version"] + 1,
-                 sets if sets is not None else base["sets"], reps if reps is not None else base["reps"],
-                 _jsonb(targets if targets is not None else base["targets"]),
-                 _jsonb(limits if limits is not None else base["limits"]),
-                 _jsonb(rule_overrides if rule_overrides is not None else base["rule_overrides"]), created_by))
-            return await cur.fetchone()
+            return await _insert_version(conn, patient_id, exercise_id, created_by=created_by, sets=sets, reps=reps,
+                                         targets=(lambda _: targets) if targets is not None else None,
+                                         limits=limits, rule_overrides=rule_overrides)
 
     return await _safe(db, "new_prescription_version", run, None, patient_id=patient_id)
+
+
+class ProposalConflict(InvalidInput):
+    """The proposal can't be decided: unknown (`status` None), no longer pending, or its exercise isn't active."""
+
+    def __init__(self, message: str, status: str | None = "pending") -> None:
+        super().__init__(message)
+        self.status = status
+
+
+async def _insert_version(conn: Any, patient_id: str, exercise_id: str, *, created_by: str, sets: int | None,
+                          reps: int | None, targets: Callable[[dict[str, Any]], dict[str, Any]] | None,
+                          limits: dict[str, Any] | None = None, rule_overrides: dict[str, Any] | None = None,
+                          require_active: bool = False) -> dict[str, Any]:
+    """Inside the caller's transaction: lock the plan, deactivate the active version, insert N+1. `targets` maps
+    the previous version's targets to the new ones (None = carry over)."""
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"rx:{patient_id}:{exercise_id}",))
+    cur = await conn.execute(
+        "SELECT version, sets, reps, targets, limits, rule_overrides, active FROM prescriptions "
+        "WHERE patient_id = %s AND exercise_id = %s ORDER BY active DESC, version DESC LIMIT 1",
+        (patient_id, exercise_id))
+    prev = await cur.fetchone()
+    if require_active and (prev is None or not prev["active"]):
+        raise ProposalConflict(f"{exercise_id!r} is not an active prescription")
+    if prev is None and (sets is None or reps is None):
+        raise InvalidInput("sets and reps are required for a new exercise")
+    base = prev or {"version": 0, "targets": {}, "limits": {}, "rule_overrides": {}}
+    await conn.execute("UPDATE prescriptions SET active = false WHERE patient_id = %s AND exercise_id = %s "
+                       "AND active", (patient_id, exercise_id))
+    cur = await conn.execute(
+        "INSERT INTO prescriptions (patient_id, exercise_id, version, sets, reps, targets, limits, "
+        "rule_overrides, active, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, %s) RETURNING *",
+        (patient_id, exercise_id, base["version"] + 1,
+         sets if sets is not None else base["sets"], reps if reps is not None else base["reps"],
+         _jsonb(targets(base["targets"] or {}) if targets is not None else base["targets"]),
+         _jsonb(limits if limits is not None else base["limits"]),
+         _jsonb(rule_overrides if rule_overrides is not None else base["rule_overrides"]), created_by))
+    return await cur.fetchone()
+
+
+async def decide_proposal_and_apply(db: Database | None, proposal_id: int, status: str, decided_by: str, *,
+                                    exercise_id: str | None = None, sets: int | None = None,
+                                    reps: int | None = None,
+                                    targets: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+                                    agent: str = "copilot", detail: dict[str, Any] | None = None
+                                    ) -> dict[str, Any] | None:
+    """The therapist's decision, all or nothing in ONE transaction: the pending proposal → approved | edited |
+    dismissed (decided_by, decided_at); for approved/edited the active version of `exercise_id` is deactivated
+    and version N+1 inserted (created_by 'proposal:<id>', targets = targets(active targets)); and an agent_actions
+    row 'proposal_<status>'. Returns {"proposal", "prescription"} (prescription None when dismissed).
+    Raises ProposalConflict (unknown / not pending / exercise not active); None on database failure."""
+    if status not in ("approved", "edited", "dismissed"):
+        raise ValueError(f"invalid proposal status {status!r}")
+    if status != "dismissed" and not exercise_id:
+        raise InvalidInput("exercise_id is required to approve or edit")
+
+    async def run(d: Database) -> dict[str, Any]:
+        async with d.connection() as conn, conn.transaction():
+            cur = await conn.execute("SELECT id, patient_id, status FROM plan_proposals WHERE id = %s FOR UPDATE",
+                                     (proposal_id,))
+            current = await cur.fetchone()
+            if current is None:
+                raise ProposalConflict("proposal not found", status=None)
+            if current["status"] != "pending":
+                raise ProposalConflict(f"proposal already {current['status']}", status=current["status"])
+            rx = None
+            if status != "dismissed":
+                assert exercise_id is not None
+                rx = await _insert_version(conn, current["patient_id"], exercise_id,
+                                           created_by=f"proposal:{proposal_id}", sets=sets, reps=reps,
+                                           targets=targets, require_active=True)
+            cur = await conn.execute("UPDATE plan_proposals SET status = %s, decided_by = %s, decided_at = now() "
+                                     "WHERE id = %s RETURNING *", (status, decided_by, proposal_id))
+            decided = await cur.fetchone()
+            action = {"proposal_id": proposal_id, "decided_by": decided_by, **(detail or {})}
+            if rx is not None:
+                action |= {"prescription_id": rx["id"], "version": rx["version"]}
+            await conn.execute("INSERT INTO agent_actions (time, agent, action, patient_id, detail) "
+                               "VALUES (now(), %s, %s, %s, %s)",
+                               (agent, f"proposal_{status}", current["patient_id"], _jsonb(action)))
+            return {"proposal": decided, "prescription": rx}
+
+    return await _safe(db, "decide_proposal_and_apply", run, None, proposal_id=proposal_id)
 
 
 # ---- Data Guard ------------------------------------------------------------------------------------------
