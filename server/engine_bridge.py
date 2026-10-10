@@ -51,6 +51,7 @@ JOIN_TIMEOUT_S = 2.0
 # Reverse-channel message types understood by the mock source (beyond incident_closed).
 TRIGGER_FALL = "trigger_fall"
 INCIDENT_CLOSED = "incident_closed"
+SESSION_START = "session_start"  # a new live session started (REST or boot); the mock restarts its program
 
 
 class Inbox(Protocol):
@@ -345,23 +346,26 @@ class MockSource:
         self._t0 = 0.0
         self._sim_s = 0.0
         self._program_s = 0.0
+        self._prev_program_s = -1e-9
         self._fall: FallScript | None = None
         self._fall_started_s = 0.0
         self._auto_fall_done = False
+        self._arrived = False
+        self._arrive_due_s = MOCK_ARRIVE_AT_S
+        self._patient_id = cfg.MOCK_PATIENT_ID
 
     def run(self, emit: Emit, inbox: Inbox, stop: StopFlag) -> None:
         dt = 1.0 / FRAME_HZ
         self._t0 = time.time()
         next_tick = time.monotonic()
-        prev_program_s = -1e-9
-        arrived = False
         while not stop.is_set():
             self._drain(inbox)
             # The mock patient steps in front of the device once per run, a few seconds after start (so clients
-            # that connect at boot see the greeting); the squat program starts on arrival.
-            if not arrived and self._sim_s >= MOCK_ARRIVE_AT_S:
-                arrived = True
-                self._emit(emit, {"type": "arrived", "patient_id": cfg.MOCK_PATIENT_ID})
+            # that connect at boot see the greeting); the squat program starts on arrival. A new live session
+            # (REST or boot) restarts this via `_restart_session`, so later sessions get their own arrival too.
+            if not self._arrived and self._sim_s >= self._arrive_due_s:
+                self._arrived = True
+                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
                 self._auto_fall_done = True
                 self._start_fall(self.responds_at_s)
@@ -372,9 +376,9 @@ class MockSource:
             else:
                 pose = _program_pose(self._program_s)
                 body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
-                events = list(self._events_between(prev_program_s, self._program_s)) if arrived else []
-                if arrived:
-                    prev_program_s = self._program_s
+                events = list(self._events_between(self._prev_program_s, self._program_s)) if self._arrived else []
+                if self._arrived:
+                    self._prev_program_s = self._program_s
             self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
             for ev in events:
                 self._emit(emit, ev)
@@ -382,7 +386,7 @@ class MockSource:
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
             self._sim_s += dt
-            if self._fall is None and arrived:
+            if self._fall is None and self._arrived:
                 self._program_s += dt
             next_tick += dt / self.speed
             delay = next_tick - time.monotonic()
@@ -403,6 +407,18 @@ class MockSource:
             elif kind == INCIDENT_CLOSED and self._fall is not None:
                 self._fall = None
                 self._program_s = math.ceil(self._program_s / _SET_S) * _SET_S  # resume at the next set
+            elif kind == SESSION_START:
+                self._restart_session(msg.get("patient_id"))
+
+    def _restart_session(self, patient_id: str | None) -> None:
+        """A new live session started: fresh rep/set counters and a fresh `arrived` MOCK_ARRIVE_AT_S seconds
+        from now, so `server.ai.session_voice` greets this session too. The ring buffer and any in-progress
+        fall script (mock:fall) are left alone."""
+        self._patient_id = patient_id or cfg.MOCK_PATIENT_ID
+        self._arrived = False
+        self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
+        self._program_s = 0.0
+        self._prev_program_s = -1e-9
 
     def _start_fall(self, responds_at_s: float | None) -> None:
         pose = _program_pose(self._program_s)
@@ -818,6 +834,13 @@ class EngineBridge:
                 self._fall_injector_closed.set()
         if self._inbox is not None and self._running:
             self._inbox.put_nowait(msg)
+
+    def notify_session_start(self, patient_id: str) -> None:
+        """A new live session started (SessionRegistry.on_start hook). In mock modes, restart the mock
+        program so it emits a fresh `arrived` (and the squat program) for this session too; live/replay
+        sources are unaffected."""
+        if self.source.startswith("mock"):
+            self.send_to_engine({"type": SESSION_START, "patient_id": patient_id})
 
     async def trigger_fall(self, responds_at_s: float | None) -> None:
         """Inject the scripted mock:fall sequence into the current session."""

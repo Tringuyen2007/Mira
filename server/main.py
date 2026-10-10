@@ -126,8 +126,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
 
+    # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
+    # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
+    sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id))
+    sessions.on_start.append(voice.prepare_greeting)
+
     if cfg.MIRA_SOURCE.startswith("mock"):
-        voice.prepare_greeting(await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID))
+        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID)
     await bridge.start()
     try:
         yield

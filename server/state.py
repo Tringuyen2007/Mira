@@ -115,6 +115,9 @@ class SessionRegistry:
         self.store = store
         self.current: LiveSession | None = None
         self._sessions: dict[str, LiveSession] = {}
+        # Called with the new LiveSession after every start() (boot or REST), e.g. to restart the mock
+        # engine's program and to warm up the greeting (server.ai.session_voice.SessionVoice.prepare_greeting).
+        self.on_start: list[Callable[[LiveSession], None]] = []
 
     async def start(self, patient_id: str, exercise_id: str) -> LiveSession:
         profile = await self._load_profile(patient_id)
@@ -128,6 +131,12 @@ class SessionRegistry:
         self._sessions[session.session_id] = session
         self.current = session
         await self._store_call("session_started", session)
+        for hook in self.on_start:
+            try:
+                hook(session)
+            except Exception as exc:  # noqa: BLE001 - a hook bug must not break session start
+                log.warning("session start hook failed", extra={"session_id": session.session_id,
+                                                                 "error": repr(exc)})
         log.info("session started", extra={"session_id": session.session_id, "patient_id": patient_id,
                                             "exercise_id": exercise_id})
         return session

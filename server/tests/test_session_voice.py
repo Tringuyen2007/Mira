@@ -18,7 +18,7 @@ from server.ai.validators import AI_DRAFT_LABEL
 from server.config import cfg, reload_config
 from server.state import LiveSession, SessionRegistry
 
-from .conftest import TOKEN
+from .conftest import AUTH, TOKEN
 
 
 class FakeHub:
@@ -315,3 +315,52 @@ def test_mock_run_emits_greeting_and_enriched_cue(make_client: Callable[..., Tes
 
 async def _inject_cue(state: Any) -> None:
     state.bridge.inject({"type": "cue", "id": "knees_out"})
+
+
+# ---- REST-started sessions in mock mode (the bug this file's tests were added to catch) -----------
+
+def test_rest_session_start_emits_arrived_and_greeting(make_client: Callable[..., TestClient]) -> None:
+    """POST /sessions in mock mode must restart the mock program for the new session, so it `arrived`s
+    and SessionVoice greets it — not just the session auto-started at boot."""
+    client = make_client()
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        resp = client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
+        assert resp.status_code == 200
+        new_sid = resp.json()["session_id"]
+
+        got: dict[str, dict[str, Any]] = {}
+        deadline = time.monotonic() + 10
+        while len(got) < 2 and time.monotonic() < deadline:
+            msg = ws.receive_json()
+            if msg["type"] in ("arrived", "greeting") and msg.get("session_id") == new_sid:
+                got[msg["type"]] = msg
+        assert got.keys() == {"arrived", "greeting"}
+        assert got["arrived"]["patient_id"] == "maya"
+        assert "Maya" in got["greeting"]["text"]
+
+
+def test_mock_fall_still_works_after_rest_session_start(make_client: Callable[..., TestClient]) -> None:
+    """mock:fall must still script a fall after a REST session start restarts the squat program. The
+    automatic fall is scheduled 20 simulated seconds in (too slow for a unit test), so trigger one instead
+    to confirm the fall script still works for the new, REST-started session."""
+    client = make_client(MIRA_SOURCE="mock:fall")
+    from server.state import get_state
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        resp = client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
+        assert resp.status_code == 200
+        new_sid = resp.json()["session_id"]
+
+        got_arrived = got_fall = False
+        deadline = time.monotonic() + 10
+        triggered = False
+        while not (got_arrived and got_fall) and time.monotonic() < deadline:
+            msg = ws.receive_json()
+            if msg["type"] == "arrived" and msg.get("session_id") == new_sid:
+                got_arrived = True
+                if not triggered:
+                    triggered = True
+                    client.portal.call(lambda: get_state().bridge.trigger_fall(None))  # type: ignore[union-attr]
+            elif msg["type"] == "fall" and msg.get("session_id") == new_sid:
+                got_fall = True
+        assert got_arrived and got_fall

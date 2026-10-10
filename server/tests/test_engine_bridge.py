@@ -227,6 +227,48 @@ async def test_mock_emits_arrived_once_before_the_program(run_bridge: Callable[.
     assert arrived[0]["session_id"] == SESSION and arrived[0]["patient_id"] == "maya"
 
 
+async def test_notify_session_start_restarts_mock_program(run_bridge: Callable[..., Any]) -> None:
+    bridge, got = await run_bridge(source="mock", speed=15)
+    await wait_until(lambda: len(got.of_type("arrived")) == 1)
+    assert got.of_type("arrived")[0]["patient_id"] == "maya"
+    reps_before = len(got.of_type("rep"))
+
+    bridge.notify_session_start("liam")
+    await wait_until(lambda: len(got.of_type("arrived")) == 2)
+    second = got.of_type("arrived")[1]
+    assert second["patient_id"] == "liam" and second["session_id"] == SESSION
+
+    # The squat program restarted from the top: a fresh countdown/rep sequence follows the new arrival.
+    arrived_seq = second["seq"]
+    await wait_until(lambda: any(e["seq"] > arrived_seq for e in got.of_type("rep")))
+    reps_after_restart = [e for e in got.of_type("rep") if e["seq"] > arrived_seq]
+    assert reps_after_restart[0]["index"] == 1 and reps_after_restart[0]["set"] == 1
+    assert len(got.of_type("rep")) >= reps_before  # the program kept running (no gap/crash)
+
+
+async def test_notify_session_start_noop_for_live_and_replay(run_bridge: Callable[..., Any],
+                                                              tmp_path: Path) -> None:
+    path = tmp_path / "rec.jsonl"
+    path.write_text(json.dumps({"type": "frame", "seq": 1, "t": 0.0, "joints": [], "confidence": [],
+                                "load_l_pct": 0.0, "flags": []}) + "\n", encoding="utf-8")
+    bridge, got = await run_bridge(source=f"replay:{path}", speed=10)
+    bridge.notify_session_start("liam")  # must not raise; replay has no reverse-channel handler for this
+    await wait_until(lambda: len(got.frames) >= 3)
+    assert not got.of_type("arrived")
+
+
+async def test_mock_fall_still_scripted_after_session_restart(run_bridge: Callable[..., Any]) -> None:
+    bridge, got = await run_bridge(source="mock:fall", speed=20, responds_at_s=None)
+    await wait_until(lambda: len(got.of_type("arrived")) == 1)
+
+    bridge.notify_session_start("liam")
+    await wait_until(lambda: len(got.of_type("arrived")) == 2)
+
+    await bridge.trigger_fall(None)
+    await wait_until(lambda: bool(got.of_type("fall")) and len(got.of_type("fall_status")) >= 2)
+    assert got.of_type("fall")[0]["stage"] == "confirmed"
+
+
 async def test_event_enricher_runs_before_hub_and_subscribers(run_bridge: Callable[..., Any]) -> None:
     published: list[dict[str, Any]] = []
     bridge = EngineBridge(Hub(), asyncio.get_running_loop(), source="mock", session_provider=lambda: SESSION)
