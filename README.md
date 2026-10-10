@@ -201,6 +201,37 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 
 Example payloads for every WebSocket message and REST response are in `server/samples/`.
 
+## For the therapist dashboard
+
+Victoria's dashboard lives in `device/dashboard/` and is served by this server at `/dashboard/` (static files,
+`index.html` as the entry point; nothing is mounted while the folder is empty). It can also run on its own dev
+server (e.g. Vite on `http://localhost:5173`): CORS allows any origin, and the token is still required.
+
+**Auth:** every REST call sends `Authorization: Bearer <MIRA_API_TOKEN>` (401 without it, except `GET /health`);
+every WebSocket URL carries `?token=<url-encoded token>` (closed with 1008 otherwise). How the dashboard gets the
+token (prompt, local config) is the dashboard's choice; never commit it.
+
+| Need | Endpoints (samples in `server/samples/`) |
+|---|---|
+| Patients | `GET /patients`, `GET /patients/{id}` (`rest_get_patients`, `rest_get_patient`) |
+| Progress | `GET /patients/{id}/progress?exercise_id=&days=90` (`rest_get_patient_progress`) |
+| Sessions, replay | `GET /sessions/{id}`; `GET /sessions/{id}/frames?downsample=300` (knee curve) or `downsample=0` (full frames, page with `t0=<next_t0>`) (`rest_get_session`, `rest_get_session_frames_*`) |
+| Alerts | `GET /alerts?open=true`, `POST /alerts/{id}/resolve {resolved_by, note?}` (`rest_get_alerts`, `rest_post_alert_resolve`) |
+| Plan proposals | `GET /proposals?status=pending&patient_id=`, `POST /proposals/{id}/approve {therapist_id}`, `/edit {therapist_id, change}`, `/dismiss {therapist_id, reason?}` (409 if already decided) (`rest_get_proposals`, `rest_post_proposal_approve`, `rest_error_409_proposal`) |
+| Prescriptions | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}` (`rest_get_prescriptions`, `rest_put_prescriptions`) |
+| Copilot | `POST /copilot/ask {question, patient_id?}` (`rest_post_copilot_ask`) |
+| Notifications | `GET /notifications?unread=&limit=&since_id=&therapist_id=`, `GET /notifications/count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `POST /notifications/{id}/ack {therapist_id}` (see "Dashboard notifications") |
+| Health | `GET /health` (public), `GET /health/data`, `GET /stats` (`rest_get_health*`, `rest_get_stats`) |
+
+WebSockets: `/ws/events` (alerts, proposals, session events; `ws_events_*`), `/ws/notifications?since_id=<last id>`
+(replay + live; `ws_notifications_message`), `/ws/live` (`ws_live`), `/ws/pose` (`ws_pose`, 25 Hz). Every channel
+sends `{"type":"ping"}` after 10 s of silence; ignore it. History routes need the database (503 with
+`DB_DISABLED=1`; `rest_error_503`).
+
+Desktop pop-ups (browser Notification API) only work in a secure context: open the dashboard at
+`http://localhost:8000/dashboard/` on the server laptop (or over HTTPS). On another machine via
+`http://<laptop>.local:8000` use in-page toasts. Request permission from a button click.
+
 ## Frame contract: joint angles
 
 `angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (the team plan's frame contract) are **flexion in degrees**:
