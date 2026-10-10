@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -75,6 +76,7 @@ class Reply:
     cached: bool = False
     thought_signature: str | None = None  # base64, echoed back via as_message()
     model: str | None = None  # the model that actually answered (may be a fallback)
+    cache_key: str | None = field(default=None, repr=False, compare=False)  # set when stored in the cache
 
     def as_message(self) -> dict[str, Any]:
         msg: dict[str, Any] = {"role": "model"}
@@ -251,7 +253,7 @@ def _read_cache(key: str) -> Reply | None:
 def _write_cache(key: str, agent: str, model: str, reply: Reply) -> None:
     path = _cache_path(key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps({"key": key, "agent": agent, "model": model,
                                "created": datetime.now(PACIFIC).isoformat(timespec="seconds"),
                                "reply": reply.to_dict()}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -329,6 +331,8 @@ def from_sdk_response(resp: types.GenerateContentResponse) -> Reply:
             signature = part.thought_signature
         elif part.text and not part.thought:
             texts.append(part.text)
+            if call is None and signature is None:
+                signature = part.thought_signature
     if call is None and not texts:
         raise _EmptyResponse(f"no text or function call ({candidates[0].finish_reason})")
     return Reply(text="".join(texts) or None, function_call=call,
@@ -491,7 +495,11 @@ def _fake(agent: str, model: str, messages: list[dict[str, Any]], tools: list[di
     if fn is None:
         _counters["unavailable"] += 1
         raise AIUnavailable(f"no fake registered for agent {agent!r}")
-    reply = fn(messages, tools)
+    try:
+        reply = fn(messages, tools)
+    except Exception as exc:  # noqa: BLE001 - ask() only ever raises AIUnavailable
+        _counters["unavailable"] += 1
+        raise AIUnavailable(f"fake for {agent!r} failed: {exc!r}") from None
     reply.model = reply.model or model
     _counters["fake"] += 1
     _record(agent, model, 0, True, False, None, persist=False)
@@ -511,6 +519,7 @@ async def ask(agent: str, model: str, system: str, messages: list[dict[str, Any]
     key = cache_key(model, system, messages, tools, json_mode)
     hit = await asyncio.to_thread(_read_cache, key)
     if hit is not None:
+        hit.cache_key = key
         _counters["cached"] += 1
         _record(agent, hit.model or model, 0, True, True, None)
         return hit
@@ -525,9 +534,22 @@ async def ask(agent: str, model: str, system: str, messages: list[dict[str, Any]
     reply = await _ask_live(agent, model, system, messages, tools, timeout_s, background, json_mode)
     try:
         await asyncio.to_thread(_write_cache, key, agent, model, reply)
+        reply.cache_key = key
     except OSError as exc:
         log.warning("ai cache write failed", extra={"error": repr(exc)})
     return reply
+
+
+async def discard(reply: Reply) -> None:
+    """Forget a cached answer the caller rejected (failed validation), so the same request is asked again
+    next time instead of replaying the bad answer forever. Replay mode keeps its recordings."""
+    if reply.cache_key is None or cfg.GEMINI_MODE != "live":
+        return
+    try:
+        await asyncio.to_thread(_cache_path(reply.cache_key).unlink, missing_ok=True)
+    except OSError as exc:
+        log.warning("ai cache discard failed", extra={"error": repr(exc)})
+    reply.cache_key = None
 
 
 async def _ask_live(agent: str, model: str, system: str, messages: list[dict[str, Any]],

@@ -369,3 +369,44 @@ async def test_replay_mode_serves_saved_real_answers(monkeypatch: pytest.MonkeyP
                              "You are a friendly exercise coach. Answer in one short sentence.",
                              [{"role": "user", "content": "Say hello to Maya, who is about to do 12 squats."}])
     assert reply.cached and reply.text == "Hello Maya, get ready to crush those 12 squats!"
+
+
+async def test_discarded_answer_is_asked_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_text_response("bad 999"), _text_response("good"))
+    _live(monkeypatch, send)
+    bad = await gemini.ask("a", "m", "sys", USER)
+    await gemini.discard(bad)  # the caller's validator rejected it
+    assert not list((Path(cfg.DATA_DIR) / "ai_cache").glob("*.json"))
+    good = await gemini.ask("a", "m", "sys", USER)
+    assert good.text == "good" and send.models == ["m", "m"]
+    again = await gemini.ask("a", "m", "sys", USER)
+    assert again.cached and again.text == "good"
+
+
+async def test_replay_mode_keeps_recordings_on_discard(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = FakeSend(_text_response("recorded"))
+    _live(monkeypatch, send)
+    await gemini.ask("a", "m", "sys", USER)
+    monkeypatch.setenv("GEMINI_MODE", "replay")
+    reload_config()
+    hit = await gemini.ask("a", "m", "sys", USER)
+    await gemini.discard(hit)
+    assert (await gemini.ask("a", "m", "sys", USER)).cached
+
+
+async def test_failing_fake_raises_ai_unavailable() -> None:
+    def broken(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> gemini.Reply:
+        raise KeyError("set")
+
+    gemini.register_fake("broken_agent", broken)
+    with pytest.raises(gemini.AIUnavailable):
+        await gemini.ask("broken_agent", "m", "sys", USER)
+
+
+def test_text_part_thought_signature_is_kept() -> None:
+    resp = types.GenerateContentResponse.model_validate({"candidates": [{"content": {"role": "model", "parts": [
+        {"text": "hi", "thoughtSignature": base64.b64encode(b"txt-sig").decode()}]}, "finishReason": "STOP"}]})
+    reply = gemini.from_sdk_response(resp)
+    assert reply.thought_signature == base64.b64encode(b"txt-sig").decode()
+    [content] = gemini.to_sdk_contents([reply.as_message()])
+    assert content.parts[0].thought_signature == b"txt-sig"
