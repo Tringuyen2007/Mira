@@ -29,7 +29,7 @@ SECRET_FIELDS = (
     "ELEVEN_API_KEY",
     "RETELL_API_KEY",
 )
-PHONE_FIELDS = ("RETELL_FROM_NUMBER", "DEMO_EMERGENCY_PHONE", "DEMO_THERAPIST_PHONE")
+PHONE_FIELDS = ("RETELL_FROM_NUMBER", "DEMO_EMERGENCY_PHONE", "DEMO_THERAPIST_PHONE", "DEMO_PATIENT_PHONE")
 
 
 @dataclass(frozen=True)
@@ -62,11 +62,14 @@ class Config:
     RETELL_API_KEY: str | None = None
     RETELL_FROM_NUMBER: str | None = None
     RETELL_AGENT_ID: str | None = None
+    RETELL_AGENT_VERSION: int | None = None  # published version bound to the number (printed by retell_setup)
     CALLS_DISABLED: bool = True
+    SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
 
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None
     DEMO_THERAPIST_PHONE: str | None = None
+    DEMO_PATIENT_PHONE: str | None = None  # Maya's phone in the default profile ({{patient_phone}})
 
     INSIGHT_ENABLED: bool = True
     COPILOT_CACHED_DEMO: bool = False
