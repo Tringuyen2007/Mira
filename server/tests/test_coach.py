@@ -126,6 +126,8 @@ async def test_pain_5_skips_next_exercise_and_notifies(coach: SessionCoach, hub:
     fake_module = types.ModuleType("server.notify.notifications")
     fake_module.create = fake_create  # type: ignore[attr-defined]
     monkeypatch.setitem(__import__("sys").modules, "server.notify.notifications", fake_module)
+    import server.notify  # `from server.notify import notifications` reads the package attribute once it's imported
+    monkeypatch.setattr(server.notify, "notifications", fake_module, raising=False)
 
     await coach.on_event({"type": "command", "name": "pain", "session_id": s.session_id, "payload": {"level": 5}})
     await coach.drain()  # the notification is sent in the background
