@@ -131,3 +131,80 @@ def test_rejects_garbage_and_empty() -> None:
 def test_allow_list_matches_copilot_ro_grants() -> None:
     assert ALLOWED_TABLES == {"progress_v", "sessions", "reps", "form_events", "memory_events", "patients",
                               "prescriptions"}
+
+
+# ---- review regressions (F4 review): bypasses found adversarially --------------------------------------------
+
+@pytest.mark.parametrize("sql", [
+    # a CTE defined in a subquery doesn't hide the real table outside it
+    "SELECT * FROM alerts, (WITH alerts AS (SELECT 1) SELECT * FROM alerts) s",
+    # a non-recursive CTE sees only the CTEs before it: here `alerts` is the real table
+    "WITH x AS (SELECT * FROM alerts), alerts AS (SELECT 1) SELECT * FROM x",
+    "SELECT * FROM sessions WHERE EXISTS (WITH a AS (SELECT 1) SELECT 1 FROM agent_actions)",
+    "SELECT * FROM mira.public.sessions",           # catalog-qualified
+    'SELECT * FROM "Sessions"',                      # quoted names are exact in Postgres
+])
+def test_rejects_table_allow_list_bypasses(sql: str) -> None:
+    with pytest.raises(Rejected, match="is not available"):
+        check_sql(sql)
+
+
+@pytest.mark.parametrize("sql", [
+    "WITH alerts AS (SELECT 1 AS a) SELECT a FROM (SELECT a FROM alerts) s",  # the CTE is visible in the body
+    "WITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT x FROM b UNION SELECT x FROM a",
+    "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3) SELECT n FROM r",
+    'SELECT * FROM "sessions"',
+])
+def test_cte_scoping_still_accepts_valid_queries(sql: str) -> None:
+    check_sql(sql)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT ts_stat('SELECT to_tsvector(note) FROM sessions')",        # runs a query given as text
+    "SELECT ts_rewrite('a'::tsquery, 'SELECT 1')",
+    "SELECT drop_chunks('pose_frames', older_than => now())",          # TimescaleDB admin API
+    "SELECT decompress_chunk('x')",
+    "SELECT add_retention_policy('pose_frames', INTERVAL '1 day')",
+    "SELECT alter_job(1000, scheduled => false)",
+    "SELECT delete_job(1000)",
+    "SELECT nextval('plan_proposals_id_seq')",
+    "SELECT _timescaledb_functions.x()",
+    "SELECT * FROM sessions s, LATERAL (SELECT setval('x', 1)) q",
+])
+def test_rejects_query_text_and_admin_functions(sql: str) -> None:
+    with pytest.raises(Rejected, match="not allowed"):
+        check_sql(sql)
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT emergency_contact_phone FROM patients",
+    "SELECT regexp_replace(emergency_contact_phone, '\\D', '', 'g') AS x FROM patients",  # beats a value scrub
+    "SELECT name FROM patients WHERE emergency_contact_name IS NOT NULL",
+    "SELECT * FROM patients",
+    "SELECT p.* FROM patients p",
+    "SELECT * FROM sessions s JOIN patients p ON p.id = s.patient_id",
+    "SELECT p::text FROM patients p",
+    "SELECT row_to_json(p) FROM patients p",
+    "SELECT to_jsonb(patients) FROM patients",
+])
+def test_rejects_contact_details_and_whole_patient_rows(sql: str) -> None:
+    with pytest.raises(Rejected, match="contact|patients"):
+        check_sql(sql)
+
+
+def test_named_patient_columns_are_fine() -> None:
+    check_sql("SELECT s.*, p.name FROM sessions s JOIN patients p ON p.id = s.patient_id")
+    check_sql("SELECT id, name, affected_side FROM patients")
+    check_sql("SELECT count(*) FROM patients")
+
+
+def test_comments_are_dropped_from_the_query_that_runs() -> None:
+    out = check_sql("SELECT id FROM sessions /* ; DROP TABLE sessions */ -- */ , alerts /*")
+    assert "/*" not in out and "--" not in out and "DROP" not in out and "alerts" not in out
+
+
+def test_union_with_order_by_and_big_limit_is_capped() -> None:
+    out = check_sql("SELECT id FROM sessions UNION SELECT id FROM sessions ORDER BY 1 LIMIT 5000")
+    assert out.endswith(f"LIMIT {MAX_ROWS}")
+    assert _limit(check_sql("SELECT * FROM sessions FETCH FIRST 1000 ROWS ONLY")) == MAX_ROWS
+    assert _limit(check_sql("SELECT * FROM sessions LIMIT 1 + 1000")) == MAX_ROWS
