@@ -158,3 +158,24 @@ def test_context_text_from_cached_profile() -> None:
 def test_status_after_a_response() -> None:
     inc = incident(responses=["thumbs_up"], last_status={"posture": "sitting", "on_mat": True})
     assert snap.status_text(with_snapshot(inc, []).snapshot) == "Responded. Sitting up on the mat."
+
+
+def test_call_variables_are_total_when_the_snapshot_is_missing() -> None:
+    # Regression: an empty snapshot (build_snapshot failed) used to raise KeyError in situation_short,
+    # so escalate() placed no call at all.
+    inc = incident()
+    assert inc.snapshot == {}
+    variables = snap.call_variables(inc, "Linh")
+    assert set(variables) == set(CALL_VARIABLES)
+    assert all(isinstance(v, str) and v and "None" not in v for v in variables.values())
+    assert variables["situation_short"] == "Mira saw Maya fall at 3:42 PM and she hasn't responded."
+    assert "{{" not in "".join(render_opening(variables).values())
+
+
+def test_call_variables_survive_a_broken_profile_and_an_unusable_time() -> None:
+    profile = replace(default_profile("maya"), falls_30d=None)  # type: ignore[arg-type]
+    inc = incident(profile, started_t=1.7e12)  # milliseconds by mistake: not a usable timestamp
+    variables = snap.call_variables(inc, None)
+    assert all(isinstance(v, str) and v for v in variables.values())
+    assert variables["contact_name"] == "there"
+    assert snap.time_local(float("nan")) and snap.time_local(1.7e12)

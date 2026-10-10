@@ -8,19 +8,22 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from server.config import cfg
+from server.logging_setup import get_logger
 from server.notify.templates import LIMITS_SENTENCE
 from server.state import PatientProfile
 
 if TYPE_CHECKING:
     from server.agents.safety_guardian import Incident
 
-__all__ = ["LIMITS_SENTENCE", "build_snapshot", "call_variables", "context_text", "estimate_posture",
+log = get_logger("snapshot")
+
+__all__ = ["LIMITS_SENTENCE", "base_facts", "build_snapshot", "call_variables", "context_text", "estimate_posture",
            "limits_text", "situation_short", "situation_text", "status_text"]
 
 KNOWN_POSTURES = ("standing", "sitting", "kneeling", "lying")
@@ -62,8 +65,12 @@ def _cap(text: str) -> str:
 
 
 def time_local(epoch_s: float) -> str:
-    """'3:42 PM' in the configured time zone."""
-    dt = datetime.fromtimestamp(epoch_s, ZoneInfo(cfg.TZ_NAME))
+    """'3:42 PM' in the configured time zone (now, if `epoch_s` is not a usable timestamp)."""
+    tz = ZoneInfo(cfg.TZ_NAME)
+    try:
+        dt = datetime.fromtimestamp(epoch_s, tz)
+    except (OverflowError, OSError, ValueError, TypeError):
+        dt = datetime.now(tz)
     return f"{dt.hour % 12 or 12}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
 
 
@@ -127,6 +134,28 @@ def _posture(inc: Incident, ring_frames: Sequence[dict[str, Any]]) -> tuple[str 
     return estimated, estimated is not None
 
 
+def base_facts(inc: Incident, profile: PatientProfile) -> dict[str, Any]:
+    """The facts that need nothing but the incident and the cached profile (never the ring buffer)."""
+    return {
+        "kind": inc.kind,
+        "time_local": time_local(inc.started_t),
+        "first_name": profile.first_name,
+        "pronoun_subj": profile.pronoun_subj,
+        "pronoun_obj": profile.pronoun_obj,
+        "pronoun_poss": profile.pronoun_poss,
+        "checkins": inc.checkins,
+        "responses": list(inc.responses) or "none",
+        "hr_before": inc.hr_before,
+        "hr_now": inc.hr_now,
+        "hr_limit": profile.hr_limit,
+        "pain_level": inc.pain_level,
+        "pain_today": profile.pain_today,
+        "condition": profile.condition,
+        "weeks_since_surgery": profile.weeks_since_surgery,
+        "falls_30d": profile.falls_30d,
+    }
+
+
 def build_snapshot(inc: Incident, ring_frames: Sequence[dict[str, Any]], profile: PatientProfile) -> dict[str, Any]:
     trig = inc.trigger
     posture, estimated = _posture(inc, ring_frames)
@@ -138,12 +167,7 @@ def build_snapshot(inc: Incident, ring_frames: Sequence[dict[str, Any]], profile
         still_s = f_still if still_s is None else still_s
     on_mat = status.get("on_mat", trig.get("on_mat"))
     return {
-        "kind": inc.kind,
-        "time_local": time_local(inc.started_t),
-        "first_name": profile.first_name,
-        "pronoun_subj": profile.pronoun_subj,
-        "pronoun_obj": profile.pronoun_obj,
-        "pronoun_poss": profile.pronoun_poss,
+        **base_facts(inc, profile),
         "exercise_id": trig.get("exercise_id"),
         "set": trig.get("set"),
         "rep": trig.get("rep"),
@@ -154,16 +178,6 @@ def build_snapshot(inc: Incident, ring_frames: Sequence[dict[str, Any]], profile
         "moving": moving if isinstance(moving, bool) else None,
         "still_s": int(round(still_s)) if still_s is not None else None,
         "on_mat": on_mat if isinstance(on_mat, bool) else None,
-        "checkins": inc.checkins,
-        "responses": list(inc.responses) or "none",
-        "hr_before": inc.hr_before,
-        "hr_now": inc.hr_now,
-        "hr_limit": profile.hr_limit,
-        "pain_level": inc.pain_level,
-        "pain_today": profile.pain_today,
-        "condition": profile.condition,
-        "weeks_since_surgery": profile.weeks_since_surgery,
-        "falls_30d": profile.falls_30d,
     }
 
 
@@ -289,7 +303,7 @@ def context_text(inc: Incident) -> str:
         parts.append(f"{_cap(p.pronoun_subj)} rated {p.pronoun_poss} pain {p.pain_today} out of 10 today.")
     if p.falls_30d == 0:
         parts.append("No falls in the last month.")
-    elif p.falls_30d > 0:
+    elif p.falls_30d:
         parts.append(f"{p.falls_30d} other fall{'s' if p.falls_30d != 1 else ''} in the last month.")
     return " ".join(parts) or "No other context is available."
 
@@ -303,23 +317,33 @@ def _str(value: str | None, fallback: str) -> str:
     return str(value) if value not in (None, "") else fallback
 
 
-def call_variables(inc: Incident, contact_name: str | None) -> dict[str, str]:
-    """Retell dynamic variables (§8.6.3). Every value is a non-empty string; no `None` ever reaches a call."""
-    s = inc.snapshot
-    p = inc.profile
+def _safe(name: str, build: Callable[[], str], fallback: str) -> str:
     try:
-        situation = situation_text(s)
-    except (KeyError, TypeError, ValueError):  # never let a template bug stop the call
-        situation = f"{situation_short(s)} Mira asked {p.pronoun_obj} to respond and got no answer."
+        text = build()
+    except Exception:  # noqa: BLE001 - a template bug must never stop the emergency call
+        log.exception("call variable failed, using fallback", extra={"variable": name})
+        return fallback
+    return text if isinstance(text, str) and text else fallback
+
+
+def call_variables(inc: Incident, contact_name: str | None) -> dict[str, str]:
+    """Retell dynamic variables (§8.6.3). Total: every value is a non-empty string, whatever the snapshot holds
+    (even empty, when building it failed); no `None` ever reaches a call."""
+    p = inc.profile
+    s = {**base_facts(inc, p), **inc.snapshot}
+    name = _str(p.first_name, "the patient")
+    short = _safe("situation_short", lambda: situation_short(s),
+                  f"Mira detected a possible emergency for {name} at {time_local(inc.started_t)}.")
     return {
         "contact_name": _str(contact_name, "there"),
-        "patient_first_name": _str(p.first_name, "the patient"),
+        "patient_first_name": name,
         "patient_phone": _str(p.phone, f"the number you have for {p.pronoun_obj}"),
-        "situation": situation,
-        "situation_short": situation_short(s),
-        "current_status": status_text(s),
-        "context": context_text(inc),
-        "limits": limits_text(p),
+        "situation": _safe("situation", lambda: situation_text(s),
+                           f"{short} Mira asked {p.pronoun_obj} to respond and got no answer."),
+        "situation_short": short,
+        "current_status": _safe("current_status", lambda: status_text(s), "No response yet."),
+        "context": _safe("context", lambda: context_text(inc), "No other context is available."),
+        "limits": _safe("limits", lambda: limits_text(p), LIMITS_SENTENCE),
         "therapist_name": _str(p.therapist_name, "the care team"),
         "therapist_phone": _str(p.therapist_phone, "not available"),
     }
