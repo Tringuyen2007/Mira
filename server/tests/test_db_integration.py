@@ -116,10 +116,19 @@ def test_copilot_ro_is_read_only_and_cannot_see_alerts(dsn: str) -> None:
         conn.execute("SELECT * FROM progress_v LIMIT 1")
         conn.execute("SELECT * FROM patients LIMIT 1")
         for stmt in ("SELECT * FROM alerts LIMIT 1", "SELECT * FROM agent_actions LIMIT 1",
-                     "SELECT * FROM ai_calls LIMIT 1", "SELECT * FROM pose_frames LIMIT 1"):
+                     "SELECT * FROM ai_calls LIMIT 1", "SELECT * FROM notifications LIMIT 1",
+                     "SELECT * FROM therapists LIMIT 1"):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(stmt)
+        # The Data Guard's fixed reads (roles.sql): raw frames, the materialized rollup, archive, check results.
+        mat = conn.execute("SELECT format('%I.%I', materialization_hypertable_schema, materialization_hypertable_name) "
+                           "FROM timescaledb_information.continuous_aggregates "
+                           "WHERE view_name = 'daily_progress'").fetchone()[0]
+        for relation in ("pose_frames", "daily_progress_archive", "data_checks", mat):
+            conn.execute(f"SELECT * FROM {relation} LIMIT 1")
         for stmt in ("INSERT INTO memory_events (patient_id, kind, message, evidence) VALUES ('maya','x','y','{}')",
+                     "INSERT INTO data_checks (check_name, status, details) VALUES ('x', 'ok', '{}')",
+                     "DELETE FROM pose_frames", "DELETE FROM daily_progress_archive",
                      "UPDATE patients SET name = 'x'", "DELETE FROM sessions", "CREATE TABLE evil (x int)"):
             with pytest.raises((psycopg.errors.ReadOnlySqlTransaction, psycopg.errors.InsufficientPrivilege)):
                 conn.execute(stmt)
@@ -225,7 +234,7 @@ async def test_progress_fallback_has_progress_v_shape(db: Database) -> None:
 # ---- simulated history → Data Guard → compression --------------------------------------------------------------
 
 async def test_small_sim_check3_compress_and_hyperfunctions(sim_dsn: str) -> None:
-    db = Database(sim_dsn)
+    db = Database(sim_dsn, ro_dsn(sim_dsn))
     await db.open()
     try:
         guard = DataGuard(db)
@@ -272,7 +281,7 @@ async def test_check3_catches_a_wrong_summary(sim_dsn: str) -> None:
         conn.execute("INSERT INTO pose_frames (time, patient_id, session_id, exercise_id, knee_l, knee_r, "
                      "load_l_pct, confidence) VALUES (%s + INTERVAL '12 hours', 'p02', gen_random_uuid(), 'squat', "
                      "150, 150, 50, 0.9)", (day,))
-    db = Database(sim_dsn)
+    db = Database(sim_dsn, ro_dsn(sim_dsn))
     await db.open()
     try:
         result = await DataGuard(db).check_raw_vs_summary(days=10)
@@ -288,7 +297,7 @@ async def test_safe_drop_refuses_without_summaries() -> None:
         prepare(url)
         old = time.time() - 40 * 86400
         _write_frames(url, [_frame(old + i, str(uuid.uuid4())) for i in range(3)])
-        db = Database(url)
+        db = Database(url, ro_dsn(url))
         await db.open()
         try:
             result = await DataGuard(db).safe_drop(older_than_days=31)

@@ -125,8 +125,19 @@ With a database (`TIGER_DSN`), the lifespan starts `server/agents/scheduler.py`:
 
 | Job | When | Reads | Writes |
 |---|---|---|---|
-| Data Guard `run_all()` (archive + checks 1-4) | `DATA_GUARD_DELAY_S` (300) after startup, then every `DATA_GUARD_INTERVAL_S` (900) | app pool, SELECT only | `data_checks`, `daily_progress_archive` (writes.py) |
+| Data Guard `run_all()` (archive + checks 1-4) | `DATA_GUARD_DELAY_S` (300) after startup, then every `DATA_GUARD_INTERVAL_S` (900) | `copilot_ro` only (`COPILOT_DSN`; skipped without it) | `data_checks`, `daily_progress_archive` (writes.py) |
 | Insight agent + milestones | `INSIGHT_DELAY_S` (120) after startup, then every `INSIGHT_INTERVAL_S` (900) | `copilot_ro` only (`COPILOT_DSN`) | `memory_events` (writes.py) |
+
+Background agents read only through `copilot_ro` and write only through the fixed functions in
+`server/db/writes.py` (a test traps the app pool during a full pass of both jobs). **Grant deviation from TRI.md
+§9.3:** `roles.sql` also grants `copilot_ro` SELECT on `pose_frames`, `daily_progress_archive`, `data_checks` and
+daily_progress's materialization hypertable (looked up in a re-runnable `DO` block), because the Data Guard's
+checks 1-4 read them and the project rule is that background agents read only through the read-only role. It
+still has no access to `alerts`, `agent_actions`, `ai_calls`, `notifications` or `therapists`, and the Copilot
+stays confined to its seven relations by `sql_guard`'s table allow-list. `timescaledb_information.job_errors`
+only shows rows to the job owner, so a failing check 1 reports `job_stats` fields and points at `job_errors`.
+Owner-only maintenance (check 6 compression via `compress_history`, `safe_drop`'s `drop_chunks`, never
+scheduled) still runs on the app pool.
 
 Kill switches: `DATA_GUARD_ENABLED=0`, `INSIGHT_ENABLED=0`. A failing run is logged and counted (`/stats` →
 `scheduler`) and the schedule carries on. All DB work is on the async pools (measured event-loop lag p95 ≈ 1 ms

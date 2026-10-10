@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from server.db.apply_sql import apply_file, statements
-from server.tests.dbutil import fresh_database
+from server.tests.dbutil import RO_PASSWORD, fresh_database
 
 DB_DIR = Path(__file__).resolve().parents[1] / "db"
 
@@ -55,8 +55,9 @@ def test_schema_aggregates_roles_apply_end_to_end() -> None:
     with fresh_database() as dsn:
         for name in ("schema.sql", "aggregates.sql"):
             apply_file(DB_DIR / name, dsn)
-        apply_file(DB_DIR / "roles.sql", dsn, {"copilot_ro_password": "ro-test-pass"})
-        apply_file(DB_DIR / "roles.sql", dsn, {"copilot_ro_password": "ro-test-pass"})  # re-runnable
+        # copilot_ro is cluster-wide: keep the shared test password so concurrent test databases keep working
+        apply_file(DB_DIR / "roles.sql", dsn, {"copilot_ro_password": RO_PASSWORD})
+        apply_file(DB_DIR / "roles.sql", dsn, {"copilot_ro_password": RO_PASSWORD})  # re-runnable
         with psycopg.connect(dsn) as conn:
             rows = conn.execute("SELECT view_name, materialized_only "
                                 "FROM timescaledb_information.continuous_aggregates").fetchall()
@@ -66,3 +67,8 @@ def test_schema_aggregates_roles_apply_end_to_end() -> None:
             assert {"pose_frames", "form_events", "alerts", "heart_rate", "wrist_motion"} <= hypertables
             assert conn.execute("SELECT to_regclass('notifications')").fetchone()[0] is not None
             assert conn.execute("SELECT to_regclass('daily_progress_archive')").fetchone()[0] is not None
+            # the Data Guard reads the materialization hypertable as copilot_ro (granted by roles.sql's DO block)
+            assert conn.execute(
+                "SELECT has_table_privilege('copilot_ro', format('%I.%I', materialization_hypertable_schema, "
+                "materialization_hypertable_name), 'SELECT') FROM timescaledb_information.continuous_aggregates"
+            ).fetchone()[0] is True

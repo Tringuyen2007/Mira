@@ -3,7 +3,9 @@
 Checks: 1 refresh_ran, 2 missing_summaries, 3 raw_vs_summary (both directions), 4 frozen_unchanged (+ archive
 insert), 5 safe_drop (implemented, never scheduled: no retention in the hackathon), 6 compress_verified
 (fingerprint → convert_to_columnstore → fingerprint). Results go to `data_checks` via writes.insert_data_check.
-SQL here is read-only except the archive insert (writes.py), data_checks, compression and safe_drop.
+Every read in checks 1-5 goes through the copilot_ro pool (`db.ro_fetch`, READ ONLY transactions); the only
+writes are the archive insert and data_checks rows (writes.py). Owner-only maintenance stays on the app pool:
+safe_drop's drop_chunks (never scheduled) and check 6 (convert_to_columnstore, run by hand / setup).
 """
 
 from __future__ import annotations
@@ -24,11 +26,15 @@ REFRESH_MAX_AGE_MIN = 30
 ARCHIVE_AFTER_DAYS = 31
 EXAMPLES = 5
 SLOW_S = 120.0
+RO_SHORT_S = 3.0
 
 Result = dict[str, Any]
 
+# job_stats is readable by every role; job_errors only shows rows to the job's owner, so on failure the result
+# carries job_stats' own fields (as copilot_ro) and points the operator at job_errors.
 CHECK1_SQL = """
-SELECT j.job_id, s.last_run_status, s.last_successful_finish, s.total_runs, s.total_failures,
+SELECT j.job_id, s.last_run_status, s.last_successful_finish, s.last_run_started_at, s.last_run_duration,
+       s.job_status, s.total_runs, s.total_failures,
        s.last_successful_finish < now() - make_interval(mins => %s) AS stale
 FROM timescaledb_information.jobs j
 LEFT JOIN timescaledb_information.job_stats s USING (job_id)
@@ -117,20 +123,25 @@ class DataGuard:
         self.db = db
         self._mat: sql.Identifier | None = None
 
+    async def _read(self, query: str, params: Any = None, timeout_s: float = SLOW_S) -> list[dict[str, Any]]:
+        """Every Data Guard read: copilot_ro, READ ONLY transaction, statement timeout = timeout_s."""
+        return await self.db.ro_fetch(query, params, timeout_s=timeout_s)
+
     async def _fetch_mat(self, query: str, params: Any = None, timeout_s: float = SLOW_S) -> list[dict[str, Any]]:
         if self._mat is None:
-            row = await self.db.fetchrow(
+            rows = await self._read(
                 "SELECT materialization_hypertable_schema AS s, materialization_hypertable_name AS n "
-                "FROM timescaledb_information.continuous_aggregates WHERE view_name = 'daily_progress'")
-            if row is None:
+                "FROM timescaledb_information.continuous_aggregates WHERE view_name = 'daily_progress'",
+                timeout_s=RO_SHORT_S)
+            if not rows:
                 raise DBError("continuous aggregate daily_progress does not exist")
-            self._mat = sql.Identifier(row["s"], row["n"])
-        return await self.db.fetch(sql.SQL(query).format(mat=self._mat), params, timeout_s=timeout_s)
+            self._mat = sql.Identifier(rows[0]["s"], rows[0]["n"])
+        return await self._read(sql.SQL(query).format(mat=self._mat).as_string(None), params, timeout_s)
 
     # ---- check 1 ------------------------------------------------------------------------------------------
 
     async def check_refresh_ran(self) -> Result:
-        rows = await self.db.fetch(CHECK1_SQL, (REFRESH_MAX_AGE_MIN,))
+        rows = await self._read(CHECK1_SQL, (REFRESH_MAX_AGE_MIN,), timeout_s=RO_SHORT_S)
         if not rows:
             return _result("refresh_ran", "fail", reason="no refresh policy job for daily_progress")
         job = rows[0]
@@ -141,11 +152,10 @@ class DataGuard:
         if not job["total_runs"]:
             return _result("refresh_ran", "warn", reason="refresh policy has not run yet", **details)
         if job["last_run_status"] != "Success" or job["stale"] or last is None:
-            errors = await self.db.fetch("SELECT finish_time, sqlerrcode, err_message "
-                                         "FROM timescaledb_information.job_errors WHERE job_id = %s "
-                                         "ORDER BY finish_time DESC LIMIT 5", (job["job_id"],))
-            return _result("refresh_ran", "fail", errors=[{**e, "finish_time": str(e["finish_time"])}
-                                                          for e in errors], **details)
+            started = job["last_run_started_at"]
+            return _result("refresh_ran", "fail", last_run_started=started.isoformat() if started else None,
+                           last_run_duration=str(job["last_run_duration"]), job_status=job["job_status"],
+                           errors_in="timescaledb_information.job_errors (as the service owner)", **details)
         return _result("refresh_ran", "ok", **details)
 
     # ---- check 2 ------------------------------------------------------------------------------------------
@@ -160,7 +170,7 @@ class DataGuard:
         params = {"days": days}
         mismatches = await self._fetch_mat(CHECK3_SQL, params, timeout_s=SLOW_S)
         orphans = await self._fetch_mat(CHECK3_REVERSE_SQL, params, timeout_s=SLOW_S)
-        counts = await self.db.fetchrow(CHECK3_COUNT_SQL, params, timeout_s=SLOW_S) or {"rows": 0, "days": 0}
+        counts = (await self._read(CHECK3_COUNT_SQL, params) or [{"rows": 0, "days": 0}])[0]
         bad = len(mismatches) + len(orphans)
         return _result("raw_vs_summary", "fail" if bad else "ok", window_days=days, days_compared=counts["days"],
                        rows_compared=counts["rows"], mismatches=len(mismatches), summaries_without_raw=len(orphans),
@@ -172,12 +182,10 @@ class DataGuard:
         return await writes.archive_finished_days(self.db, older_than_days)
 
     async def check_frozen_unchanged(self, before: Any = None) -> Result:
-        rows = await self.db.fetch(CHECK4_SQL, {"before": before}, timeout_s=SLOW_S)
-        verified = await self.db.fetchrow("SELECT count(*) AS n, count(DISTINCT day) AS days "
-                                          "FROM daily_progress_archive")
-        return _result("frozen_unchanged", "fail" if rows else "ok", rows_verified=verified["n"] if verified else 0,
-                       days_verified=verified["days"] if verified else 0, changed_or_missing=len(rows),
-                       examples=_examples(rows))
+        rows = await self._read(CHECK4_SQL, {"before": before})
+        [verified] = await self._read("SELECT count(*) AS n, count(DISTINCT day) AS days FROM daily_progress_archive")
+        return _result("frozen_unchanged", "fail" if rows else "ok", rows_verified=verified["n"],
+                       days_verified=verified["days"], changed_or_missing=len(rows), examples=_examples(rows))
 
     # ---- run_all -----------------------------------------------------------------------------------------------
 
@@ -208,10 +216,9 @@ class DataGuard:
 
     async def safe_drop(self, older_than_days: int) -> Result:
         """Drop raw frames older than N local days only after their summaries exist, are archived and match."""
-        cutoff_row = await self.db.fetchrow(
+        [cutoff_row] = await self._read(
             f"SELECT time_bucket(INTERVAL '1 day', now() - make_interval(days => %s), '{TZ}') AS cutoff",
-            (older_than_days,))
-        assert cutoff_row is not None
+            (older_than_days,), timeout_s=RO_SHORT_S)
         cutoff = cutoff_row["cutoff"]
         missing = await self._fetch_mat(f"""
             SELECT r.patient_id, r.exercise_id, r.day FROM (
@@ -225,22 +232,22 @@ class DataGuard:
         else:
             await writes.archive_finished_days(self.db, older_than_days)
             changed = await self.check_frozen_unchanged(before=cutoff)
-            unarchived = await self.db.fetch("""
+            unarchived = await self._read("""
                 SELECT v.patient_id, v.exercise_id, v.day FROM progress_v v
                 LEFT JOIN daily_progress_archive a USING (patient_id, exercise_id, day)
-                WHERE v.day < %s AND a.day IS NULL""", (cutoff,), timeout_s=SLOW_S)
+                WHERE v.day < %s AND a.day IS NULL""", (cutoff,))
             if changed["status"] != "ok" or unarchived:
                 result = _result("safe_to_drop", "fail", cutoff=str(cutoff),
                                  reason="archive does not match the summaries; nothing dropped",
                                  changed=changed["details"]["changed_or_missing"], unarchived=len(unarchived))
-            else:
+            else:  # owner-only operation: the app pool
                 dropped = await self.db.fetch("SELECT drop_chunks('pose_frames', older_than => %s) AS chunk",
                                               (cutoff,), timeout_s=SLOW_S)
                 result = _result("safe_to_drop", "ok", cutoff=str(cutoff), chunks_dropped=len(dropped))
         await writes.insert_data_check(self.db, result["check_name"], result["status"], result["details"])
         return result
 
-    # ---- check 6: compression with fingerprints ----------------------------------------------------------------
+    # ---- check 6: compression with fingerprints (owner-run maintenance: app pool) -------------------------------
 
     async def fingerprint(self, start: Any, end: Any) -> dict[str, Any]:
         row = await self.db.fetchrow(FINGERPRINT_SQL, (start, end), timeout_s=SLOW_S)

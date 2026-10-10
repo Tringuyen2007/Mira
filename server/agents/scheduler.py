@@ -2,7 +2,8 @@
 
 Data Guard `run_all()` every DATA_GUARD_INTERVAL_S, first DATA_GUARD_DELAY_S after startup (5 min: normally just
 after a 15-min refresh-policy run). Insight every INSIGHT_INTERVAL_S when INSIGHT_ENABLED, plus `run_insight_now()`
-on demand. All DB work is on the async pools, so nothing here blocks the event loop. A failing run is logged and
+on demand. All DB work is on the async pools, so nothing here blocks the event loop. Both jobs read only through
+copilot_ro; the Data Guard is skipped without COPILOT_DSN. A failing run is logged and
 counted and the loop carries on; `stop()` cancels cleanly. Data Guard failures become non-urgent dashboard
 notifications (kind data_guard, severity normal) through F7 when it is present.
 """
@@ -30,6 +31,8 @@ log = get_logger("scheduler")
 
 FAILED_STATUSES = ("fail", "error")
 NOTIFY_BODY_MAX = 300
+# copilot_ro cannot read `therapists`; every therapist with a patient gets the notification.
+THERAPISTS_SQL = "SELECT DISTINCT therapist_id FROM patients WHERE therapist_id IS NOT NULL ORDER BY 1"
 
 Job = Callable[[], Awaitable[Any]]
 
@@ -110,6 +113,10 @@ class Scheduler:
             return await self._insight()
 
     async def run_data_guard(self) -> list[dict[str, Any]] | None:
+        if not self.db.has_ro:
+            self.jobs["data_guard"].skipped += 1
+            log.warning("data guard skipped: COPILOT_DSN is not configured (it reads only through copilot_ro)")
+            return None
         if not self.db.available:
             self.jobs["data_guard"].skipped += 1
             log.info("data guard skipped: database unavailable")
@@ -122,7 +129,7 @@ class Scheduler:
 
     async def _notify_guard_failures(self, failed: list[dict[str, Any]]) -> None:
         try:
-            therapists = [r["id"] for r in await self.db.fetch("SELECT id FROM therapists ORDER BY id", timeout_s=5)]
+            therapists = [r["therapist_id"] for r in await self.db.ro_fetch(THERAPISTS_SQL)]
         except DBError as exc:
             log.warning("data guard failure not notified: therapists unavailable", extra={"error": str(exc)})
             return

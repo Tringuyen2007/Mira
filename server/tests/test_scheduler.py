@@ -5,7 +5,6 @@ POST /insight/run."""
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
 import time
 import types
@@ -17,6 +16,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from server.agents import data_guard
 from server.agents.data_guard import DataGuard
 from server.agents.scheduler import Scheduler
 from server.db import writes
@@ -31,12 +31,13 @@ FAST = {"guard_delay_s": 0, "guard_interval_s": 0.05, "insight_delay_s": 0, "ins
 
 
 class FakeDB:
-    def __init__(self, available: bool = True) -> None:
+    def __init__(self, available: bool = True, has_ro: bool = True) -> None:
         self.available = available
+        self.has_ro = has_ro
 
-    async def fetch(self, sql: str, params: Any = None, **_: Any) -> list[dict[str, Any]]:
-        assert sql.startswith("SELECT id FROM therapists")
-        return [{"id": "okafor"}]
+    async def ro_fetch(self, sql: str, params: Any = None, **_: Any) -> list[dict[str, Any]]:
+        assert sql.startswith("SELECT DISTINCT therapist_id FROM patients")
+        return [{"therapist_id": "okafor"}]
 
 
 class FakeGuard:
@@ -152,6 +153,13 @@ async def test_data_guard_skipped_while_database_unavailable() -> None:
     assert guard.calls == 0 and sched.jobs["data_guard"].skipped == 1
 
 
+async def test_data_guard_skipped_without_copilot_ro() -> None:
+    guard = FakeGuard()
+    sched = Scheduler(FakeDB(has_ro=False), guard=guard, guard_enabled=True, insight_enabled=False)
+    assert await sched.run_data_guard() is None
+    assert guard.calls == 0 and sched.jobs["data_guard"].skipped == 1
+
+
 async def test_data_guard_failures_become_normal_notifications(notified: list[dict[str, Any]]) -> None:
     guard = FakeGuard(results=[
         {"check_name": "refresh_ran", "status": "ok", "details": {}},
@@ -240,9 +248,6 @@ async def test_event_loop_lag_while_guard_and_insight_run(sim_dsn: str, notified
         await db.close()
 
 
-_WRITE_WORDS = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|CALL|GRANT|COPY)\b", re.I)
-
-
 def _called_from_writes() -> bool:
     frame = sys._getframe(1)
     while frame is not None:
@@ -252,35 +257,81 @@ def _called_from_writes() -> bool:
     return False
 
 
-async def test_data_guard_only_writes_through_writes_py(sim_dsn: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """copilot_ro may not read pose_frames, so the Data Guard reads on the app pool: every statement it sends
-    there outside writes.py must be a plain SELECT; its only writes are the archive insert and data_checks."""
-    db = Database(sim_dsn)
-    await db.open()
-    reads: list[str] = []
-    written: list[str] = []
-    real = {name: getattr(db, name) for name in ("fetch", "execute")}
+def _trap_app_pool(db: Database, monkeypatch: pytest.MonkeyPatch, written: list[str]) -> None:
+    """The app pool fails every statement that doesn't come from a fixed writes.py function."""
+    real = {name: getattr(db, name) for name in ("fetch", "fetchrow", "execute")}
 
     def guarded(name: str) -> Any:
         async def call(sql: Any, *args: Any, **kwargs: Any) -> Any:
-            text = sql.as_string(None) if hasattr(sql, "as_string") else str(sql)
-            if _called_from_writes():
-                written.append(text)
-            else:
-                assert text.lstrip().upper().startswith(("SELECT", "WITH")) and not _WRITE_WORDS.search(text), text
-                reads.append(text)
+            if not _called_from_writes():
+                raise AssertionError(f"app pool used outside writes.py: {str(sql)[:80]}")
+            written.append(str(sql))
             return await real[name](sql, *args, **kwargs)
         return call
 
+    real_connection = db.connection
+
+    def connection() -> Any:
+        if not _called_from_writes():
+            raise AssertionError("app connection used outside writes.py")
+        return real_connection()
+
     for name in real:
         monkeypatch.setattr(db, name, guarded(name))
+    monkeypatch.setattr(db, "connection", connection)
+
+
+async def test_background_jobs_read_only_through_copilot_ro(sim_dsn: str, monkeypatch: pytest.MonkeyPatch,
+                                                            notified: list[dict[str, Any]]) -> None:
+    """A full scheduled pass of both jobs (incl. a Data Guard failure notification): every read is copilot_ro;
+    the app pool runs only writes.py (archive insert, data_checks, memory_events)."""
+    db = Database(sim_dsn, ro_dsn(sim_dsn))
+    await db.open()
+    written: list[str] = []
+    _trap_app_pool(db, monkeypatch, written)
+    sched = Scheduler(db, guard_enabled=True, insight_enabled=True)
+    real_check = sched.guard.check_frozen_unchanged
+
+    async def failing_check4() -> dict[str, Any]:  # forces the failure-notification path
+        result = await real_check()
+        return {**result, "status": "fail"}
+
+    monkeypatch.setattr(sched.guard, "check_frozen_unchanged", failing_check4)
     try:
-        results = await DataGuard(db).run_all()
+        with pytest.raises(AssertionError):  # the trap works
+            await db.fetch("SELECT 1")
+        results = await sched.run_data_guard()
+        insight_result = await sched.run_insight_now()
     finally:
         await db.close()
-    assert {r["status"] for r in results} <= {"ok", "warn"} and len(reads) >= 6
-    assert {" ".join(w.split()[:3]) for w in written} == {"INSERT INTO daily_progress_archive",
-                                                         "INSERT INTO data_checks"}
+    assert results is not None and {r["check_name"]: r["status"] for r in results} == {
+        "refresh_ran": results[0]["status"], "missing_summaries": "ok", "raw_vs_summary": "ok",
+        "frozen_unchanged": "fail"}
+    assert results[0]["status"] in ("ok", "warn")
+    assert insight_result is not None and not insight_result["errors"]
+    assert any(n["kind"] == "data_guard" and n["therapist_id"] == "okafor" for n in notified)
+    assert {" ".join(w.split()[:3]) for w in written} <= {"INSERT INTO daily_progress_archive",
+                                                         "INSERT INTO data_checks", "INSERT INTO memory_events"}
+    assert sum(w.startswith("INSERT INTO data_checks") for w in written) == 4
+
+
+async def test_refresh_check_failure_details_come_from_job_stats(sim_dsn: str, monkeypatch: pytest.MonkeyPatch
+                                                               ) -> None:
+    """copilot_ro can't see job_errors (owner-only rows), so a failing check 1 reports job_stats fields."""
+    with psycopg.connect(sim_dsn, autocommit=True) as conn:
+        job_id = conn.execute("SELECT job_id FROM timescaledb_information.jobs "
+                              "WHERE proc_name = 'policy_refresh_continuous_aggregate'").fetchone()[0]
+        conn.execute(f"CALL run_job({job_id})")
+    monkeypatch.setattr(data_guard, "REFRESH_MAX_AGE_MIN", -1)  # the last success now counts as stale
+    db = Database(sim_dsn, ro_dsn(sim_dsn))
+    await db.open()
+    try:
+        result = await DataGuard(db).check_refresh_ran()
+    finally:
+        await db.close()
+    details = result["details"]
+    assert result["status"] == "fail" and details["last_run_status"] == "Success"
+    assert details["last_run_started"] and details["job_status"] and "job_errors" in details["errors_in"]
 
 
 # ---- HTTP: /health/data and /insight/run ----------------------------------------------------------------------
