@@ -17,6 +17,7 @@ import socket
 import struct
 import threading
 import os
+import re
 import secrets
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -58,6 +59,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def log_message(self, format, *args):  # noqa: A002 - BaseHTTPRequestHandler signature
+        # Request lines carry ?token=; never write it to the console.
+        super().log_message(format, *(re.sub(r"(token=)[^&\s\"']+", r"\1***", str(a)) for a in args))
 
     def authorized(self):
         auth = self.headers.get("Authorization", "")
