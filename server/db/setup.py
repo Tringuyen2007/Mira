@@ -26,7 +26,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import psycopg
 from psycopg import sql
@@ -157,7 +157,7 @@ def setup(dsn: str, *, fresh: bool = False, seed: int = 42, days: int = 75, pati
     _step(6, "refresh_continuous_aggregate (full)", refresh)
 
     def check3() -> str:
-        result = asyncio.run(_check3(dsn, days + 7))
+        result = asyncio.run(_check3(dsn, ro_dsn(dsn, params["copilot_ro_password"]), days + 7))
         report["check3"] = result
         d = result["details"]
         if result["status"] != "ok":
@@ -198,8 +198,16 @@ def setup(dsn: str, *, fresh: bool = False, seed: int = 42, days: int = 75, pati
     return report
 
 
-async def _check3(dsn: str, days: int) -> dict[str, Any]:
-    db = Database(dsn, min_size=1, max_size=2)
+def ro_dsn(dsn: str, password: str) -> str:
+    """The same database as copilot_ro (the Data Guard reads only through that role)."""
+    parts = urlsplit(dsn)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, f"copilot_ro:{quote(password, safe='')}@{host}", parts.path, parts.query,
+                       parts.fragment))
+
+
+async def _check3(dsn: str, ro: str, days: int) -> dict[str, Any]:
+    db = Database(dsn, ro, min_size=1, max_size=2)
     await db.open()
     try:
         guard = DataGuard(db)

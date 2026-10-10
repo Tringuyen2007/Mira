@@ -215,6 +215,52 @@ MIRA_EVAL_RO_DSN=postgresql://copilot_ro:<password>@localhost:55432/mira \
 GEMINI_MODE=live make evals EVAL_ARGS="--only compensating -v"   # live: ~2-5 smart requests per question
 ```
 
+## Background agents: Insight, Data Guard, milestones
+
+With a database (`TIGER_DSN`), the lifespan starts `server/agents/scheduler.py`:
+
+| Job | When | Reads | Writes |
+|---|---|---|---|
+| Data Guard `run_all()` (archive + checks 1-4) | `DATA_GUARD_DELAY_S` (300) after startup, then every `DATA_GUARD_INTERVAL_S` (900) | `copilot_ro` only (`COPILOT_DSN`; skipped without it) | `data_checks`, `daily_progress_archive` (writes.py) |
+| Insight agent + milestones | `INSIGHT_DELAY_S` (120) after startup, then every `INSIGHT_INTERVAL_S` (900) | `copilot_ro` only (`COPILOT_DSN`) | `memory_events` (writes.py) |
+
+Background agents read only through `copilot_ro` and write only through the fixed functions in
+`server/db/writes.py` (a test traps the app pool during a full pass of both jobs). **Grant deviation from TRI.md
+§9.3:** `roles.sql` also grants `copilot_ro` SELECT on `pose_frames`, `daily_progress_archive`, `data_checks` and
+daily_progress's materialization hypertable (looked up in a re-runnable `DO` block), because the Data Guard's
+checks 1-4 read them and the project rule is that background agents read only through the read-only role. It
+still has no access to `alerts`, `agent_actions`, `ai_calls`, `notifications` or `therapists`, and the Copilot
+stays confined to its seven relations by `sql_guard`'s table allow-list. `timescaledb_information.job_errors`
+only shows rows to the job owner, so a failing check 1 reports `job_stats` fields and points at `job_errors`.
+Owner-only maintenance (check 6 compression via `compress_history`, `safe_drop`'s `drop_chunks`, never
+scheduled) still runs on the app pool.
+
+Kill switches: `DATA_GUARD_ENABLED=0`, `INSIGHT_ENABLED=0`. A failing run is logged and counted (`/stats` →
+`scheduler`) and the schedule carries on. All DB work is on the async pools (measured event-loop lag p95 ≈ 1 ms
+during back-to-back runs on the 900k-frame history).
+
+- **Insight** (`server/agents/insight.py`, §7.4): five SQL rules find candidates (depth gain ≥ 10° vs 3 weeks
+  ago; asymmetry rising and compensation = depth up ≥ 5° while affected-leg load falls ≥ 2 points, both as
+  least-squares trends over ≥ 3 session days in the last 14 days; pain_post ≥ 5 in the last 7 days; ≥ 3
+  prescribed session days missed in the last 14). Each is deduped by `<patient>:<kind>:<ISO week>`; a
+  compensation candidate (or note this week) for a patient + exercise suppresses its asymmetry note. New ones are
+  investigated by Gemini (smart model, background priority, ≤ 5 tool steps, read-only patient-scoped tools); the
+  note is number-checked against the evidence stored with it, else the SQL-only note is written.
+  Compensation and pain notes raise a `high` dashboard notification (kind `insight`).
+- **Milestones:** the first day a patient's p95 knee depth reaches `prescriptions.targets.knee_deg` (squat default
+  90°) in the last 7 days → notification kind `milestone`, severity `low`, deduped per patient + exercise + target.
+- **Data Guard** failures (`fail`/`error`) → notification kind `data_guard`, severity `normal`, once per check per day,
+  addressed to `SELECT DISTINCT therapist_id FROM patients` on `copilot_ro` (its column-level `patients` grant
+  keeps `therapist_id` and leaves out the emergency contact columns).
+- Notifications go through `server.notify.notifications.create` when that module is present (no-op otherwise).
+
+```bash
+curl -s -H "Authorization: Bearer $MIRA_API_TOKEN" localhost:8000/health/data   # latest result per check
+curl -s -X POST -H "Authorization: Bearer $MIRA_API_TOKEN" localhost:8000/insight/run   # on-demand Insight pass
+```
+`/health/data` → `{status: ok | failing | unavailable, checks: [{check_name, status, details, time}], last_run,
+scheduler}`.
+
 ## Safety path (Guardian, emergency calls)
 
 The Safety Guardian (`server/agents/safety_guardian.py`) watches the event stream: a confirmed `fall`,

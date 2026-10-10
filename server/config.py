@@ -72,6 +72,11 @@ class Config:
     DEMO_PATIENT_PHONE: str | None = None  # Maya's phone in the default profile ({{patient_phone}})
 
     INSIGHT_ENABLED: bool = True
+    INSIGHT_DELAY_S: float = 120.0  # first scheduled Insight run after startup, then every INSIGHT_INTERVAL_S
+    INSIGHT_INTERVAL_S: float = 900.0
+    DATA_GUARD_ENABLED: bool = True
+    DATA_GUARD_DELAY_S: float = 300.0  # 5 min after startup: normally just after a 15-min refresh-policy run
+    DATA_GUARD_INTERVAL_S: float = 900.0
     COPILOT_CACHED_DEMO: bool = False
     PUBLIC_WEBHOOK_HOST: str | None = None
     NOTIFY_RESEND_MIN: float = 5.0  # urgent, unacked notifications are re-sent on the hub every N minutes
