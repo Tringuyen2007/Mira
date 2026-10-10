@@ -5,6 +5,17 @@ the engine bridge (mock / replay / live vision), the safety path (fall check-in,
 and the REST API. This README is everything a new developer needs; the team plan (TRI.md, kept by Tri) has the
 design background, but no setup step depends on it.
 
+## Repo layout
+
+| Path | Owner | What |
+|---|---|---|
+| `server/` | Tri | this FastAPI server (everything below) |
+| `vision/` | Eric | vision engine (camera, pose, reps, falls) — plugs in via the frame contract below |
+| `device/ios/` | Josie | iOS app (Xcode project) — networking contract in `device/ios/NETWORKING.md` |
+| `device/dashboard/` | Victoria | therapist dashboard (served at `/dashboard` when present) |
+| `data/` | shared | cues, audio, recordings (recordings and AI cache are git-ignored) |
+| `tools/` | shared | dev utilities (seeders, mocks, scripts) |
+
 ## Prerequisites
 
 | Tool | Why | Get it |

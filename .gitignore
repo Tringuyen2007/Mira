@@ -17,3 +17,14 @@ data/recordings/
 
 # local tooling
 .superpowers/
+
+# Xcode / iOS build output
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.build/
+build/
+*.xcarchive
+*.ipa
+*.dSYM
+*.dSYM.zip
