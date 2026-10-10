@@ -74,6 +74,7 @@ class Config:
     INSIGHT_ENABLED: bool = True
     COPILOT_CACHED_DEMO: bool = False
     PUBLIC_WEBHOOK_HOST: str | None = None
+    NOTIFY_RESEND_MIN: float = 5.0  # urgent, unacked notifications are re-sent on the hub every N minutes
 
     LOG_DIR: str = "logs"
     DATA_DIR: str = "data"

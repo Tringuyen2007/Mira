@@ -112,12 +112,20 @@ class Hub:
         self._clock = clock
 
     async def connect(self, channel: str, ws: WebSocketLike,
-                      on_message: Callable[[dict[str, Any]], None] | None = None) -> None:
-        """Serve an accepted WebSocket until it disconnects. Incoming JSON objects go to `on_message`."""
+                      on_message: Callable[[dict[str, Any]], None] | None = None,
+                      on_connect: Callable[[], Any] | None = None) -> None:
+        """Serve an accepted WebSocket until it disconnects. Incoming JSON objects go to `on_message`.
+
+        `on_connect` (optional, awaited) runs once the client is registered but before its sender task
+        starts draining the queue — used for a reconnect replay (e.g. `/ws/notifications?since_id=`) that
+        must be sent before any later live message, with no gap and no duplicate.
+        """
         if channel not in self._clients:
             raise ValueError(f"unknown channel {channel!r}")
         client = _Client(channel, ws)
         self._clients[channel].add(client)
+        if on_connect is not None:
+            await on_connect()
         sender = asyncio.create_task(self._sender(client), name=f"ws-sender-{channel}")
         log.info("ws connected", extra={"channel": channel, "clients": len(self._clients[channel])})
         try:
