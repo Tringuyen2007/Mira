@@ -1,0 +1,17 @@
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Build output and exports
+.build/
+build/
+*.xcarchive
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
