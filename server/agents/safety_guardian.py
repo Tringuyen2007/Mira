@@ -77,7 +77,7 @@ class Incident:
     flush_task: asyncio.Task[None] | None = None
     posture_now: str | None = None
     moving_now: bool | None = None
-    still_at_escalation: float | None = None
+    still_baseline: float | None = None
     hr_at_update: int | None = None
 
     @property
@@ -207,16 +207,16 @@ class SafetyGuardian:
         posture, moving, still = s["posture"], s["moving"], s["still_s"]
         name, be = inc.first_name, "are" if inc.profile.pronoun_subj == "they" else "is"
         status = status_text(s)
-        if inc.still_at_escalation is None and still is not None:
-            inc.still_at_escalation = still  # first reading after escalation is the baseline
+        if inc.still_baseline is None and still is not None and inc.call_state == "ongoing":
+            inc.still_baseline = still  # "another 30 s" counts from when the contact is on the line
         if posture is not None and posture != inc.posture_now:
             phrase = posture_phrase(s) or posture
             await self.queue_update(inc, f"posture:{posture}", templates.posture_update(name, phrase, be), status)
         if not inc.responses:  # once she has responded, moving/still are no longer news
             if moving is True and inc.moving_now is False:
                 await self.queue_update(inc, "moving", templates.moving_update(name), status)
-            elif moving is not True and still is not None and inc.still_at_escalation is not None:
-                periods = int((still - inc.still_at_escalation) // STILL_UPDATE_EVERY_S)
+            elif moving is not True and still is not None and inc.still_baseline is not None:
+                periods = int((still - inc.still_baseline) // STILL_UPDATE_EVERY_S)
                 if periods >= 1:
                     await self.queue_update(inc, f"still:{periods}", templates.still_update(name, be), status)
         if posture is not None:
@@ -245,7 +245,6 @@ class SafetyGuardian:
         try:
             inc.snapshot = self.live_snapshot(inc)
             inc.posture_now, inc.moving_now = inc.snapshot["posture"], inc.snapshot["moving"]
-            inc.still_at_escalation = inc.snapshot["still_s"]
             inc.hr_at_update = inc.hr_now
         except Exception:  # noqa: BLE001 - a snapshot bug must not stop the call; the notifier falls back
             log.exception("snapshot failed", extra={"alert_id": inc.alert_id})
