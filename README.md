@@ -119,6 +119,44 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
 
 Voice by [ElevenLabs](https://elevenlabs.io) (free plan, attribution required).
 
+## Care Copilot (therapist Q&A, plan proposals)
+
+`POST /copilot/ask {question, patient_id?}` → `{answer, charts[], sql[], evidence[], cached, proposals[], fallback}`.
+The Copilot (`server/agents/copilot.py`) runs up to 5 Gemini steps (`GEMINI_MODEL_SMART` + fallbacks, 8 s each)
+with five tools: `run_sql` (checked by `server/agents/sql_guard.py`: one SELECT on progress_v, sessions, reps,
+form_events, memory_events, patients or prescriptions, blocked functions, LIMIT ≤ 200, then run as the read-only
+`copilot_ro` user with a 3 s timeout), `get_patient_summary`, `create_plan_proposal` (a pending card only),
+`draft_message` (saved to `agent_actions`, never sent) and `final_answer`. Tool results go back labelled as data,
+with phone numbers removed. Every number in the answer must appear in a tool result; the model gets one retry,
+then the answer falls back (`fallback` says why). It needs `TIGER_DSN` and `COPILOT_DSN`.
+
+Proposals (the therapist decides): `GET /proposals?status=pending|approved|edited|dismissed|all&patient_id=`,
+`POST /proposals/{id}/approve {therapist_id}`, `POST /proposals/{id}/edit {therapist_id, change}`,
+`POST /proposals/{id}/dismiss {therapist_id, reason?}`. Approve/edit insert a new prescription version (the old
+one stays, inactive; `created_by = proposal:<id>`; rest days and drills are kept in `targets`), set
+`decided_by`/`decided_at`, log `agent_actions` and emit `proposal_decided` on `/ws/events`. A decided proposal
+returns 409.
+
+```bash
+python -m server.agents.copilot --weekly-review [--patient maya]   # pending cards; run once before the demo (quota)
+python -m server.agents.copilot --write-demo-cache                 # refresh data/copilot_demo.json (see below)
+```
+
+Stage backup: `COPILOT_CACHED_DEMO=1` answers "Which of my patients are compensating?" instantly from
+`data/copilot_demo.json` (`DATA_DIR` copy wins), and the same file is the fallback if Gemini is unavailable. The
+committed file was produced by `--write-demo-cache` with `GEMINI_MODE=fake` against a freshly simulated history
+(seed 42): the real guarded SQL on copilot_ro, no hand-written numbers. Regenerate it on the day the history is
+loaded (dates and numbers are relative to that day); with `GEMINI_MODE=live` it spends ~5 smart-model requests.
+
+Evals (not part of `make test`): 10 questions with answers from `server/sim/expected.json`.
+
+```bash
+make evals                                   # GEMINI_MODE from env/.env; fake mode is free and must pass 10/10
+MIRA_EVAL_DSN=postgresql://postgres:mira@localhost:55432/mira \
+MIRA_EVAL_RO_DSN=postgresql://copilot_ro:<password>@localhost:55432/mira \
+GEMINI_MODE=live make evals EVAL_ARGS="--only compensating -v"   # live: ~2-5 smart requests per question
+```
+
 ## Safety path (Guardian, emergency calls)
 
 The Safety Guardian (`server/agents/safety_guardian.py`) watches the event stream: a confirmed `fall`,

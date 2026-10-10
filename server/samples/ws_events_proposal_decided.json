@@ -1,0 +1,9 @@
+{
+  "type": "proposal_decided",
+  "proposal_id": 1,
+  "patient_id": "maya",
+  "status": "approved",
+  "decided_by": "okafor",
+  "exercise_id": "squat",
+  "prescription_version": 2
+}

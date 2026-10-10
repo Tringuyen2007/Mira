@@ -108,9 +108,11 @@ def merged_targets(current: dict[str, Any], change: PlanChange) -> dict[str, Any
         targets["rest_days_between"] = change.rest_days_between
     added = set(targets.get("add") or []) | set(change.add or [])
     removed = set(targets.get("remove") or []) | set(change.remove or [])
-    if change.add or change.remove:
-        targets["add"] = sorted(added - set(change.remove or []))
-        targets["remove"] = sorted(removed - set(change.add or []))
+    for key, items in (("add", added - set(change.remove or [])), ("remove", removed - set(change.add or []))):
+        if items:
+            targets[key] = sorted(items)
+        else:
+            targets.pop(key, None)
     return targets
 
 

@@ -321,9 +321,9 @@ def test_merged_targets_keeps_rest_days_and_drills_in_targets() -> None:
     change = PlanChange(exercise_id="squat", rest_days_between=1, add="weight_shift_drill",
                         targets={"knee_deg": 80})
     assert merged_targets({"knee_deg": 90, "sessions_per_week": 5}, change) == {
-        "knee_deg": 80, "sessions_per_week": 5, "rest_days_between": 1, "add": ["weight_shift_drill"], "remove": []}
+        "knee_deg": 80, "sessions_per_week": 5, "rest_days_between": 1, "add": ["weight_shift_drill"]}
     drop = PlanChange(exercise_id="squat", remove=["weight_shift_drill"])
-    assert merged_targets({"add": ["weight_shift_drill"]}, drop) == {"add": [], "remove": ["weight_shift_drill"]}
+    assert merged_targets({"add": ["weight_shift_drill"]}, drop) == {"remove": ["weight_shift_drill"]}
 
 
 # ---- REST ----------------------------------------------------------------------------------------------------
