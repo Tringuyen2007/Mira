@@ -24,7 +24,7 @@ SMALL_INT_MAX = 10
 # kind → (max words, max sentences); None = unlimited.
 LENGTH_LIMITS: dict[str, tuple[int | None, int | None]] = {
     "cue": (8, None),
-    "greeting": (30, 2),
+    "greeting": (30, 3),
     "spoken": (None, 3),
     "situation": (None, 4),
     "note": (None, 5),

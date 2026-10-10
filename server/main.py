@@ -15,6 +15,8 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from server.ai import gemini
+from server.ai.session_voice import SessionVoice
 from server.api import demo, health
 from server.config import REPO_ROOT, cfg
 from server.engine_bridge import EngineBridge
@@ -55,16 +57,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     bridge = EngineBridge(hub, asyncio.get_running_loop(), session_provider=current_session_id)
     state = AppState(cfg, hub, bridge, sessions)
-    state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats})
+    state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats, "ai": gemini.stats})
     set_state(state)
+    if state.db is not None:
+        await gemini.seed_budget(state.db)
+
+    voice = SessionVoice(hub, sessions, live=bridge.live)
+    bridge.subscribe_events(voice.on_event)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
-        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID)
+        voice.prepare_greeting(await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID))
     await bridge.start()
     try:
         yield
     finally:
         await bridge.stop()
+        await voice.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
         set_state(None)
