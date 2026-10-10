@@ -43,7 +43,8 @@ def test_llm_payload_matches_section_8_3() -> None:
     assert llm["begin_message"] == OPENING
     assert llm["general_prompt"] == PROMPT
     assert llm["default_dynamic_variables"] == {"current_status": "No newer information yet.", "limits": LIMITS}
-    [tool] = llm["general_tools"]
+    end_call, tool = llm["general_tools"]
+    assert end_call["type"] == "end_call" and end_call["name"] == "end_call" and end_call["description"]
     assert tool["type"] == "transfer_call"
     assert tool["transfer_destination"] == {"type": "predefined", "number": "{{therapist_phone}}"}
     assert tool["transfer_option"] == {"type": "warm_transfer",
@@ -81,15 +82,21 @@ def test_pick_voice_prefers_a_calm_female_elevenlabs_voice() -> None:
 
 
 class FakeRetell:
-    def __init__(self, existing: bool) -> None:
+    """Mimics Retell versioning: edits go to the latest draft; a published latest needs create_version first."""
+
+    def __init__(self, existing: bool, published: bool = False) -> None:
         self.calls: list[tuple[str, Any]] = []
+        self.version, self.published = 0, published
         items = [SimpleNamespace(agent_id="agent_old", agent_name="Mira Safety Caller")] if existing else []
         self.voice = SimpleNamespace(list=lambda: [voice("11labs-Grace")])
         self.agent = SimpleNamespace(
             list=lambda **kw: SimpleNamespace(items=items, has_more=False, pagination_key=None),
-            retrieve=lambda agent_id: SimpleNamespace(response_engine=SimpleNamespace(llm_id="llm_old")),
+            retrieve=lambda agent_id, **kw: SimpleNamespace(version=self.version, is_published=self.published,
+                                                             response_engine=SimpleNamespace(llm_id="llm_old")),
             create=lambda **kw: self._rec("agent.create", kw, SimpleNamespace(agent_id="agent_new")),
-            update=lambda agent_id, **kw: self._rec("agent.update", (agent_id, kw), None))
+            update=self._agent_update,
+            create_version=self._create_version,
+            publish=self._publish)
         self.llm = SimpleNamespace(
             create=lambda **kw: self._rec("llm.create", kw, SimpleNamespace(llm_id="llm_new")),
             update=lambda llm_id, **kw: self._rec("llm.update", (llm_id, kw), None))
@@ -100,22 +107,46 @@ class FakeRetell:
         self.calls.append((name, args))
         return result
 
+    def _agent_update(self, agent_id: str, **kw: Any) -> None:
+        assert not self.published, "a published version is read-only"
+        self._rec("agent.update", (agent_id, kw), None)
 
-def test_apply_creates_when_missing_and_binds_the_outbound_number() -> None:
+    def _create_version(self, agent_id: str, *, base_version: int) -> None:
+        assert base_version == self.version
+        self.version, self.published = self.version + 1, False
+        self._rec("agent.create_version", base_version, None)
+
+    def _publish(self, agent_id: str, *, version: int, **kw: Any) -> None:
+        assert version == self.version
+        self.published = True
+        self._rec("agent.publish", version, None)
+
+
+def test_apply_creates_publishes_and_pins_the_outbound_number() -> None:
     client = FakeRetell(existing=False)
     ids = apply(client, "+15550100999")
-    assert ids == {"action": "created", "agent_id": "agent_new", "llm_id": "llm_new", "voice_id": "11labs-Grace"}
-    assert [c[0] for c in client.calls] == ["llm.create", "agent.create", "phone.update"]
-    assert client.calls[2][1] == ("+15550100999", {"outbound_agents": [{"agent_id": "agent_new", "weight": 1.0,
-                                                                         "agent_version": "latest"}]})
+    assert ids == {"action": "created", "agent_id": "agent_new", "agent_version": 0, "llm_id": "llm_new",
+                   "voice_id": "11labs-Grace"}
+    assert [c[0] for c in client.calls] == ["llm.create", "agent.create", "agent.publish", "phone.update"]
+    assert client.calls[3][1] == ("+15550100999", {"outbound_agents": [{"agent_id": "agent_new", "weight": 1.0,
+                                                                         "agent_version": 0}]})
 
 
-def test_apply_updates_in_place_when_the_agent_exists() -> None:
+def test_apply_updates_a_draft_in_place_when_the_agent_exists() -> None:
     client = FakeRetell(existing=True)
     ids = apply(client, "+15550100999")
     assert ids["action"] == "updated" and ids["agent_id"] == "agent_old" and ids["llm_id"] == "llm_old"
-    assert [c[0] for c in client.calls] == ["llm.update", "agent.update", "phone.update"]
+    assert [c[0] for c in client.calls] == ["llm.update", "agent.update", "agent.publish", "phone.update"]
     assert client.calls[1][1][1]["response_engine"]["llm_id"] == "llm_old"
+
+
+def test_apply_opens_a_new_draft_when_the_latest_version_is_published() -> None:
+    client = FakeRetell(existing=True, published=True)
+    ids = apply(client, "+15550100999")
+    assert ids["agent_version"] == 1 and client.published
+    assert [c[0] for c in client.calls] == ["agent.create_version", "llm.update", "agent.update", "agent.publish",
+                                            "phone.update"]
+    assert client.calls[-1][1][1]["outbound_agents"][0]["agent_version"] == 1
 
 
 def test_dry_run_prints_the_payload_and_masks_the_number(capsys: pytest.CaptureFixture[str],

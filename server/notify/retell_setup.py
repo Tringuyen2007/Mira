@@ -1,10 +1,15 @@
 """Create or update the Retell "Mira Safety Caller" agent exactly per TRI.md §8.3 (idempotent by name).
 
     python -m server.notify.retell_setup            # dry run: print the payloads, touch nothing
-    python -m server.notify.retell_setup --apply    # create/update LLM + agent, bind the number, verify
+    python -m server.notify.retell_setup --apply    # create/update, publish, bind the number, verify
 
 Configuring is free; this never places a call. Needs RETELL_API_KEY and RETELL_FROM_NUMBER in the
-environment for --apply. Prints the agent id to put in RETELL_AGENT_ID.
+environment for --apply. Prints RETELL_AGENT_ID and RETELL_AGENT_VERSION for the server's env.
+
+Versions: Retell edits only an agent's latest *draft*. --apply writes the draft (opening a new draft
+from the published version first when needed), publishes it, and binds the number's outbound agent to
+that exact version number, so a later dashboard edit can never change what an emergency call says
+until it is published and bound again.
 """
 
 from __future__ import annotations
@@ -25,6 +30,13 @@ MAX_CALL_DURATION_MS = 180_000
 END_CALL_AFTER_SILENCE_MS = 20_000
 DATA_STORAGE_SETTING = "everything"
 TRANSFER_TOOL_NAME = "transfer_to_therapist"
+END_CALL_TOOL_NAME = "end_call"
+END_CALL_DESCRIPTION = (
+    "End the call after a short goodbye once the goal is met: the contact has understood what happened, has said "
+    "whether they can check on the patient now (or will call 911), and has no more questions. Also end it if the "
+    "contact asks to hang up. Never end the call while they are still asking about the patient."
+)
+VERSION_TITLE = "Mira Safety Caller (TRI.md section 8.3)"
 # Calm, warm female ElevenLabs voices, in order of preference; the first one the account offers wins.
 PREFERRED_VOICES = ("11labs-Grace", "11labs-Marissa", "11labs-Myra", "11labs-Paola", "11labs-Kate")
 VOICE_PLACEHOLDER = "<picked from client.voice.list() at --apply>"
@@ -48,6 +60,10 @@ def llm_payload() -> dict[str, Any]:
         "default_dynamic_variables": {"current_status": templates.DEFAULT_CURRENT_STATUS,
                                       "limits": templates.LIMITS_SENTENCE},
         "general_tools": [{
+            "type": "end_call",
+            "name": END_CALL_TOOL_NAME,
+            "description": END_CALL_DESCRIPTION,
+        }, {
             "type": "transfer_call",
             "name": TRANSFER_TOOL_NAME,
             "description": "Warm transfer to the patient's therapist when the contact asks to talk to the therapist.",
@@ -77,9 +93,9 @@ def agent_payload(llm_id: str, voice_id: str) -> dict[str, Any]:
     }
 
 
-def phone_payload(agent_id: str) -> dict[str, Any]:
-    # "latest" = the version this script just wrote (drafts are never published by this script).
-    return {"outbound_agents": [{"agent_id": agent_id, "weight": 1.0, "agent_version": "latest"}]}
+def phone_payload(agent_id: str, version: int | str) -> dict[str, Any]:
+    """Pin the number's outbound agent to the exact published version (not "latest", which is the draft)."""
+    return {"outbound_agents": [{"agent_id": agent_id, "weight": 1.0, "agent_version": version}]}
 
 
 def pick_voice(voices: list[Any]) -> str:
@@ -106,8 +122,8 @@ def _find_agent_id(client: Any, name: str) -> str | None:
         key = page.pagination_key
 
 
-def apply(client: Any, from_number: str) -> dict[str, str]:
-    """Create or update the LLM and agent, bind the agent as the number's outbound agent."""
+def apply(client: Any, from_number: str) -> dict[str, Any]:
+    """Create or update the LLM and agent draft, publish it, and bind that version as the number's outbound agent."""
     voice_id = pick_voice(list(client.voice.list()))
     agent_id = _find_agent_id(client, templates.AGENT_NAME)
     if agent_id is None:
@@ -115,16 +131,22 @@ def apply(client: Any, from_number: str) -> dict[str, str]:
         agent_id = str(client.agent.create(**agent_payload(llm_id, voice_id)).agent_id)
         action = "created"
     else:
-        engine = client.agent.retrieve(agent_id).response_engine
-        llm_id = getattr(engine, "llm_id", None)
+        agent = client.agent.retrieve(agent_id)
+        if getattr(agent, "is_published", False):  # published versions are read-only: open a new draft
+            client.agent.create_version(agent_id, base_version=int(agent.version))
+            agent = client.agent.retrieve(agent_id)
+        llm_id = getattr(agent.response_engine, "llm_id", None)
         if llm_id:
             client.llm.update(llm_id, **llm_payload())
         else:
             llm_id = str(client.llm.create(**llm_payload()).llm_id)
         client.agent.update(agent_id, **agent_payload(llm_id, voice_id))
         action = "updated"
-    client.phone_number.update(from_number, **phone_payload(agent_id))
-    return {"action": action, "agent_id": agent_id, "llm_id": str(llm_id), "voice_id": voice_id}
+    version = int(client.agent.retrieve(agent_id).version)
+    client.agent.publish(agent_id, version=version, version_title=VERSION_TITLE)
+    client.phone_number.update(from_number, **phone_payload(agent_id, version))
+    return {"action": action, "agent_id": agent_id, "agent_version": version, "llm_id": str(llm_id),
+            "voice_id": voice_id}
 
 
 def _get(obj: Any, path: str) -> Any:
@@ -143,10 +165,13 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def verify(client: Any, ids: dict[str, str], from_number: str) -> list[tuple[str, Any, Any, bool]]:
-    """Retrieve the live LLM, agent and number and compare every §8.3 field. Returns (field, want, got, ok)."""
-    llm = client.llm.retrieve(ids["llm_id"])
-    agent = client.agent.retrieve(ids["agent_id"])
+def verify(client: Any, ids: dict[str, Any], from_number: str) -> list[tuple[str, Any, Any, bool]]:
+    """Retrieve the published agent version, its LLM version and the number; compare every §8.3 field.
+
+    Returns (field, want, got, ok)."""
+    agent = client.agent.retrieve(ids["agent_id"], version=ids["agent_version"])
+    llm_version = _get(agent, "response_engine.version")
+    llm = client.llm.retrieve(ids["llm_id"], **({"version": int(llm_version)} if llm_version is not None else {}))
     number = client.phone_number.retrieve(from_number)
     want_llm = llm_payload()
     want_agent = agent_payload(ids["llm_id"], ids["voice_id"])
@@ -159,10 +184,16 @@ def verify(client: Any, ids: dict[str, str], from_number: str) -> list[tuple[str
         check(f"llm.{key}", want_llm[key], _plain(getattr(llm, key, None)))
     tools = _plain(getattr(llm, "general_tools", None)) or []
     transfer = next((t for t in tools if t.get("name") == TRANSFER_TOOL_NAME), {})
-    check("llm.transfer.destination", want_llm["general_tools"][0]["transfer_destination"],
+    end_call = next((t for t in tools if t.get("name") == END_CALL_TOOL_NAME), {})
+    check("llm.end_call", {"type": "end_call", "description": END_CALL_DESCRIPTION},
+          {k: end_call.get(k) for k in ("type", "description")})
+    want_transfer = next(t for t in want_llm["general_tools"] if t["name"] == TRANSFER_TOOL_NAME)
+    check("llm.transfer.destination", want_transfer["transfer_destination"],
           {k: v for k, v in (transfer.get("transfer_destination") or {}).items() if k in ("type", "number")})
     check("llm.transfer.option.type", "warm_transfer", _get(transfer, "transfer_option.type"))
     check("llm.transfer.whisper", templates.WHISPER_MESSAGE, _get(transfer, "transfer_option.private_handoff_option.message"))
+    check("agent.version", ids["agent_version"], getattr(agent, "version", None))
+    check("agent.is_published", True, getattr(agent, "is_published", None))
     check("agent.agent_name", want_agent["agent_name"], agent.agent_name)
     check("agent.response_engine.llm_id", ids["llm_id"], _get(agent, "response_engine.llm_id"))
     check("agent.voice_id", ids["voice_id"], agent.voice_id)
@@ -176,8 +207,9 @@ def verify(client: Any, ids: dict[str, str], from_number: str) -> list[tuple[str
     check("agent.post_call_analysis_data", [(f["name"], f["type"]) for f in POST_CALL_ANALYSIS],
           [(f.get("name"), f.get("type")) for f in analysis if f.get("type") != "system-presets"])
     outbound = _plain(getattr(number, "outbound_agents", None)) or []
-    check("phone_number.outbound_agents[0]", phone_payload(ids["agent_id"])["outbound_agents"][0],
-          outbound[0] if outbound else None)
+    check("phone_number.outbound_agents", phone_payload(ids["agent_id"], ids["agent_version"])["outbound_agents"],
+          [{"agent_id": a.get("agent_id"), "weight": a.get("weight"), "agent_version": a.get("agent_version")}
+           for a in outbound])
     return rows
 
 
@@ -189,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.apply:
         print(json.dumps({"llm": llm_payload(), "agent": agent_payload(LLM_PLACEHOLDER, VOICE_PLACEHOLDER),
                           "phone_number": {"number": mask_phone(from_number) or "<RETELL_FROM_NUMBER>",
-                                           **phone_payload("<agent_id>")}}, indent=2))
+                                           **phone_payload("<agent_id>", "<published version>")}}, indent=2))
         print("\ndry run: nothing was sent. Re-run with --apply to configure Retell.", file=sys.stderr)
         return 0
     if not cfg.RETELL_API_KEY or not from_number:
@@ -204,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, want, got, ok in rows:
         print(f"{'OK ' if ok else 'BAD'} {name}" + ("" if ok else f"\n    want: {want!r}\n    got:  {got!r}"))
     bad = [r for r in rows if not r[3]]
-    print(f"\n{len(rows) - len(bad)}/{len(rows)} fields verified. Set RETELL_AGENT_ID={ids['agent_id']}")
+    print(f"\n{len(rows) - len(bad)}/{len(rows)} fields verified. Set RETELL_AGENT_ID={ids['agent_id']} "
+          f"RETELL_AGENT_VERSION={ids['agent_version']}")
     return 1 if bad else 0
 
 
