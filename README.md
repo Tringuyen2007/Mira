@@ -5,6 +5,8 @@ the engine bridge (mock / replay / live vision), the safety path (fall check-in,
 and the REST API. This README is everything a new developer needs; the team plan (TRI.md, kept by Tri) has the
 design background, but no setup step depends on it.
 
+iOS networking setup and tests: [Networking guide](device/ios/NETWORKING.md).
+
 ## Repo layout
 
 | Path | Owner | What |
