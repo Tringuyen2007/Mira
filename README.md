@@ -59,7 +59,8 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
 - `gemini.py`: `await ask(agent, model, system, messages, tools=None, timeout_s=4.0, background=False,
   json_mode=False)` returns a `Reply` or raises `AIUnavailable` (the caller then uses its fallback).
   `GEMINI_MODE=fake` (default) uses fakes registered per agent with `register_fake(agent, fn)`; `replay` serves
-  saved answers from `data/ai_cache/` (falls back to the fake); `live` calls Gemini and caches every answer.
+  saved answers from `data/ai_cache/` (falls back to the fake); `live` calls Gemini and caches every answer
+  (a caller that rejects an answer calls `await gemini.discard(reply)` so it is not replayed).
   Retries 429/5xx after 1 s and 3 s, honours retry hints, and on a daily-quota 429 for `GEMINI_MODEL_SMART`
   moves through `GEMINI_SMART_FALLBACKS` (the exhausted model is skipped until midnight Pacific). Requests are
   counted per model per Pacific day: warning at 70 %, background callers refused at 85 %. `GEMINI_DISABLED=1`
@@ -69,13 +70,15 @@ All AI lives in `server/ai/`; nothing else imports the Google SDK.
 - `eleven.py`: `await tts(text, cache_key)` → `/audio/<hash>.mp3`, generated once; `ELEVEN_DISABLED=1` or no key
   → `None` (already-recorded files are still served).
 - `cue_library.py`: pre-written cues (`data/cues/cues.json`, hand-written default committed), 3 variants each,
-  `pick(cue_id)` never repeats the last 2. Regenerate (costs quota, run by hand only):
+  `pick(cue_id)` never repeats the last 2; the bridge fills `text`/`audio_url` on every `cue {id}` event
+  (`enrich_cue_event`). Regenerate (costs quota, run by hand only):
 
   ```bash
   python -m server.ai.cue_library --generate-text    # 1 Gemini request (FAST model) → DATA_DIR/cues/cues.json
   python -m server.ai.cue_library --generate-audio   # ElevenLabs, missing MP3s only → DATA_DIR/cues/mp3/
   ```
-- `session_voice.py`: `greeting{text, audio_url}` on `arrived` (prepared at session start) and
+- `session_voice.py`: `greeting{text, audio_url}` on `arrived` (prepared at session start; the mock patient
+  arrives 3 s after start) and
   `summary_ready{set, spoken, therapist_note, audio_url}` after each `set_done`. Both fall back to templates.
 - `prompts/*.md`: system prompts; each ends with the shared guardrail rules.
 
