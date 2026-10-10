@@ -50,6 +50,9 @@ CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "devic
 MAX_CLIENT_MSG_KEYS = 32
 CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
+# Static web pages, mounted only when the directory exists. `device/` itself holds the iOS sources, so it is
+# never served as a whole: the therapist dashboard lives in device/dashboard, the kiosk page in device/kiosk.
+STATIC_PAGES = {"dashboard": REPO_ROOT / "device" / "dashboard", "device": REPO_ROOT / "device" / "kiosk"}
 
 
 class MultiDirStaticFiles(StaticFiles):
@@ -214,8 +217,7 @@ def _mount_static(app: FastAPI) -> None:
     for d in audio_dirs:
         d.mkdir(parents=True, exist_ok=True)
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
-    for name in ("device", "dashboard"):
-        directory = REPO_ROOT / name
+    for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
             app.mount(f"/{name}", StaticFiles(directory=directory, html=True), name=name)
 

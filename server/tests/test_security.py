@@ -190,3 +190,40 @@ def test_tests_never_read_the_developers_dotenv() -> None:
 
     assert os.environ.get("MIRA_SKIP_DOTENV") == "1"
     assert dbutil.RO_PASSWORD == "mira-local-ro"  # fixed, never taken from the environment
+
+
+def test_dashboard_static_path_is_device_dashboard() -> None:
+    from server.config import REPO_ROOT
+    from server.main import STATIC_PAGES
+
+    assert STATIC_PAGES["dashboard"] == REPO_ROOT / "device" / "dashboard"
+    assert STATIC_PAGES["dashboard"].is_dir()  # Victoria's folder exists in the repo
+    assert all(path != REPO_ROOT / "device" for path in STATIC_PAGES.values())  # iOS sources never served
+
+
+def test_dashboard_served_and_ios_sources_not(make_client: Callable[..., TestClient],
+                                              monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from server import main
+
+    (tmp_path / "device" / "dashboard").mkdir(parents=True)
+    (tmp_path / "device" / "dashboard" / "index.html").write_text("<h1>dashboard</h1>")
+    (tmp_path / "device" / "ios").mkdir()
+    (tmp_path / "device" / "ios" / "App.swift").write_text("// source")
+    monkeypatch.setattr(main, "STATIC_PAGES", {"dashboard": tmp_path / "device" / "dashboard",
+                                               "device": tmp_path / "device" / "kiosk"})
+    client = make_client()
+    resp = client.get("/dashboard/")
+    assert resp.status_code == 200 and "dashboard" in resp.text
+    assert client.get("/device/ios/App.swift").status_code == 404
+
+
+def test_cors_allows_separately_hosted_dashboard_but_token_still_required(client: TestClient) -> None:
+    origin = "http://localhost:5173"  # e.g. a Vite dev server
+    pre = client.options("/patients", headers={"Origin": origin, "Access-Control-Request-Method": "GET",
+                                               "Access-Control-Request-Headers": "authorization"})
+    assert pre.status_code == 200
+    assert pre.headers["access-control-allow-origin"] in ("*", origin)
+    assert "authorization" in pre.headers["access-control-allow-headers"].lower()
+    resp = client.get("/stats", headers={"Origin": origin})
+    assert resp.status_code == 401
+    assert client.get("/stats", headers={"Origin": origin, **AUTH}).status_code == 200
