@@ -51,6 +51,8 @@ class Config:
     GEMINI_MODEL_SMART: str = "gemini-3.8-flash"
     GEMINI_DISABLED: bool = False
     GEMINI_DAILY_LIMIT: int = 1000
+    GEMINI_DAILY_LIMITS: str = ""
+    GEMINI_SMART_FALLBACKS: str = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"
 
     ELEVEN_API_KEY: str | None = None
     ELEVEN_VOICE_ID: str | None = None

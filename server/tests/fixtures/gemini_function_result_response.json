@@ -1,0 +1,30 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "text": "You did 12 squat reps today.",
+      "thought_signature": "EmAKXgFpFH0TrUbSyHPMWYX7JVLYlwsTciC3LiQc3-v4H0ydWckatMuZ9rJBtc0PkK18bE9FGVV8ygKJC9JkG3dZWto1kn4nu8tbmoJZuHt0Xya7_V16xDHcKI99tVnqf9o="
+     }
+    ],
+    "role": "model"
+   },
+   "finish_reason": "STOP",
+   "index": 0
+  }
+ ],
+ "model_version": "gemini-3.5-flash-lite",
+ "response_id": "S53KauqdGoXoz7IPovqEsA0",
+ "usage_metadata": {
+  "candidates_token_count": 9,
+  "prompt_token_count": 117,
+  "prompt_tokens_details": [
+   {
+    "modality": "TEXT",
+    "token_count": 117
+   }
+  ],
+  "total_token_count": 126
+ }
+}
