@@ -6,8 +6,10 @@ A failed check means: discard the AI text and use the caller's template/fallback
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Awaitable, Callable, Iterable
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -35,12 +37,15 @@ _UNITS = {
     "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
     "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
 }
+# Scale words count as their own value, so "a hundred reps" must be backed by the data too.
+_SCALES = {"dozen": 12, "hundred": 100, "thousand": 1000}
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
          "ninety": 90}
 _NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 _WORD_RE = re.compile(
     r"\b(" + "|".join(_TENS) + r")(?:[\s-](" + "|".join(k for k in _UNITS if _UNITS[k] < 10) + r"))?\b"
-    r"|\b(" + "|".join(_UNITS) + r")\b",
+    r"|\b(" + "|".join(_UNITS) + r")\b"
+    r"|\b(" + "|".join(_SCALES) + r")s?\b",
     re.IGNORECASE,
 )
 
@@ -49,13 +54,17 @@ _COUNT_WORDS = "|".join(["\\d+", *_UNITS, "another", "more", "done", "completed"
 _BANNED = [
     # diagnosis
     rf"\byou have (?!(?:a |an )?(?:{_COUNT_WORDS})\b)",
+    r"\byou(?:'ve| have)? (?:may|might|probably|likely|could|must|seem to|appear to) (?:have|be suffering)\b",
+    r"\b(?:sounds|looks|seems) like (?:you have|an? (?:injury|tear|strain|sprain))\b",
+    r"\binjur(?:y|ies|ed)\b", r"\binflam\w*", r"\bneed(?:s)? (?:an? )?(?:surgery|operation|mri|x-ray|scan)\b",
     r"\bdiagnos\w*", r"\btorn\b", r"\btears?\b(?= in| of)", r"\brupture\w*", r"\binfect\w*", r"\bfractur\w*",
     r"\bdislocat\w*", r"\bblood clot", r"\bdvt\b", r"\barthritis\b", r"\btendinitis\b", r"\bsprain\w*",
     # medication
     r"\bmedication\w*", r"\bmedicine\w*", r"\bibuprofen\b", r"\bacetaminophen\b", r"\btylenol\b", r"\badvil\b",
     r"\baspirin\b", r"\bopioid\w*", r"\bpainkiller\w*", r"\bpain killer\w*", r"\bpills?\b", r"\bdos(?:e|age)s?\b",
     # stopping treatment
-    r"\bstop (?:your |the )?(?:treatment|therapy|physical therapy|exercises|taking)\b", r"\bquit (?:your )?therapy\b",
+    r"\b(?:stop|skip|quit) (?:doing |taking )?(?:your |the |all )?(?:treatment|therapy|physical therapy|exercises"
+    r"|meds|taking)\b",
     # recovery promises
     r"\bfully recover\w*", r"\bfull recovery\b", r"\bwill recover\b", r"\bguarantee\w*", r"\bcured?\b",
     r"\bheal(?:ed)? completely\b", r"\bback to normal\b",
@@ -74,23 +83,34 @@ def extract_numbers(text: str) -> list[float]:
     """Every number in `text`, digits and English number words ("twelve", "twenty-five")."""
     found = [float(m.replace(",", "")) for m in _NUMBER_RE.findall(text)]
     for m in _WORD_RE.finditer(text):
-        tens, unit, single = m.group(1), m.group(2), m.group(3)
-        if single:
+        tens, unit, single, scale = m.group(1), m.group(2), m.group(3), m.group(4)
+        if scale:
+            found.append(float(_SCALES[scale.lower()]))
+        elif single:
             found.append(float(_UNITS[single.lower()]))
         else:
             found.append(float(_TENS[tens.lower()] + (_UNITS[unit.lower()] if unit else 0)))
     return found
 
 
+def _roundings(a: float) -> tuple[float, ...]:
+    """`a` as written, and rounded to 0 and 1 decimals both half-up (how people and models round: 12.5 → 13)
+    and half-even (Python's round: 12.5 → 12)."""
+    d = Decimal(repr(a))
+    return (a, float(d.quantize(Decimal(1), ROUND_HALF_UP)), float(d.quantize(Decimal("0.1"), ROUND_HALF_UP)),
+            float(round(a)), round(a, 1))
+
+
 def _allowed(n: float, allowed: list[float]) -> bool:
     if n.is_integer() and 0 <= n <= SMALL_INT_MAX:
         return True
-    return any(abs(n - a) < 1e-9 or abs(n - round(a)) < 1e-9 or abs(n - round(a, 1)) < 1e-9 for a in allowed)
+    return any(abs(n - r) < 1e-9 for a in allowed for r in _roundings(a))
 
 
 def check_numbers(text: str, allowed: Iterable[float]) -> bool:
     """True when every number in `text` comes from `allowed` (rounded to 0–1 decimals) or is a count ≤ 10."""
-    values = [abs(float(a)) for a in allowed if isinstance(a, (int, float)) and not isinstance(a, bool)]
+    values = [abs(float(a)) for a in allowed
+              if isinstance(a, (int, float)) and not isinstance(a, bool) and math.isfinite(a)]
     return all(_allowed(n, values) for n in extract_numbers(text))
 
 

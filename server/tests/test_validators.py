@@ -150,3 +150,28 @@ def test_label_is_added_by_code() -> None:
     assert v.AI_DRAFT_LABEL == "AI draft — review before use"
     assert v.label_note("Good set.").startswith(v.AI_DRAFT_LABEL)
     assert v.label_note(v.label_note("Good set.")).count(v.AI_DRAFT_LABEL) == 1
+
+
+def test_numbers_rounded_half_up_are_allowed() -> None:
+    assert v.check_numbers("You reached 13 reps.", [12.5])  # people round 12.5 up; Python's round() gives 12
+    assert v.check_numbers("72.3 degrees", [72.25])
+    assert v.check_numbers("12 reps", [12.5])
+    assert not v.check_numbers("14 reps", [12.5])
+
+
+def test_scale_number_words_must_come_from_data() -> None:
+    assert not v.check_numbers("You did a hundred reps!", [12])
+    assert v.check_numbers("A dozen squats today.", [12])
+
+
+@pytest.mark.parametrize("text", [
+    "You might have a meniscus injury.", "It sounds like a strain.", "You may need surgery.",
+    "Skip your exercises today.", "Stop doing your exercises.", "That is inflammation.",
+])
+def test_banned_hedged_diagnoses_and_stopping(text: str) -> None:
+    assert not v.check_banned(text)
+
+
+@pytest.mark.parametrize("text", ["Stop and rest for a moment.", "You have 2 sets left.", "Great depth, Maya!"])
+def test_harmless_lines_still_pass(text: str) -> None:
+    assert v.check_banned(text)
