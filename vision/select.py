@@ -104,10 +104,13 @@ def pair_position(pa: PoseResult, pb: PoseResult, ca: CameraConfig, cb: CameraCo
 
 class PersonSelector:
     def __init__(self, cams: dict[str, CameraConfig], mat: MatConfig, vicinity_m: float = 1.0,
-                 pair_px: float = 25.0, switch_m: float = 0.3, switch_s: float = 0.5):
+                 pair_px: float = 25.0, switch_m: float = 0.3, switch_s: float = 0.5, forget_s: float = 1.0):
+        """forget_s: how long the tracked person's position is remembered through frames with nobody."""
         self.cams, self.mat = cams, mat
         self.vicinity_m, self.pair_px, self.switch_m, self.switch_s = vicinity_m, pair_px, switch_m, switch_s
+        self.forget_s = forget_s
         self._pos: np.ndarray | None = None
+        self._last_pick_t: float | None = None
         self._challenge_since: float | None = None
 
     def _choose_single(self, cands: list[tuple[np.ndarray, object]]):
@@ -152,6 +155,8 @@ class PersonSelector:
             a = a_people[0] if a_people else None
             b = b_people[0] if b_people else None
             return Selection(a, b, {"A": a_people[1:], "B": b_people[1:]})
+        if self._pos is not None and t - self._last_pick_t > self.forget_s:
+            self._pos, self._challenge_since = None, None  # gone too long: start afresh
 
         pairs = []
         for i, pa in enumerate(a_people):
@@ -172,12 +177,13 @@ class PersonSelector:
                             and plausible_height(p, cam, xz)):
                         singles.append((xz, (name, k)))
             if not singles:
-                self._pos, self._challenge_since = None, None
+                self._challenge_since = None  # keep _pos for forget_s: one empty frame mustn't lose the track
                 return Selection(None, None, {"A": a_people, "B": b_people})
             xz, (name, k) = self._choose_single(singles)
             a = a_people[k] if name == "A" else None
             b = b_people[k] if name == "B" else None
             other = b_people if name == "A" else a_people
             dropped = ("B" if name == "A" else "A") if other else None
+        self._last_pick_t = t
         ignored = {"A": [p for p in a_people if p is not a], "B": [p for p in b_people if p is not b]}
         return Selection(a, b, ignored, dropped, np.asarray(xz, float))

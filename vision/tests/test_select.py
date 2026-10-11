@@ -142,3 +142,19 @@ def test_single_camera_fallback_never_switches_to_a_closer_person():
     ch_a, _ = _person(cams, 0.0, -0.05)  # plausible person 0.55 m closer to the centre, only in A
     picks = [sel.select(0.1 * k, [ch_a, tr_a], []).a for k in range(1, 20)]  # nobody pairs: fallback
     assert all(p is tr_a for p in picks)
+
+
+def test_one_empty_frame_keeps_the_track_but_a_long_gap_forgets_it():
+    cams = _cams()
+    tr_a, tr_b = _person(cams, 0.0, 0.6)  # tracked, towards the edge
+    ch_a, ch_b = _person(cams, 0.0, -0.05)  # closer to the centre
+    sel = PersonSelector(cams, MAT)
+    assert sel.select(0.0, [tr_a], [tr_b]).a is tr_a
+    assert sel.select(0.033, [], []).a is None  # one frame with nobody
+    assert sel.select(0.066, [ch_a, tr_a], [tr_b, ch_b]).a is tr_a  # no instant swap
+
+    sel = PersonSelector(cams, MAT)
+    assert sel.select(0.0, [tr_a], [tr_b]).a is tr_a
+    for k in range(1, 37):  # 1.2 s of nobody
+        sel.select(k / 30, [], [])
+    assert sel.select(1.2, [ch_a, tr_a], [tr_b, ch_b]).a is ch_a  # track forgotten: centre wins at once
