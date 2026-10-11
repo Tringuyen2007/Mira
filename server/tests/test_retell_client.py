@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -82,7 +83,7 @@ async def test_simulated_call_runs_the_whole_ladder_and_closes_the_incident() ->
     await until(lambda: "call_ongoing" in steps)
     inc = guardian.incidents[sid]
     assert inc.escalation is not None and inc.escalation["contact_call_id"] == f"sim_{inc.alert_id}"
-    assert inc.escalation["dynamic_variables"]["contact_name"] == "Linh"
+    assert inc.escalation["dynamic_variables"]["contact_name"] == "Eric"
     await guardian.on_event(ev(sid, "gesture", name="thumbs_up"))
     await until(lambda: "closed" in steps, timeout=3)
     assert steps == ["detected", "checked_in", "escalated", "call_registered", "call_ongoing", "patient_responded",
@@ -121,7 +122,7 @@ async def test_log_only_logs_masked_variables_and_the_rendered_opening() -> None
     lines = [json.loads(line) for line in text.splitlines()]
     sim = next(e for e in lines if e["msg"].startswith("CALLS_DISABLED: simulating Retell call"))
     assert sim["to"] == "***0111" and sim["retell_llm_dynamic_variables"]["therapist_phone"] == "***0222"
-    assert sim["opening"].startswith("Hi Linh, this is Mira") and "{{" not in sim["opening"]
+    assert sim["opening"].startswith("Hello Eric, this is Mira") and "{{" not in sim["opening"]
     assert "{{" not in sim["voicemail"]
     steps_logged = [e["step"] for e in lines if e.get("component") == "guardian" and "step" in e]
     assert steps_logged[:3] == ["detected", "checked_in", "escalated"] and steps_logged[-1] == "closed"
@@ -149,8 +150,9 @@ async def test_live_mode_places_one_call_with_the_exact_sdk_arguments(monkeypatc
     assert created["from_number"] == "+15550100999" and created["to_number"] == CONTACT_PHONE
     assert created["override_agent_id"] == "agent_test" and "override_agent_version" not in created
     assert created["timeout"] == 10.0  # never the SDK's 60 s default on the safety path
-    assert created["idempotency_key"] == f"{inc.alert_id}:emergency_contact"
-    assert created["metadata"] == {"alert_id": inc.alert_id, "role": "emergency_contact"}
+    assert created["idempotency_key"] == f"{inc.alert_id}_emergency_contact"
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", created["idempotency_key"])  # Retell rejects anything else (400)
+    assert created["metadata"] == {"alert_id": inc.alert_id, "role": "emergency_contact", "agent": "main"}
     assert all(isinstance(v, str) and v for v in created["retell_llm_dynamic_variables"].values())
     assert "error_emergency_contact_0" in inc.escalation  # the first attempt failed and was retried
 
@@ -187,9 +189,74 @@ async def test_not_connected_retries_once_then_calls_the_therapist(monkeypatch: 
     guardian, _, _, sid, steps = await make(notifier)
     await guardian.on_event(fall(sid))
     await until(lambda: "closed" in steps, timeout=3)
-    keys = [c["idempotency_key"].split(":", 1)[1] for c in calls.created]
-    assert keys == ["emergency_contact", "emergency_contact:retry", "therapist"]
+    keys = [c["idempotency_key"].split("_", 1)[1] for c in calls.created]
+    assert keys == ["emergency_contact", "emergency_contact_retry", "therapist"]
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]+", c["idempotency_key"]) for c in calls.created)
     assert steps.count("call_retry") == 1 and steps.count("call_not_connected") == 2
+
+
+def backup_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETELL_BACKUP_AGENT_ID", "agent_backup")
+    monkeypatch.setenv("RETELL_BACKUP_AGENT_VERSION", "4")
+    live_env(monkeypatch)
+
+
+async def test_voice_model_error_calls_again_at_once_with_the_backup_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    backup_env(monkeypatch)
+    calls = FakeCalls({"call_1": [("ongoing", None), ("ended", {"data": {}, "reason": "error_llm_websocket_runtime"})],
+                       "call_2": [("ongoing", None), ("ended", {"data": {"will_check_on_patient": True}})]})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.02, not_connected_retry_s=30)
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)  # no 30 s not-connected wait: the backup goes out at once
+    main, backup = calls.created
+    assert main["override_agent_id"] == "agent_test" and main["metadata"]["agent"] == "main"
+    assert backup["override_agent_id"] == "agent_backup" and backup["override_agent_version"] == 4
+    assert backup["metadata"]["agent"] == "backup" and backup["to_number"] == CONTACT_PHONE
+    assert backup["idempotency_key"].endswith("_emergency_contact_backup")
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", backup["idempotency_key"])
+    assert backup["retell_llm_dynamic_variables"] == main["retell_llm_dynamic_variables"]
+    assert steps.count("call_backup") == 1 and "acknowledged" in steps and "therapist_call" not in steps
+
+
+async def test_main_agent_create_failure_places_the_call_with_the_backup_agent(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    backup_env(monkeypatch)
+    calls = FakeCalls({"call_1": [("ongoing", None), ("ended", {"data": {"will_check_on_patient": True}})]},
+                      fail_creates=3)  # every attempt with the main agent fails
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.02, retry_delays_s=(0, 0.01, 0.01))
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)
+    assert len(calls.created) == 1 and calls.created[0]["override_agent_id"] == "agent_backup"
+    assert calls.created[0]["idempotency_key"].endswith("_emergency_contact_backup")
+    assert "escalated" in steps and "call_failed" not in steps and "acknowledged" in steps
+
+
+async def test_backup_agent_failing_too_falls_back_to_the_therapist(monkeypatch: pytest.MonkeyPatch) -> None:
+    backup_env(monkeypatch)
+    calls = FakeCalls({"call_1": [("ended", {"data": {}, "reason": "error_retell"})],
+                       "call_2": [("ended", {"data": {}, "reason": "error_llm_websocket_open"})],
+                       "call_3": [("registered", None)]})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.02)
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)
+    assert [(c["metadata"]["role"], c["metadata"]["agent"]) for c in calls.created] == [
+        ("emergency_contact", "main"), ("emergency_contact", "backup"), ("therapist", "main")]
+    assert steps.count("call_backup") == 1
+
+
+async def test_without_a_backup_agent_a_model_error_calls_the_therapist(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_env(monkeypatch)
+    calls = FakeCalls({"call_1": [("ended", {"data": {}, "reason": "error_llm_websocket_lost_connection"})],
+                       "call_2": [("registered", None)]})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), poll_interval_s=0.02)
+    guardian, _, _, sid, steps = await make(notifier)
+    await guardian.on_event(fall(sid))
+    await until(lambda: "closed" in steps, timeout=3)
+    assert [c["metadata"]["role"] for c in calls.created] == ["emergency_contact", "therapist"]
+    assert "call_backup" not in steps
 
 
 async def test_watch_timeout_still_closes_the_incident(monkeypatch: pytest.MonkeyPatch) -> None:

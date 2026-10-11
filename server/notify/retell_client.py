@@ -32,6 +32,11 @@ MAX_POLLS = 80  # ~4 min at 3 s
 NOT_CONNECTED_RETRY_S = 60.0
 FINAL_STATUSES = ("ended", "not_connected", "error")
 NO_ANSWER_REASONS = ("voicemail_reached", "dial_no_answer", "dial_busy", "dial_failed")
+# The voice agent's model or Retell itself failed (not the person): call again at once with the backup agent.
+AGENT_FAILURE_REASONS = ("error_llm_websocket_open", "error_llm_websocket_lost_connection",
+                         "error_llm_websocket_runtime", "error_llm_websocket_corrupt_payload", "error_retell",
+                         "error_unknown")
+BACKUP_SUFFIX = ":backup"
 SIM_RING_S = 2.0
 # Per-request limits: the SDK default (60 s read, 2 internal retries) could hold an escalation for minutes.
 CREATE_TIMEOUT_S = 10.0
@@ -127,8 +132,9 @@ class RetellNotifier:
         return out
 
     async def _place_call(self, inc: Incident, role: str, to_number: str, variables: dict[str, str],
-                          out: dict[str, Any], suffix: str = "") -> str | None:
-        """Place one call (with retries in live mode). Records it in the per-person ledger."""
+                          out: dict[str, Any], suffix: str = "", backup: bool = False) -> str | None:
+        """Place one call (with retries in live mode). Records it in the per-person ledger. If the main agent's
+        call can't be created, the backup agent (another model provider) is tried once, still as the same call."""
         retry = bool(suffix)
         if not self.ledger.may_call(inc.alert_id, role, retry=retry):
             log.warning("call refused by policy", extra={"alert_id": inc.alert_id, "role": role})
@@ -140,14 +146,16 @@ class RetellNotifier:
             out["render_error"] = str(exc)
             log.error("call text has an unrendered variable", extra={"alert_id": inc.alert_id, "role": role})
             rendered = {}
-        extra = {"alert_id": inc.alert_id, "role": role, "to": mask_phone(to_number)}
+        extra = {"alert_id": inc.alert_id, "role": role, "to": mask_phone(to_number),
+                 "agent": "backup" if backup else "main"}
         if self.mode == "log_only":
             call_id = f"sim_{inc.alert_id}" + ("" if role == CONTACT else f"_{role}") + suffix.replace(":", "_")
             self._sims[call_id] = SimulatedCall(asyncio.get_running_loop().time(), self.sim_duration_s,
                                                   self.sim_ring_s)
             log.warning("CALLS_DISABLED: simulating Retell call (no real call placed)", extra={
                 **extra, "call_id": call_id, "retell_llm_dynamic_variables": variables,
-                "opening": rendered.get("opening"), "voicemail": rendered.get("voicemail")})
+                "opening": rendered.get("backup_opening" if backup else "opening"),
+                "voicemail": rendered.get("voicemail")})
         else:
             call_id = None
             for attempt, delay in enumerate(self.retry_delays_s):
@@ -155,11 +163,20 @@ class RetellNotifier:
                     await asyncio.sleep(delay)
                 try:
                     call_id = await asyncio.to_thread(self._create_call, inc.alert_id, role, to_number,
-                                                      variables, suffix)
+                                                      variables, suffix, backup)
                     break
                 except Exception as exc:  # noqa: BLE001 - recorded in the payload, then retried
                     out[f"error_{role}_{attempt}"] = repr(exc)[:300]
                     log.warning("create_phone_call failed", extra={**extra, "attempt": attempt, "error": repr(exc)})
+            if call_id is None and not backup and self.has_backup:
+                log.warning("main agent call failed, trying the backup agent", extra=extra)
+                extra["agent"] = "backup"
+                try:
+                    call_id = await asyncio.to_thread(self._create_call, inc.alert_id, role, to_number,
+                                                      variables, suffix + BACKUP_SUFFIX, True)
+                except Exception as exc:  # noqa: BLE001 - recorded; the caller falls back further
+                    out[f"error_{role}_backup"] = repr(exc)[:300]
+                    log.warning("create_phone_call failed", extra={**extra, "error": repr(exc)})
             if call_id is None:
                 return None
             log.warning("Retell call placed", extra={**extra, "call_id": call_id})
@@ -173,17 +190,25 @@ class RetellNotifier:
             self._client_obj = Retell(api_key=cfg.RETELL_API_KEY)
         return self._client_obj
 
-    def _create_call(self, alert_id: str, role: str, to_number: str, variables: dict[str, str], suffix: str) -> str:
+    @property
+    def has_backup(self) -> bool:
+        return bool(cfg.RETELL_BACKUP_AGENT_ID)
+
+    def _create_call(self, alert_id: str, role: str, to_number: str, variables: dict[str, str], suffix: str,
+                     backup: bool = False) -> str:
         # The published version retell_setup bound to the number; without it Retell picks the agent's default.
-        version = {"override_agent_version": cfg.RETELL_AGENT_VERSION} if cfg.RETELL_AGENT_VERSION is not None else {}
+        agent_id, agent_version = ((cfg.RETELL_BACKUP_AGENT_ID, cfg.RETELL_BACKUP_AGENT_VERSION) if backup
+                                   else (cfg.RETELL_AGENT_ID, cfg.RETELL_AGENT_VERSION))
+        version = {"override_agent_version": agent_version} if agent_version is not None else {}
         call = self._client().call.create_phone_call(
             from_number=cfg.RETELL_FROM_NUMBER,
             to_number=to_number,
-            override_agent_id=cfg.RETELL_AGENT_ID,
+            override_agent_id=agent_id,
             **version,
             retell_llm_dynamic_variables=variables,
-            metadata={"alert_id": alert_id, "role": role},
-            idempotency_key=f"{alert_id}:{role}{suffix}",  # a retry can never place a second call
+            metadata={"alert_id": alert_id, "role": role, "agent": "backup" if backup else "main"},
+            # A retry can never place a second call. Retell allows only [A-Za-z0-9_-] here.
+            idempotency_key=f"{alert_id}_{role}{suffix}".replace(":", "_"),
             timeout=CREATE_TIMEOUT_S,
         )
         return str(call.call_id)
@@ -249,12 +274,22 @@ class RetellNotifier:
                         await self.guardian.close(inc)
 
     async def _after_call(self, inc: Incident, call_id: str, view: CallView) -> str | None:
-        """Acknowledge, retry once if not connected, or fall back to the therapist. Returns a new call id to watch."""
+        """Acknowledge; call again with the backup agent if the voice model failed; retry once if not connected;
+        or fall back to the therapist. Returns a new call id to watch."""
         data = view.analysis or {}
         if data.get("will_check_on_patient"):
             await self._log_step(inc, "acknowledged", {"call_id": call_id, "notes": data.get("notes"),
                                                       "contact_reached": data.get("contact_reached")})
             return None
+        if (view.disconnection_reason in AGENT_FAILURE_REASONS and self.has_backup
+                and self.ledger.may_call(inc.alert_id, CONTACT, retry=True)):
+            await self._log_step(inc, "call_backup", {"call_id": call_id, "reason": view.disconnection_reason})
+            backup_out: dict[str, Any] = {}
+            new_id = await self._place_call(inc, CONTACT, inc.profile.contact_phone or "",
+                                            call_variables(inc, inc.profile.contact_name), backup_out,
+                                            suffix=BACKUP_SUFFIX, backup=True)
+            if new_id is not None:
+                return new_id
         if view.status != "ended" and self.ledger.may_call(inc.alert_id, CONTACT, retry=True):
             await self._log_step(inc, "call_retry", {"call_id": call_id, "after_s": self.not_connected_retry_s})
             await asyncio.sleep(self.not_connected_retry_s)
@@ -263,7 +298,8 @@ class RetellNotifier:
                                             call_variables(inc, inc.profile.contact_name), out, suffix=":retry")
             if new_id is not None:
                 return new_id
-        if view.status != "ended" or view.disconnection_reason in NO_ANSWER_REASONS or view.in_voicemail:
+        if (view.status != "ended" or view.disconnection_reason in NO_ANSWER_REASONS + AGENT_FAILURE_REASONS
+                or view.in_voicemail):
             await self.maybe_call_therapist(inc)
         return None
 

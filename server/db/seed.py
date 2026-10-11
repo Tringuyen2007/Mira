@@ -1,7 +1,8 @@
 """Seed the demo cast (idempotent): Dr. Okafor, Maya (mock persona, D21) and her prescriptions.
 
 usage: python -m server.db.seed "$DSN"
-Phone numbers come from DEMO_THERAPIST_PHONE / DEMO_EMERGENCY_PHONE and are refreshed on every run.
+Phone numbers (DEMO_THERAPIST_PHONE / DEMO_EMERGENCY_PHONE) and the contact name (DEMO_CONTACT_NAME) are
+refreshed on every run.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ def seed(conn: psycopg.Connection[Any], history_days: int = 75) -> None:
     upsert_therapist(conn)
     upsert_patient(conn, patient_id=MAYA_ID, name="Maya Ellis", age=67, height_cm=163, mass_kg=70,
                    affected_side="right", condition="right knee replacement",
-                   contact_name="Linh", contact_phone=cfg.DEMO_EMERGENCY_PHONE, hr_limit=130, simulated=True,
+                   contact_name=cfg.DEMO_CONTACT_NAME, contact_phone=cfg.DEMO_EMERGENCY_PHONE, hr_limit=130, simulated=True,
                    created_days_ago=history_days + 5)
     ensure_prescriptions(conn, MAYA_ID)
 

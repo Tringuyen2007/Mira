@@ -159,13 +159,23 @@ def pacific_day_start(now: float | None = None) -> datetime:
     return datetime(local.year, local.month, local.day, tzinfo=PACIFIC)
 
 
+def api_keys() -> list[str]:
+    """GEMINI_API_KEY first, then GEMINI_API_KEYS, without duplicates."""
+    keys: list[str] = []
+    for k in [cfg.GEMINI_API_KEY or "", *(cfg.GEMINI_API_KEYS or "").split(",")]:
+        if k.strip() and k.strip() not in keys:
+            keys.append(k.strip())
+    return keys
+
+
 def daily_limit(model: str) -> int:
+    """Per-key limit times the number of keys (each key has its own free-tier quota)."""
     limits = dict(DEFAULT_DAILY_LIMITS)
     for item in (cfg.GEMINI_DAILY_LIMITS or "").split(","):
         name, _, value = item.partition("=")
         if name.strip() and value.strip().isdigit():
             limits[name.strip()] = int(value.strip())
-    return limits.get(model, cfg.GEMINI_DAILY_LIMIT)
+    return limits.get(model, cfg.GEMINI_DAILY_LIMIT) * max(len(api_keys()), 1)
 
 
 class Budget:
@@ -177,6 +187,8 @@ class Budget:
         self.counts: dict[str, int] = {}
         self.blocked_until: dict[str, float] = {}
         self._warned: set[str] = set()
+        self.key_index = 0  # which of api_keys() is in use
+        self.keys_spent: dict[int, float] = {}  # key index -> blocked until (next Pacific midnight)
 
     def _roll(self) -> None:
         day = pacific_day(self.clock())
@@ -207,6 +219,18 @@ class Budget:
     def block_until_midnight(self, model: str) -> None:
         self.blocked_until[model] = next_pacific_midnight(self.clock())
 
+    def rotate_key(self, n_keys: int) -> bool:
+        """The active key hit a daily quota: switch to the next key not spent today. False when none is left."""
+        now = self.clock()
+        self.keys_spent[self.key_index] = next_pacific_midnight(now)
+        for step in range(1, n_keys):
+            i = (self.key_index + step) % n_keys
+            if self.keys_spent.get(i, 0.0) <= now:
+                self.key_index = i
+                self.blocked_until.clear()  # those 429s were the old key's
+                return True
+        return False
+
     def cooldown(self, model: str, seconds: float) -> None:
         self.blocked_until[model] = max(self.blocked_until.get(model, 0.0), self.clock() + seconds)
 
@@ -224,6 +248,8 @@ class Budget:
                       for m, n in self.counts.items()},
             "blocked": {m: datetime.fromtimestamp(t, PACIFIC).isoformat(timespec="seconds")
                         for m, t in self.blocked_until.items() if t > now},
+            "key_index": self.key_index,
+            "keys_spent": sorted(i for i, t in self.keys_spent.items() if t > now),
         }
 
 
@@ -408,9 +434,11 @@ _client_key: str | None = None
 
 def _get_client() -> genai.Client:
     global _client, _client_key
-    if _client is None or _client_key != cfg.GEMINI_API_KEY:
-        _client = genai.Client(api_key=cfg.GEMINI_API_KEY)
-        _client_key = cfg.GEMINI_API_KEY
+    keys = api_keys()
+    key = keys[budget.key_index % len(keys)]
+    if _client is None or _client_key != key:
+        _client = genai.Client(api_key=key)
+        _client_key = key
     return _client
 
 
@@ -601,7 +629,7 @@ async def ask(agent: str, model: str, system: str, messages: list[dict[str, Any]
     if mode != "live":
         _counters["unavailable"] += 1
         raise AIUnavailable(f"unknown GEMINI_MODE {mode!r}")
-    if not cfg.GEMINI_API_KEY:
+    if not api_keys():
         _counters["unavailable"] += 1
         raise AIUnavailable("no api key")
     reply = await _ask_live(agent, model, system, messages, tools, timeout_s, background, json_mode,
@@ -671,6 +699,11 @@ async def _ask_live(agent: str, model: str, system: str, messages: list[dict[str
                 _record(agent, m, _ms(loop, started), False, False, "429")
                 last_error = "429"
                 if exc.daily:
+                    if budget.rotate_key(len(api_keys())):
+                        log.warning("gemini key spent for today, switching key",
+                                    extra={"model": m, "key_index": budget.key_index})
+                        wait = 0.0
+                        continue
                     budget.block_until_midnight(m)
                     break
                 if exc.retry_after is not None and exc.retry_after > MAX_HINT_WAIT_S:

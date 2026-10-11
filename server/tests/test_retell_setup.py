@@ -12,9 +12,9 @@ from server.config import reload_config
 from server.notify.retell_setup import agent_payload, apply, llm_payload, main, pick_voice
 
 # Copied verbatim from TRI.md §8.3 (the single source for the agent).
-OPENING = ("Hi {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
+OPENING = ("Hello {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
            "This is an urgent safety call. {{situation}}")
-VOICEMAIL = ("Hi {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
+VOICEMAIL = ("Hello {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
              "Urgent: {{situation_short}} Please call {{patient_first_name}} at {{patient_phone}}. "
              "If you can't reach her, call 911.")
 WHISPER = "Mira safety alert for {{patient_first_name}}: {{situation_short}}"
@@ -39,6 +39,7 @@ LIMITS = ("Mira only sees body position and movement through its cameras. It can
 
 def test_llm_payload_matches_section_8_3() -> None:
     llm = llm_payload()
+    assert llm["model"] == "gemini-3.8-flash"
     assert llm["start_speaker"] == "agent"
     assert llm["begin_message"] == OPENING
     assert llm["general_prompt"] == PROMPT
@@ -79,6 +80,9 @@ def test_pick_voice_prefers_a_calm_female_elevenlabs_voice() -> None:
     assert pick_voice([voice("11labs-Zoe")]) == "11labs-Zoe"
     with pytest.raises(RuntimeError):
         pick_voice([voice("cartesia-x", "cartesia")])
+
+
+BACKUP_CREATE = ["llm.create", "agent.create", "agent.publish"]  # the backup agent (not found by name → created)
 
 
 class FakeRetell:
@@ -126,8 +130,10 @@ def test_apply_creates_publishes_and_pins_the_outbound_number() -> None:
     client = FakeRetell(existing=False)
     ids = apply(client, "+15550100999")
     assert ids == {"action": "created", "agent_id": "agent_new", "agent_version": 0, "llm_id": "llm_new",
-                   "voice_id": "11labs-Grace"}
-    assert [c[0] for c in client.calls] == ["llm.create", "agent.create", "agent.publish", "phone.update"]
+                   "voice_id": "11labs-Grace", "backup_agent_id": "agent_new", "backup_agent_version": 0,
+                   "backup_llm_id": "llm_new"}
+    assert [c[0] for c in client.calls] == ["llm.create", "agent.create", "agent.publish", "phone.update",
+                                            *BACKUP_CREATE]
     assert client.calls[3][1] == ("+15550100999", {"outbound_agents": [{"agent_id": "agent_new", "weight": 1.0,
                                                                          "agent_version": 0}]})
 
@@ -136,7 +142,8 @@ def test_apply_updates_a_draft_in_place_when_the_agent_exists() -> None:
     client = FakeRetell(existing=True)
     ids = apply(client, "+15550100999")
     assert ids["action"] == "updated" and ids["agent_id"] == "agent_old" and ids["llm_id"] == "llm_old"
-    assert [c[0] for c in client.calls] == ["llm.update", "agent.update", "agent.publish", "phone.update"]
+    assert [c[0] for c in client.calls] == ["llm.update", "agent.update", "agent.publish", "phone.update",
+                                            *BACKUP_CREATE]
     assert client.calls[1][1][1]["response_engine"]["llm_id"] == "llm_old"
 
 
@@ -145,8 +152,22 @@ def test_apply_opens_a_new_draft_when_the_latest_version_is_published() -> None:
     ids = apply(client, "+15550100999")
     assert ids["agent_version"] == 1 and client.published
     assert [c[0] for c in client.calls] == ["agent.create_version", "llm.update", "agent.update", "agent.publish",
-                                            "phone.update"]
-    assert client.calls[-1][1][1]["outbound_agents"][0]["agent_version"] == 1
+                                            "phone.update", *BACKUP_CREATE]
+    phone = next(args for name, args in client.calls if name == "phone.update")
+    assert phone[1]["outbound_agents"][0]["agent_version"] == 1
+
+
+def test_apply_creates_a_non_gemini_backup_agent_and_never_binds_it_to_the_number() -> None:
+    client = FakeRetell(existing=True)
+    apply(client, "+15550100999")
+    backup_llm = [args for name, args in client.calls if name == "llm.create"][-1]
+    backup_agent = [args for name, args in client.calls if name == "agent.create"][-1]
+    assert backup_llm["model"] == "gpt-4.1-mini" and not backup_llm["model"].startswith("gemini")
+    assert backup_llm["begin_message"].startswith("Hello {{contact_name}}, this is Mira")
+    assert "{{situation_short}} Please check on {{patient_first_name}} right away." in backup_llm["begin_message"]
+    assert [t["type"] for t in backup_llm["general_tools"]] == ["end_call"]
+    assert backup_agent["agent_name"] == "Mira Safety Caller (backup)"
+    assert sum(1 for name, _ in client.calls if name == "phone.update") == 1
 
 
 def test_dry_run_prints_the_payload_and_masks_the_number(capsys: pytest.CaptureFixture[str],
