@@ -40,17 +40,32 @@ def test_limit_thigh_stops_it_swinging_far_behind():
     np.testing.assert_allclose(C.limit_thigh(fwd, FRAME), fwd)
 
 
-def test_push_out_of_torso_uses_the_nearest_face_and_side():
+def test_push_out_of_torso_goes_out_the_front_or_its_own_side():
     hw, length = 0.18, 0.55
-    inside_left = np.array([0.15, 0.3, 0.0])
-    p, moved = C.push_out_of_torso(inside_left, FRAME, hw, length, side=1.0)
-    assert moved and abs(p[0] - (hw + C.LIMB_MARGIN_M)) < 1e-9
-    front = np.array([0.0, 0.3, 0.10])  # near the chest's front surface, at the midline
-    p, moved = C.push_out_of_torso(front, FRAME, hw, length, side=-1.0)
-    assert moved and abs(p[2] - (C.TORSO_DEPTH_M + C.LIMB_MARGIN_M)) < 1e-9
+    w, d = hw + C.LIMB_MARGIN_M, C.TORSO_DEPTH_M + C.LIMB_MARGIN_M
+    front = np.array([-0.10, 0.3, 0.02])  # left hand crossed to the right, in front of the mid-plane
+    p, moved, face = C.push_out_of_torso(front, FRAME, hw, length, side=1.0)
+    assert moved and face == "front" and abs(p[2] - d) < 1e-9 and abs(p[0] + 0.10) < 1e-9  # stays on the right
+    behind = np.array([-0.10, 0.3, -0.02])  # behind the mid-plane: out through the left arm's own side
+    p, moved, face = C.push_out_of_torso(behind, FRAME, hw, length, side=1.0)
+    assert moved and face == "side" and abs(p[0] - w) < 1e-9
+    behind_right = np.array([0.0, 0.3, -0.05])
+    p, moved, face = C.push_out_of_torso(behind_right, FRAME, hw, length, side=-1.0)
+    assert moved and face == "side" and abs(p[0] + w) < 1e-9
     outside = np.array([0.5, 0.3, 0.0])
-    p, moved = C.push_out_of_torso(outside, FRAME, hw, length, side=1.0)
-    assert not moved and np.allclose(p, outside)
+    p, moved, face = C.push_out_of_torso(outside, FRAME, hw, length, side=1.0)
+    assert not moved and face is None and np.allclose(p, outside)
+
+
+def test_push_out_of_torso_keeps_last_frames_face_near_the_boundary():
+    hw, length = 0.18, 0.55
+    w, d = hw + C.LIMB_MARGIN_M, C.TORSO_DEPTH_M + C.LIMB_MARGIN_M
+    near_side = np.array([0.20, 0.3, 0.115])  # side push 0.02, front push 0.015: front chosen
+    assert C.push_out_of_torso(near_side, FRAME, hw, length, side=1.0)[2] == "front"
+    p, _, face = C.push_out_of_torso(near_side, FRAME, hw, length, side=1.0, prefer="side")
+    assert face == "side" and abs(p[0] - w) < 1e-9  # within PUSH_HYSTERESIS_M: keep the side
+    deep = np.array([0.0, 0.3, 0.05])  # side push 0.22 vs front 0.08: too far to keep the side
+    assert C.push_out_of_torso(deep, FRAME, hw, length, side=1.0, prefer="side")[2] == "front"
 
 
 def test_foot_yaw_is_limited_held_when_unsure_locked_and_rate_capped():

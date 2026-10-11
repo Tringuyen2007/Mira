@@ -197,3 +197,39 @@ def test_constrained_rig_follows_confident_tracking_closely():
     J[15] = X[15] + [0.05, 0.25, 0.25]  # left hand raised forward, reachable
     P = _rigged(BodyRig(), X, J)
     assert np.linalg.norm(P[15] - J[15]) < 0.02
+
+
+def _chest_point(X, x, y, z):
+    """A point in the standing skeleton's torso frame: x left of the midline, y above the hips, z in front."""
+    hip = (X[23] + X[24]) / 2
+    return hip + np.array([x, y, z])
+
+
+def test_hand_swept_across_the_chest_moves_smoothly_and_stays_out_of_the_torso():
+    from vision.avatar_eval import inside_torso
+
+    X = standing_skeleton()
+    rig = BodyRig()
+    _measure(rig, X)
+    prev = None
+    for k, x in enumerate(np.linspace(0.15, -0.15, 31)):
+        J = X.copy()
+        J[15] = _chest_point(X, x, 0.30, 0.08)  # left wrist crossing the chest 8 cm in front of its mid-plane
+        P = rig.update(AFTER + k * DT, J, "3d")
+        assert not inside_torso(P, P[15]) and not inside_torso(P, P[13]), x
+        if prev is not None:
+            assert np.linalg.norm(P[15] - prev) < 0.04, x
+        prev = P[15].copy()
+
+
+def test_clasped_hands_right_of_the_midline_stay_where_they_are():
+    X = standing_skeleton()
+    rig = BodyRig()
+    _measure(rig, X)
+    rng = np.random.default_rng(7)
+    for k in range(30):
+        J = X.copy()
+        J[15] = _chest_point(X, -0.04, 0.30, 0.10) + rng.normal(0, 0.01, 3)
+        J[16] = _chest_point(X, -0.04, 0.30, 0.10) + rng.normal(0, 0.01, 3)
+        P = rig.update(AFTER + k * DT, J, "3d")
+        assert np.linalg.norm(P[15] - J[15]) < 0.06, k

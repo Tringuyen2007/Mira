@@ -12,6 +12,7 @@ import numpy as np
 FLEX_MAX_DEG = 150.0  # elbows and knees bend from straight (0) to this, one way only
 TORSO_DEPTH_M = 0.09  # half depth of the torso box
 LIMB_MARGIN_M = 0.04  # an arm stays this far outside the torso surface
+PUSH_HYSTERESIS_M = 0.02  # keep last frame's torso face unless another is this much shorter a push
 FOOT_YAW_LIMIT_DEG = 35.0  # toe-out / toe-in from the body's forward
 FOOT_PITCH_DEG = (-30.0, 40.0)  # toe down .. toe up
 FOOT_YAW_RATE_DPS = 240.0  # fastest a foot turns (8° per frame at 30 fps)
@@ -92,23 +93,27 @@ def limit_thigh(direction, pelvis: Frame) -> np.ndarray:
 
 
 def push_out_of_torso(p, torso: Frame, half_width: float, length: float, side: float,
-                      depth: float = TORSO_DEPTH_M, margin: float = LIMB_MARGIN_M) -> tuple[np.ndarray, bool]:
-    """Move a point that is inside the torso box (plus margin) out through the nearest side face.
-    `side` is +1 for the left arm, -1 for the right (used when the point is near the midline)."""
+                      depth: float = TORSO_DEPTH_M, margin: float = LIMB_MARGIN_M,
+                      prefer: str | None = None) -> tuple[np.ndarray, bool, str | None]:
+    """Move a point that is inside the torso box (plus margin) out of it: through the front face when it
+    is in front of the torso's mid-plane, otherwise through its own arm's side face (`side` is +1 for the
+    left arm, -1 for the right), so a hand crossing the chest stays in front instead of jumping to the far
+    side. `prefer` (the face used last frame) wins while its push is within PUSH_HYSTERESIS_M of the
+    chosen face's, so a point near the boundary doesn't flicker between faces.
+    Returns (point, moved, face) with face "front", "side" or None."""
     q = torso.local(p)
     w, d = half_width + margin, depth + margin
     if not (0.0 < q[1] < length and abs(q[0]) < w and abs(q[2]) < d):
-        return np.asarray(p, float), False
-    sign = np.sign(q[0]) if abs(q[0]) > 0.03 else side
-    gaps = {"side": w - abs(q[0]), "front": d - q[2], "back": d + q[2]}
-    face = min(gaps, key=gaps.get)
-    if face == "side" or (sign != side and abs(q[0]) > 0.03):
-        q[0] = sign * w
-    elif face == "front":
+        return np.asarray(p, float), False, None
+    push = {"front": d - q[2], "side": abs(side * w - q[0])}
+    face = "front" if q[2] >= 0 else "side"
+    if prefer in push and push[prefer] <= push[face] + PUSH_HYSTERESIS_M:
+        face = prefer
+    if face == "front":
         q[2] = d
     else:
-        q[2] = -d
-    return torso.world(q), True
+        q[0] = side * w
+    return torso.world(q), True, face
 
 
 def foot_yaw(tracked_dir, body_fwd, prev_yaw: float | None, dt: float, locked_yaw: float | None,

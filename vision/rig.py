@@ -80,6 +80,7 @@ class BodyRig:
         self._locked_yaw: dict[str, float | None] = {"l": None, "r": None}
         self._prev_pose_t: float | None = None
         self._body_yaw: float | None = None
+        self._push_face: dict[str, str] = {}  # torso face each arm point was last pushed through
 
     @property
     def progress(self) -> float:
@@ -241,18 +242,30 @@ class BodyRig:
             elbow, wrist = two_bone_ik(sh, target, pole, l1, l2)
             length = float(np.linalg.norm((P[11] + P[12]) / 2 - hip_mid))
             hw = L["shoulder_width"] / 2
+
+            def push(point, name):  # out of the torso, keeping the face this point used last time
+                key = f"{side}_{name}"
+                out, moved, face = C.push_out_of_torso(point, chest, hw, length, sign, prefer=self._push_face.get(key))
+                if moved:
+                    self._push_face[key] = face
+                return out, moved
+
             for _ in range(3):
-                e2, moved_e = C.push_out_of_torso(elbow, chest, hw, length, sign)
-                w2, moved_w = C.push_out_of_torso(wrist, chest, hw, length, sign)
+                e2, moved_e = push(elbow, "elbow")
+                w2, moved_w = push(wrist, "wrist")
                 if not (moved_e or moved_w):
                     break
                 elbow, wrist = two_bone_ik(sh, w2 if moved_w else wrist, e2 if moved_e else elbow, l1, l2)
-            if C.push_out_of_torso(elbow, chest, hw, length, sign)[1]:  # still in: swing the elbow out sideways
+            if push(elbow, "elbow")[1]:  # still in: swing the elbow out sideways
                 side_pole = sh + sign * chest.left - 0.3 * chest.fwd
                 elbow, wrist = two_bone_ik(sh, wrist, side_pole, l1, l2)
-                w2, moved_w = C.push_out_of_torso(wrist, chest, hw, length, sign)
+                w2, moved_w = push(wrist, "wrist")
                 if moved_w:
                     elbow, wrist = two_bone_ik(sh, w2, side_pole, l1, l2)
+                q = chest.local(elbow)
+                if C.push_out_of_torso(elbow, chest, hw, length, sign)[1]:  # still in: out through its own side
+                    q[0] = sign * (hw + C.LIMB_MARGIN_M)
+                    elbow, wrist = two_bone_ik(sh, wrist, chest.world(q), l1, l2)
             self._held[f"{side}{s['wrist']}"] = wrist - sh
             P[s["elbow"]], P[s["wrist"]] = elbow, wrist
             for k in s["hand"]:
