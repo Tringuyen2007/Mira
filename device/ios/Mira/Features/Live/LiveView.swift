@@ -9,7 +9,6 @@ struct LiveView: View {
     @State private var pain = 6.0
     @State private var commandError: String?
     @State private var isSending = false
-    @State private var pulse = false
     private let onEnded: (String) -> Void
     init(initialScreen: Screen = .live, onEnded: @escaping (String) -> Void = { _ in }) {
         _screen = State(initialValue: initialScreen)
@@ -94,17 +93,18 @@ struct LiveView: View {
                     }
                     .overlay(alignment: .bottomTrailing) { Text("Mirror view").font(MiraUI.font(13)).foregroundStyle(MiraUI.soft) }
             } else {
+                // Stationary placeholder, fixed height: the 3D skeleton view goes here once the camera engine
+                // is connected. No animation — the live stream re-renders this screen ~10×/s and an implicit
+                // repeating animation made the card jitter.
                 MiraCard {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "camera.metering.unknown").font(.system(size: 34)).foregroundStyle(MiraUI.soft)
                         Text("3D movement view").font(MiraUI.font(20, "SemiBold"))
-                        Text("Coming soon — Mira will show your skeleton here once the camera engine is connected.")
-                            .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Mira will show your skeleton here once the cameras are set up.")
+                            .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft).multilineTextAlignment(.center)
+                    }.frame(maxWidth: .infinity, minHeight: 200)
                 }
-                .opacity(pulse ? 0.7 : 1)
-                .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: pulse)
                 .overlay { RoundedRectangle(cornerRadius: 28).stroke(MiraUI.alert, lineWidth: hasFlags ? 2.5 : 0) }
-                .onAppear { pulse = true }
                 .accessibilityElement(children: .combine)
             }
             HStack(spacing: 12) {
