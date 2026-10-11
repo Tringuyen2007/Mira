@@ -25,6 +25,7 @@ from vision.moved import MoveMonitor
 from vision.pipeline import Pipeline
 from vision.record import Recorder, default_path
 from vision.replay import iter_frames
+from vision.types import CameraPeople
 
 COUNTDOWN_S = 8.0  # time to walk from the laptop to the mat
 REFINED_ZOOM_STD = 0.02  # a zoom that survived the body refinement counts as measured
@@ -72,6 +73,17 @@ def capture_live(cams, mat, model: str, seconds: float, force: bool = False):
     return pairs
 
 
+def refine_views(pair, out):
+    """The two views to refine from. With exactly one person in each camera they are the same person,
+    so use them as found: person selection needs the cameras to agree under the current calibration,
+    which would starve the refinement of exactly the data it needs to fix a calibration that is off.
+    Otherwise the person the pipeline selected."""
+    if (isinstance(pair.a, CameraPeople) and isinstance(pair.b, CameraPeople)
+            and len(pair.a.people) == 1 and len(pair.b.people) == 1):
+        return pair.a.people[0], pair.b.people[0]
+    return out.raw["A"], out.raw["B"]
+
+
 def _capture(src, rec, pipeline, pairs, seconds: float) -> None:
     start = time.monotonic()
     while (elapsed := time.monotonic() - start) < COUNTDOWN_S + seconds:
@@ -80,7 +92,7 @@ def _capture(src, rec, pipeline, pairs, seconds: float) -> None:
             if capturing:
                 out = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s)
                 rec.write(out)
-                pairs.append((out.raw["A"], out.raw["B"]))  # the person at the mat, as detected
+                pairs.append(refine_views(pair, out))
         tiles = []
         for n, v in sorted(src.latest_frames().items()):
             if v is None:
