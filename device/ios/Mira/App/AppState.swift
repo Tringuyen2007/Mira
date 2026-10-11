@@ -105,11 +105,17 @@ struct OnboardingDraft: Codable, Equatable {
 final class WatchBridge {
     private(set) var isPaired = false
     private(set) var isWatchAppInstalled = false
+    private(set) var setup: WatchWire.Setup?
+    private(set) var watchSetupDone = false
+    var watchPaired: Bool { isPaired && isWatchAppInstalled }
+    var apiProvider: (() -> APIClient?)?
+    var onMeUpdated: ((MeResponse) -> Void)?
 
-    init(liveSession: LiveSessionStore) {}
+    init(liveSession: LiveSessionStore, defaults: UserDefaults = .standard) {}
     func activate() {}
     func push(_ live: LiveMessage?) {}
-    func forward(haptic pattern: String) {}
+    func handle(event: SocketEvent) {}
+    func refreshSetup(api: APIClient?) async {}
     func forward(summary: SessionSummaryMessage) {}
 }
 #endif
@@ -210,7 +216,7 @@ final class AppState {
         tokenHint = token.map(PairingToken.masked)
         // Note: patientID's didSet isn't called from init, which is what we want.
         patientID = defaults.string(forKey: "patientID.v1")
-        watch = WatchBridge(liveSession: liveSession)
+        watch = WatchBridge(liveSession: liveSession, defaults: defaults)
         liveSession.onMessageEvent = { [weak self, store] event in
             if event.message.kind == "message" {
                 store.appendIncoming(event)
@@ -224,19 +230,39 @@ final class AppState {
             }
         }
         liveSession.onSessionSummary = { [weak self] _ in Task { await self?.refreshMe() } }
+        // W2: every decoded /ws/events event (haptics included) reaches the watch through
+        // `WatchBridge.handle`, which is a no-op unless a watch is paired.
+        liveSession.onWatchEvent = { [weak self] event in self?.watch.handle(event: event) }
+        watch.apiProvider = { [weak self] in self?.watchAPIClient }
+        watch.onMeUpdated = { [weak self] updated in
+            self?.me = updated
+            self?.store.apply(me: updated)
+        }
         #if canImport(WatchConnectivity)
         watch.activate()
         #endif
+        refreshWatchSetup()
         trackLiveForWatch()
-        trackHapticForWatch()
         trackSummaryForWatch()
+    }
+
+    // MARK: Watch relay (W2)
+
+    /// The REST client for watch requests: only with a linked patient token.
+    private var watchAPIClient: APIClient? { isLinked ? apiClient : nil }
+
+    /// `GET /me/watch` → the watch's setup, only when a watch is paired and a patient token exists.
+    private func refreshWatchSetup() {
+        guard watchPaired, let api = watchAPIClient else { return }
+        Task { await watch.refreshSetup(api: api) }
     }
 
     // MARK: Watch relay (Plan 4)
 
     /// Re-arming `withObservationTracking` loops: each tracks exactly one
-    /// `liveSession` property, so a `live` update never re-sends the last haptic
-    /// (and vice versa). `AppState` itself stays the single place that knows both
+    /// `liveSession` property, so a `live` update never re-sends the last summary
+    /// (and vice versa). Haptics go through `onWatchEvent` → `WatchBridge.handle`.
+    /// `AppState` itself stays the single place that knows both
     /// "what changed" and "the watch cares" — `LiveSessionStore` doesn't know
     /// `WatchBridge` exists, and `WatchBridge` doesn't know when to look.
     private func trackLiveForWatch() {
@@ -250,16 +276,6 @@ final class AppState {
                 let live = self.liveSession.live
                 self.watch.push(live?.phase == "done" ? nil : live)
                 self.trackLiveForWatch()
-            }
-        })
-    }
-
-    private func trackHapticForWatch() {
-        withObservationTracking({ _ = liveSession.hapticSeq }, onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                if let haptic = self.liveSession.haptic { self.watch.forward(haptic: haptic.pattern) }
-                self.trackHapticForWatch()
             }
         })
     }
@@ -543,6 +559,7 @@ final class AppState {
             liveSession.disconnect()
         }
         if active, patientID != nil { Task { await refreshMe() } }
+        if active { refreshWatchSetup() }
     }
 
     func testREST() async {
