@@ -236,6 +236,8 @@ class SessionRunner(threading.Thread):
         self._stop_flag = threading.Event()
         self._last_t: float | None = None
         self.error: str | None = None
+        self._status_at = 0.0
+        self._n = 0
 
     def run(self) -> None:
         reason = "program_complete"
@@ -246,6 +248,7 @@ class SessionRunner(threading.Thread):
                 for msg in self.translator.frame(frame.to_dict()):
                     self.emit(msg)
                 self._drain_events()
+                self._log_status(frame)
                 if self._stop_flag.is_set():
                     reason = "stopped"
                     break
@@ -263,6 +266,25 @@ class SessionRunner(threading.Thread):
                 log.exception("engine stop failed")
             for msg in self.translator.stopped(self._last_t if self._last_t is not None else time.time(), reason):
                 self.emit(msg)
+
+    def _log_status(self, frame: FrameResult, every_s: float = 5.0) -> None:
+        """One line every 5 s so the operator can tell "no person seen" from "measuring" from "ready"."""
+        self._n += 1
+        now = time.monotonic()
+        if now - self._status_at < every_s:
+            return
+        self._status_at = now
+        conf = frame.conf
+        seen = int((conf > 0.5).sum()) if conf is not None else 0
+        state = self.engine.session.state if self.engine.session is not None else "?"
+        hint = ""
+        if frame.tracking == "lost" or seen == 0:
+            hint = "  <- no person detected: check camera index (python -m vision.cams), lighting, and that they are on the mat"
+        elif frame.body == "measuring":
+            hint = "  <- stand straight and still, facing the camera, until the body is measured"
+        log.info("frames=%d tracking=%s body=%s progress=%.0f%% joints_seen=%d/33 on_mat=%s session=%s rep=%d%s",
+                 self._n, frame.tracking, frame.body, 100 * float(frame.body_progress), seen, frame.on_mat, state,
+                 self.engine.counter.rep if self.engine.counter is not None else 0, hint)
 
     def _drain_events(self) -> None:
         while True:
