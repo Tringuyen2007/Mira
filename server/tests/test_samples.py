@@ -8,7 +8,7 @@ from server.hub import POSE_FIELDS
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdown", "cue", "rep", "set_done",
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
-                 "proposal_created", "coach_adapt", "device_health"}
+                 "proposal_created", "coach_adapt", "device_health", "device_status"}
 CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health"}
 
 

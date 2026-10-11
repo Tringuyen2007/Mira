@@ -196,6 +196,7 @@ class AppState:
         self.coach: Any | None = None
         self.scheduler: Any | None = None
         self.notifications: Any | None = None
+        self.devices: Any = None
 
 
 _state: AppState | None = None

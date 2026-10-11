@@ -6,6 +6,7 @@ Run exactly one process: uvicorn server.main:app --host 0.0.0.0 --port 8000 --wo
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,6 +33,7 @@ from server.db import queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
+from server.devices import DEVICE_EVENT_TYPES, DEVICE_HEALTH_KEYS, DeviceRegistry
 from server.engine_bridge import EngineBridge
 from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
@@ -39,7 +41,7 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import TunnelFilterMiddleware, require_token, ws_token_ok
+from server.security import TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -96,6 +98,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge = EngineBridge(hub, asyncio.get_running_loop(), session_provider=current_session_id)
     state = AppState(cfg, hub, bridge, sessions, db=db)
     state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats, "ai": gemini.stats})
+    devices = DeviceRegistry(hub)
+    state.devices = devices
+    state.stat_providers["devices"] = devices.status
+    devices.start()
     writer: FrameWriter | None = None
     if db is not None and persistence is not None and cfg.TIGER_DSN:  # narrowed for the type checker
         writer = FrameWriter(cfg.TIGER_DSN, patient_provider=current_patient_id)
@@ -148,6 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await notifications.stop()
         await notifier.stop()
         await guardian.stop()
+        await devices.stop()
         await bridge.stop()
         await voice.close()
         await coach.close()
@@ -200,6 +207,33 @@ def _on_client_event(msg: dict[str, Any]) -> None:
         _forward_session_command(state, msg)
 
 
+def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:
+    """A device's device_health, reduced to the allow-listed keys, stamped as the LCD."""
+    out = {k: v for k, v in msg.items() if k in DEVICE_HEALTH_KEYS}
+    out.update(type="device_health", app="lcd", t=round(time.time(), 3))
+    return out
+
+
+def _device_event_handler() -> Callable[[dict[str, Any]], None]:
+    """Per-connection handler for a device-scoped /ws/events client: rate-limited, device_health only."""
+    limiter = RateLimiter(CLIENT_MSGS_PER_S)
+
+    def handle(msg: dict[str, Any]) -> None:
+        if not limiter.allow() or msg.get("type") != "device_health" or len(msg) > MAX_CLIENT_MSG_KEYS:
+            return
+        state = get_state()
+        clean = sanitize_device_health(msg)
+        state.bridge.inject(clean)
+        if state.devices is not None:
+            state.devices.on_health(clean)
+
+    return handle
+
+
+def _device_accepts(msg: dict[str, Any]) -> bool:
+    return msg.get("type") in DEVICE_EVENT_TYPES
+
+
 def _forward_session_command(state: AppState, msg: dict[str, Any]) -> None:
     """start/pause/skip/stop go to the engine over the reverse channel (`EngineBridge.send_to_engine`), same
     as `incident_closed`. A user `start` must never resume a session the Safety Guardian is holding open
@@ -224,12 +258,27 @@ def _parse_since_id(raw: str | None) -> int | None:
         return None
 
 
-async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None) -> None:
-    if not await ws_token_ok(ws):
+async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allow_device: bool = False) -> None:
+    scope = await ws_scope(ws)
+    if scope is None or (scope == "device" and not allow_device):
         await ws.close(code=1008)
         return
     await ws.accept()
-    await get_state().hub.connect(channel, ws, on_message)
+    hub = get_state().hub
+    if scope == "full":
+        await hub.connect(channel, ws, on_message)
+        return
+    if channel != "events":
+        await hub.connect(channel, ws)
+        return
+    devices = get_state().devices
+    if devices is not None:
+        devices.connected()
+    try:
+        await hub.connect(channel, ws, _device_event_handler(), accept=_device_accepts)
+    finally:
+        if devices is not None:
+            devices.disconnected()
 
 
 def _mount_static(app: FastAPI) -> None:
@@ -263,11 +312,11 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/live")
     async def ws_live(ws: WebSocket) -> None:
-        await _serve_ws(ws, "live")
+        await _serve_ws(ws, "live", allow_device=True)
 
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket) -> None:
-        await _serve_ws(ws, "events", _client_event_handler())
+        await _serve_ws(ws, "events", _client_event_handler(), allow_device=True)
 
     @app.websocket("/ws/notifications")
     async def ws_notifications(ws: WebSocket) -> None:

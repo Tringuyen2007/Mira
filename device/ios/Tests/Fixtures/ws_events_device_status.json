@@ -1,0 +1,12 @@
+{
+  "type": "device_status",
+  "device": "lcd",
+  "online": true,
+  "t": 1791662260.102,
+  "last_health": {
+    "t": 1791662260.101,
+    "app": "lcd",
+    "screen": "1024x600",
+    "version": "1"
+  }
+}
