@@ -36,6 +36,7 @@ export function render(root, vm, mascot) {
   stage.dataset.speaking = String(vm.speaking === true);
   stage.dataset.rep = String(vm.rep);
   stage.dataset.tick = vm.countdown === null ? "" : String(vm.countdown);
+  stage.dataset.call = vm.callStatus ? vm.callStatus.phase : "none";
 
   const img = $(root, "mira");
   if (vm.mood) {
@@ -87,6 +88,11 @@ export function render(root, vm, mascot) {
   }
 
   text(root, "fall-name", vm.firstName || "the patient");
+  // The live call narration (alert.message from the server) under the gestures; textContent only.
+  text(root, "call-status", vm.callStatus ? vm.callStatus.message : "");
+  show(root, "call-status", vm.callStatus !== null && vm.callStatus.message !== "");
+  const call = root.querySelector(".call");
+  if (call) call.classList.toggle("call-emphasis", vm.show911 === true || vm.callStatus?.phase === "failed");
   text(root, "caption-text", vm.caption);
   show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== ""
     && vm.captionsOn !== false);

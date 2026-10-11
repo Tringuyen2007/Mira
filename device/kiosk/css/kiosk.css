@@ -543,6 +543,28 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   box-shadow: var(--shadow-call);
 }
 .call img { display: block; width: 56px; height: 56px; }
+/* Live call status: one line under the gestures; the gaps around it tighten so the CALL 911 pill still clears
+   the 20px border */
+.call-status {
+  margin-top: 8px;
+  max-width: 860px;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-alert-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#stage:not([data-call="none"]) .alert .gestures { margin-top: 12px; }
+#stage:not([data-call="none"]) .bystander { margin-top: 10px; }
+#stage:not([data-call="none"]) .call { margin-top: 8px; }
+/* Emphasised when the server asks bystanders to call 911 or the call failed: slightly larger, brighter */
+.call.call-emphasis {
+  transform: scale(1.05);
+  background: #f03a2c;
+  box-shadow: 0 8px 40px rgba(240, 58, 44, 0.45);
+}
 .call-text {
   font-size: 76px;
   font-weight: 700;
@@ -679,6 +701,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage[data-screen="sessionDone"] .d5 { animation-delay: -1.5s; }
 .orbit { animation: orbit 60s linear infinite; }
 .fall-border { animation: pulse 2s ease-in-out infinite; }
+#stage[data-call="calling"] .call img { animation: pulse 1s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   #stage *, #stage *::after { animation: none !important; }
