@@ -12,12 +12,12 @@ from retell.lib.webhook_auth import symmetric
 from starlette.websockets import WebSocketDisconnect
 
 from server.config import PLACEHOLDER_TOKEN
-from server.security import MAX_WEBHOOK_BYTES, require_token
+from server.security import MAX_WEBHOOK_BYTES, require_principal, require_token
 from server.tests.conftest import AUTH, TOKEN
 
 TUNNEL = "mira-test.trycloudflare.com"
 RETELL_KEY = "retell-test-key-abcdef123456"
-PUBLIC_ROUTES = {"/health", "/retell/webhook"}
+PUBLIC_ROUTES = {"/health", "/retell/webhook", "/pair"}
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def test_every_rest_route_requires_token_except_public(client: TestClient) -> No
         if not isinstance(route, APIRoute) or route.path in PUBLIC_ROUTES:
             continue
         calls = {dep.call for dep in route.dependant.dependencies}
-        assert require_token in calls, f"{route.path} is missing require_token"
+        assert calls & {require_token, require_principal}, f"{route.path} is missing require_token/require_principal"
 
 
 @pytest.mark.parametrize("path", ["/ws/pose", "/ws/live", "/ws/events", "/ws/notifications"])

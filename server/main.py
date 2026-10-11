@@ -20,21 +20,26 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from server.agents.haptics import HapticCoach
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
+from server.agents.session_analyst import SessionAnalyst
 from server.agents.session_coach import SessionCoach
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, lcd_link, patients, prescriptions
+from server.api import care as care_api
+from server.api import me as me_api
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
 from server.api import dashboard
 from server.api import insight as insight_api
+from server.api import pair as pair_api
 from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
-from server.config import REPO_ROOT, cfg
-from server.db import queries
+from server.config import Config, REPO_ROOT, cfg
+from server.db import migrate, queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
@@ -46,7 +51,9 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
+from server.security import (Principal, TokenCheckUnavailable, TunnelFilterMiddleware, require_principal,
+                             require_token, ws_scope, ws_token_ok)
+from server.session_end import MockAutoRestart, SessionEnder
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -54,6 +61,9 @@ log = get_logger("main")
 # Client → server message types accepted on /ws/events (§4.3); anything else is dropped. Engine events
 # (fall, fall_status, gesture, …) can never come from a client.
 CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health"})
+
+# A patient's phone may steer the session and relay its watch; it is never the LCD.
+PATIENT_CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button"})
 # `command` names that control the session itself (as opposed to pain/im_ok, which the Guardian/Coach
 # handle off the broadcast event). These are forwarded to the engine over the reverse channel.
 SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
@@ -89,6 +99,18 @@ class KioskStaticFiles(StaticFiles):
         return await super().get_response(path, scope)
 
 
+def _mock_loops(c: Config) -> bool:
+    """True when the mock engine's squat program repeats forever (pre-Plan-2 behaviour): its own `stopped`
+    never fires, so neither the last-set auto-stop nor the mock auto-restart should race it."""
+    return c.MIRA_SOURCE.startswith("mock") and c.MOCK_LOOP
+
+
+def _last_set_enabled(c: Config) -> bool:
+    """Whether `SessionEnder` should end the session when the last set is done (engines without `stopped`).
+    Never when MOCK_LOOP keeps the mock program running forever."""
+    return c.AUTO_STOP_AFTER_LAST_SET and not _mock_loops(c)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     problem = cfg.token_problem() or cfg.device_token_problem() or cfg.lcd_link_problem()
@@ -104,6 +126,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if cfg.TIGER_DSN and not cfg.DB_DISABLED:
         db = Database(cfg.TIGER_DSN, cfg.COPILOT_DSN)
         await db.open()
+        if cfg.DB_AUTO_MIGRATE and db.available:
+            try:
+                applied = await asyncio.to_thread(migrate.apply_migrations, cfg.TIGER_DSN)
+                log.info("migrations checked", extra={"count": len(applied)})
+            except Exception as exc:  # noqa: BLE001 - a schema hiccup must never block the live demo
+                log.warning("migrations failed; continuing", extra={"error": str(exc)})
         await _warn_on_stale_grants(db)
         persistence = SessionPersistence(db)
     sessions = SessionRegistry(store=persistence)
@@ -158,20 +186,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     coach = SessionCoach(hub, sessions, bridge, incident_open=lambda sid: sid in guardian.incidents)
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
+    haptics = HapticCoach(hub)
+    bridge.subscribe_events(haptics.on_event)
+
+    ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
+    bridge.subscribe_events(ender.on_event)
+    auto_restart: MockAutoRestart | None = None
+    if cfg.MIRA_SOURCE.startswith("mock") and not _mock_loops(cfg):
+        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S,
+                                       incident_open=lambda: bool(guardian.incidents))
+        sessions.on_stop.append(auto_restart.on_stop)
+    # Every ended session gets a whole-session analysis (session_summary event, session_analyses row).
+    analyst = SessionAnalyst(hub, sessions)
+    sessions.on_stop.append(analyst.on_stop)
+    state.analyst = analyst
 
     # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
     # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
     sessions.on_start.append(lambda session: bridge.live.on_session_start(session.profile.first_name,
-                                                                        session.exercise_id))
+                                                                        session.exercise_id,
+                                                                        session.profile.device_prefs))
     sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id))
     sessions.on_start.append(voice.prepare_greeting)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
-        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID)
+        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, origin="boot")
     await bridge.start()
     try:
         yield
     finally:
+        if auto_restart is not None:  # first: it must not start a session while everything below shuts down
+            await auto_restart.close()
         if scheduler is not None:
             await scheduler.stop()
         await notifications.stop()
@@ -183,6 +228,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await coach.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
+        await analyst.close()
         if writer is not None:
             await asyncio.to_thread(writer.stop)
         if db is not None:
@@ -220,6 +266,10 @@ def _client_event_handler() -> Callable[[dict[str, Any]], None]:
     return handle
 
 
+#: watch_button name → the session command it maps to (unknown names are ignored).
+WATCH_BUTTON_COMMANDS = {"ready": "start", "stop": "stop"}
+
+
 def _on_client_event(msg: dict[str, Any]) -> None:
     if msg.get("type") not in CLIENT_EVENT_TYPES or len(msg) > MAX_CLIENT_MSG_KEYS:
         log.debug("dropping client event", extra={"event_type": str(msg.get("type"))[:40]})
@@ -228,6 +278,10 @@ def _on_client_event(msg: dict[str, Any]) -> None:
     state.bridge.inject(msg)
     if msg.get("type") == "command" and msg.get("name") in SESSION_COMMANDS:
         _forward_session_command(state, msg)
+    elif msg.get("type") == "watch_button":
+        name = WATCH_BUTTON_COMMANDS.get(msg.get("name"))
+        if name:
+            _forward_session_command(state, {"type": "command", "name": name, "payload": {"source": "watch"}})
 
 
 def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:
@@ -294,14 +348,24 @@ def _parse_since_id(raw: str | None) -> int | None:
 
 
 async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allow_device: bool = False) -> None:
-    scope = await ws_scope(ws)
-    if scope is None or (scope == "device" and not allow_device):
+    try:
+        principal = await ws_scope(ws)
+    except TokenCheckUnavailable:
+        # The server can't tell yet whether this token is valid (no database, or a database hiccup): tell the
+        # phone to try again later, never that its token was rejected (1008 would stop LiveSocket's retries).
+        await ws.accept()
+        await ws.close(code=1013)
+        return
+    if principal is None or (principal.scope == "device" and not allow_device):
         await ws.close(code=1008)
         return
     await ws.accept()
     hub = get_state().hub
-    if scope == "full":
+    if principal.scope == "full":
         await hub.connect(channel, ws, on_message)
+        return
+    if principal.scope == "patient":
+        await _serve_patient_ws(ws, channel, principal)
         return
     if channel != "events":
         await hub.connect(channel, ws)
@@ -314,6 +378,68 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
     finally:
         if devices is not None:
             devices.disconnected()
+
+
+def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
+    """Per-client hub filter: a phone sees frames and events for its own patient, even after the session that
+    produced them has ended (e.g. the analyst's `session_summary`, emitted ~2s after `stop()` already cleared
+    `sessions.current`). Priority: an explicit `patient_id` on the message decides outright; else an explicit
+    `session_id` is looked up (the registry still knows ended sessions) and that session's patient decides;
+    else (no tag at all — `/ws/live` and `/ws/pose` frames) fall back to the current-session rule."""
+    def accept(msg: dict[str, Any]) -> bool:
+        tagged_patient = msg.get("patient_id")
+        if isinstance(tagged_patient, str):
+            return tagged_patient == patient_id
+        session_id = msg.get("session_id")
+        if isinstance(session_id, str):
+            session = get_state().sessions.get(session_id)
+            return session is not None and session.patient_id == patient_id
+        current = get_state().sessions.current
+        return current is not None and current.patient_id == patient_id
+
+    return accept
+
+
+def _patient_owns_current(patient_id: str) -> Callable[[dict[str, Any]], bool]:
+    """Inbound gate for a patient's own messages: ONLY the current session's patient, never an explicit
+    `patient_id`/`session_id` tag on the message (unlike `_patient_accepts`, the outbound filter that
+    deliberately honours those tags so a phone still receives its own `session_summary` after the session
+    it describes has ended). Without this, a phone could write `{"type":"command","name":"stop",
+    "patient_id":"someone-else"}` and steer another patient's live session."""
+    def owns(msg: dict[str, Any]) -> bool:  # noqa: ARG001 - signature matches the hub's message-filter shape
+        current = get_state().sessions.current
+        return current is not None and current.patient_id == patient_id
+
+    return owns
+
+
+_STRIP_CLIENT_TAGS = ("patient_id", "session_id")
+
+
+def _strip_client_tags(msg: dict[str, Any]) -> dict[str, Any]:
+    """Drop any client-supplied `patient_id`/`session_id` before `_on_client_event`: those keys are stamped
+    by the server on outbound events for routing, never trusted as input from a phone."""
+    return {k: v for k, v in msg.items() if k not in _STRIP_CLIENT_TAGS}
+
+
+def _patient_event_handler(patient_id: str) -> Callable[[dict[str, Any]], None]:
+    """Like _client_event_handler, minus device_health, and only while the session is the patient's own."""
+    limiter = RateLimiter(CLIENT_MSGS_PER_S)
+    owns = _patient_owns_current(patient_id)
+
+    def handle(msg: dict[str, Any]) -> None:
+        if not limiter.allow() or msg.get("type") not in PATIENT_CLIENT_EVENT_TYPES or not owns(msg):
+            return
+        _on_client_event(_strip_client_tags(msg))
+
+    return handle
+
+
+async def _serve_patient_ws(ws: WebSocket, channel: str, principal: Principal) -> None:
+    assert principal.patient_id is not None
+    hub = get_state().hub
+    handler = _patient_event_handler(principal.patient_id) if channel == "events" else None
+    await hub.connect(channel, ws, handler, accept=_patient_accepts(principal.patient_id))
 
 
 def _mount_static(app: FastAPI) -> None:
@@ -336,12 +462,17 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(demo.router)
-    for module in (sessions_api, patients, prescriptions, calibration, alerts, notifications_api, insight_api):
+    for module in (sessions_api, patients, prescriptions):  # patients may call these with their own token
+        app.include_router(module.router, dependencies=[Depends(require_principal)])
+    for module in (calibration, alerts, notifications_api, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     for module in (copilot_api, proposals, dashboard):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token
+    app.include_router(pair_api.router)  # /pair is public; its two admin routes carry their own require_token
+    app.include_router(me_api.router)  # routes carry their own require_principal
+    app.include_router(care_api.router)  # routes carry their own require_principal
 
     @app.websocket("/ws/pose")
     async def ws_pose(ws: WebSocket) -> None:

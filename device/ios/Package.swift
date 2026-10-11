@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .target(name: "MiraNetworking", path: "Mira", exclude: [
             "App/MiraApp.swift", "Design", "Features", "Watch", "Info.plist", "Assets.xcassets"
-        ], sources: ["Net", "App/AppState.swift"]),
+        ], sources: ["Net", "App/AppState.swift", "App/PatientStore.swift"]),
         // Fixtures/ is a copy of server/samples/*.json (the server's contract);
         // ContractFixtureTests fails when the copy drifts from the server's files.
         .testTarget(name: "MiraNetworkingTests", dependencies: ["MiraNetworking"], path: "Tests",

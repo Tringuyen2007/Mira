@@ -11,12 +11,14 @@ export class AudioPlayer {
   constructor(AudioImpl = globalThis.Audio) {
     this.AudioImpl = AudioImpl;
     this.current = null;
+    this.volume = 1;
   }
 
   play(url) {
     if (!isSafeAudioUrl(url)) return false;
     this.current?.pause();
     const clip = new this.AudioImpl(url);
+    clip.volume = this.volume;
     this.current = clip;
     clip.play().catch(() => { /* autoplay blocked outside kiosk mode: captions still show */ });
     return true;

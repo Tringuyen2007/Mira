@@ -18,7 +18,16 @@ struct MiraApp: App {
             }
             .environment(state)
             .tint(Theme.Mira.accent)
-            .task { if !isDesignPreview { state.setForeground(scenePhase == .active) } }
+            .task {
+                // Wires local-notification syncing in at launch — Settings also sets
+                // this (first open) via the same `== nil` guard, but a reminder that
+                // was already configured must still fire without the patient ever
+                // opening Settings again.
+                if state.onPreferencesChanged == nil {
+                    state.onPreferencesChanged = { prefs in Task { await Reminders.sync(prefs) } }
+                }
+                if !isDesignPreview { state.setForeground(scenePhase == .active) }
+            }
             .onChange(of: scenePhase) { _, phase in
                 guard !isDesignPreview else { return }
                 if phase == .active { state.setForeground(true) }

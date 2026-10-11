@@ -1,7 +1,7 @@
 import Foundation
 
 enum APIError: LocalizedError, Equatable {
-    case invalidAddress, invalidResponse, http(Int, String), notConnected, notPaired, unauthorized
+    case invalidAddress, invalidResponse, http(Int, String), notConnected, notPaired, unauthorized, forbidden
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +11,7 @@ enum APIError: LocalizedError, Equatable {
         case .notConnected: return "Mira server offline. Reconnect before sending a command."
         case .notPaired: return "Not paired. Enter the Mira server token in Settings."
         case .unauthorized: return "Token rejected by the Mira server. Check the token in Settings."
+        case .forbidden: return "This isn't your data to see."
         }
     }
 }
@@ -87,6 +88,7 @@ struct APIClient {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         if response.statusCode == 401 { throw APIError.unauthorized }
+        if response.statusCode == 403 { throw APIError.forbidden }
         guard (200..<300).contains(response.statusCode) else {
             throw APIError.http(response.statusCode, String(decoding: data.prefix(512), as: UTF8.self))
         }
@@ -120,6 +122,16 @@ struct APIClient {
     }
     func stopSession(id: String) async throws -> SessionStopped { try await request("POST", path: ["sessions", id, "stop"]) }
     func shareSession(id: String) async throws -> SessionShared { try await request("POST", path: ["sessions", id, "share"]) }
+    /// A patient's session history for the Progress/Care screens.
+    func sessions(patientID: String, limit: Int? = nil) async throws -> SessionList {
+        var query: [URLQueryItem] = []
+        if let limit { query.append(URLQueryItem(name: "limit", value: String(limit))) }
+        return try await request(path: ["patients", patientID, "sessions"], query: query)
+    }
+    /// Records pain/effort/note after a session ends (the Summary screen's check-in).
+    func checkin(sessionID: String, _ body: CheckinRequest) async throws -> CheckinResponse {
+        try await request("POST", path: ["sessions", sessionID, "checkin"], body: json(body))
+    }
     func askCopilot(question: String, patientID: String? = nil) async throws -> CopilotResponse {
         try await request("POST", path: ["copilot", "ask"], body: json(CopilotRequest(question: question, patientId: patientID)))
     }
@@ -138,4 +150,35 @@ struct APIClient {
         try await request("POST", path: ["alerts", id, "resolve"], body: json(body))
     }
     func notificationCount() async throws -> NotificationCount { try await request(path: ["notifications", "count"]) }
+
+    // MARK: Pairing and /me (Plan 1)
+
+    /// Public: a therapist code plus the onboarding profile → a patient token. Never retried.
+    func pair(_ body: PairRequest) async throws -> PairResponse {
+        let data = try await perform("POST", path: ["pair"], body: json(body), authenticated: false)
+        return try WireJSON.decoder().decode(PairResponse.self, from: data)
+    }
+    func me() async throws -> MeResponse { try await request(path: ["me"]) }
+    func updateMe(_ body: MeUpdate) async throws -> MeResponse { try await request("PUT", path: ["me"], body: json(body)) }
+    func exportMe() async throws -> Data { try await perform("GET", path: ["me", "export"]) }
+    func deleteMe() async throws { _ = try await perform("DELETE", path: ["me"]) }
+
+    // MARK: Care, messaging, milestones (Plan 3)
+
+    func care() async throws -> CareResponse { try await request(path: ["me", "care"]) }
+    /// `sinceID`: only messages after this id. `markRead` controls the server's
+    /// `?mark_read=` query param (default `false`): only the Messages screen passes
+    /// `true` to clear the therapist/mira unread badge; background refreshes must not.
+    func messages(sinceID: Int? = nil, markRead: Bool = false) async throws -> MessageList {
+        var query: [URLQueryItem] = [URLQueryItem(name: "mark_read", value: markRead ? "true" : "false")]
+        if let sinceID { query.append(URLQueryItem(name: "since_id", value: String(sinceID))) }
+        return try await request(path: ["me", "messages"], query: query)
+    }
+    func sendMessage(_ body: String) async throws -> SentMessage {
+        try await request("POST", path: ["me", "messages"], body: json(MessageSendRequest(body: body)))
+    }
+    func milestones(patientID: String) async throws -> MilestoneList {
+        try await request(path: ["patients", patientID, "milestones"])
+    }
+    func testAlert() async throws -> TestAlertResponse { try await request("POST", path: ["me", "test-alert"]) }
 }

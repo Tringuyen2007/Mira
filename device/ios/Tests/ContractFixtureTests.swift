@@ -86,6 +86,10 @@ final class ContractFixtureTests: XCTestCase {
         guard case .deviceHealth(let health) = try event("ws_events_device_health") else { return XCTFail("health") }
         XCTAssertEqual(health.cameras, 2)
         guard case .ping = try event("ws_ping") else { return XCTFail("ping") }
+        guard case .sessionSummary(let summary) = try event("ws_events_session_summary") else { return XCTFail("session_summary") }
+        XCTAssertEqual(summary.formScore, 100)
+        guard case .deviceStatus(let status) = try event("ws_events_device_status") else { return XCTFail("device_status") }
+        XCTAssertTrue(status.online)
     }
 
     /// What the app sends must be in the server's allow-list and match its samples.
@@ -113,6 +117,14 @@ final class ContractFixtureTests: XCTestCase {
         let detail = try decode(SessionDetail.self, "rest_get_session")
         XCTAssertFalse(detail.reps.isEmpty)
         XCTAssertEqual(detail.summary?.repsTotal, 4)
+        XCTAssertEqual(detail.exerciseName, "Mini squats")
+        XCTAssertNotNil(detail.analysis)
+        XCTAssertFalse(detail.analysis?.highlights.isEmpty ?? true)
+        let sessions = try decode(SessionList.self, "rest_get_patient_sessions")
+        XCTAssertEqual(sessions.patientId, "maya")
+        XCTAssertEqual(sessions.sessions.first?.formScore, 100)
+        let checkin = try decode(CheckinResponse.self, "rest_post_session_checkin")
+        XCTAssertTrue(checkin.noteSaved)
         XCTAssertEqual(try decode(SessionFrames.self, "rest_get_session_frames_lttb").points?.isEmpty, false)
         let full = try decode(SessionFrames.self, "rest_get_session_frames_full")
         XCTAssertEqual(full.mode, "full")
@@ -128,5 +140,54 @@ final class ContractFixtureTests: XCTestCase {
         let answer = try decode(CopilotResponse.self, "rest_post_copilot_ask")
         XCTAssertFalse(answer.sql.isEmpty)
         XCTAssertFalse(answer.charts.isEmpty)
+        let paired = try decode(PairResponse.self, "rest_post_pair")
+        XCTAssertEqual(paired.patientId, "maya")
+        XCTAssertTrue(paired.token.hasPrefix("pt_"))
+        let me = try decode(MeResponse.self, "rest_get_me")
+        XCTAssertEqual(me.therapist?.name, "Dr. Okafor")
+        XCTAssertEqual(me.prescriptions.first?.exerciseName.isEmpty, false)
+        XCTAssertNotNil(me.lcd)
+    }
+
+    // MARK: Plan 3: care, messaging, milestones
+
+    func testCareResponseDecodes() throws {
+        let care = try decode(CareResponse.self, "rest_get_me_care")
+        XCTAssertEqual(care.therapist?.name, "Dr. Okafor")
+        XCTAssertNotNil(care.nextVisitAt)
+        XCTAssertEqual(care.hrLimit, 130)
+        XCTAssertEqual(care.emergencyContact?.name, "Eric")
+        XCTAssertTrue(care.alertTherapist)
+        XCTAssertEqual(care.notes.first?.body, "Great squats this week")
+        XCTAssertEqual(care.notes.first?.kind, "note")
+        XCTAssertEqual(care.unreadMessages, 1)
+        XCTAssertTrue(care.highlights.isEmpty)
+    }
+
+    func testMessageListAndSendResponseDecode() throws {
+        let list = try decode(MessageList.self, "rest_get_me_messages")
+        XCTAssertEqual(list.messages.first?.sender, "therapist")
+        XCTAssertEqual(list.messages.first?.kind, "message")
+        XCTAssertNotNil(list.messages.first?.readAt)
+        let sent = try decode(SentMessage.self, "rest_post_me_messages")
+        XCTAssertEqual(sent.message.sender, "patient")
+        XCTAssertEqual(sent.message.body, "My knee hurts today")
+        XCTAssertNil(sent.message.readAt)
+    }
+
+    func testMilestoneListDecodes() throws {
+        let milestones = try decode(MilestoneList.self, "rest_get_patient_milestones")
+        XCTAssertEqual(milestones.patientId, "maya")
+        XCTAssertEqual(milestones.milestones.first?.message, "First pain-free full session")
+        XCTAssertNotNil(milestones.milestones.first?.time)
+    }
+
+    func testMessageEventDecodes() throws {
+        guard case .message(let event) = try decode(SocketEvent.self, "ws_events_message") else {
+            return XCTFail("expected message")
+        }
+        XCTAssertEqual(event.patientId, "maya")
+        XCTAssertEqual(event.message.sender, "therapist")
+        XCTAssertEqual(event.message.body, "How's the knee feeling?")
     }
 }

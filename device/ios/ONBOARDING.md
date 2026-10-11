@@ -25,19 +25,31 @@ or establishes a patient identity. The original welcome-only completion flag
 does not skip the new flow. This is local prototype storage; a production data
 retention/deletion and storage policy remains to be defined.
 
+Backend work now in place: a documented therapist-code exchange (`POST /pair`,
+README "Patient identity (phone)") that returns a patient identity and token —
+never a code passed as `patient_id`; a typed prescription response including
+targets and the care-team HR limit via `GET /me` (`me.patient.hr_limit`), with
+404/410/429 handling for unknown/expired-or-used/rate-limited codes; and
+profile/contact sync (`PUT /me`) with `alert_therapist` confirming emergency
+alerts are configured. Emergency contact and `alert_therapist` now round-trip
+live, not just at onboarding: `EmergencyContactView` calls `PUT /me` on every
+edit once paired, and the HR limit shown there and on Care comes from
+`GET /me/care`'s `hr_limit` (same value as `me.patient.hr_limit`, kept in sync
+by the server) rather than a separate fetch — see README "Care API".
+
 Backend work still needed:
 
-- A documented therapist-code exchange returning a patient identity. A code
-  must not be passed as `patient_id` to the prescription endpoint.
-- Typed prescription response including targets and care-team HR limit, with
-  error handling for expired/invalid codes and unavailable plans.
-- A customer-facing pairing mechanism and documented `device_health` fields.
-  Socket connectivity alone is not evidence that camera hardware is online.
-- Profile/contact sync and confirmation that emergency alerts are configured.
+- Documented `device_health` fields. Socket connectivity alone is not evidence
+  that camera hardware is online.
+- Calibration (vision) — `me.calibration` is still a placeholder
+  (`{"status": "unknown", "calibrated": false}`) until Eric's engine wires it up.
+  This is the only remaining gap from this list; everything else above
+  (pairing, HR limit, emergency contact/alert sync) is now backed by the server.
 
-Until these exist, the therapist and device steps explicitly offer **Set up
-later**. Review and Home say setup remains incomplete. HR limit displays **Not
-provided by your care team yet**; the app never invents a limit.
+Until these exist, the device step explicitly offers **Set up later**. Review
+and Home say setup remains incomplete where relevant. HR limit comes from
+`me.patient.hr_limit`; until a plan exists it displays **Not provided by your
+care team yet** — the app never invents a limit.
 
 Navigation: Setup is a dismissible modal; Live and Summary are dismissible
 full-screen flows. Closing Live only dismisses its UI; it does not send Stop.

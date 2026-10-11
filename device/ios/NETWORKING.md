@@ -11,9 +11,11 @@ diagnostics are compiled into **Debug builds only** and require the explicit
 launch argument `--network-debug`. With that argument, open Settings → Developer
 connection tools. Without it, the app shows the user design. Diagnostics are
 absent from Release builds. Home and Live show only a plain-language availability
-message when needed, without server addresses or protocol details. A final
-customer-facing pairing/provisioning flow is still needed to configure a server
-on a fresh installation; hiding developer controls does not implement pairing.
+message when needed, without server addresses or protocol details. Pairing in
+onboarding (`POST /pair` with the therapist code, README "Patient identity
+(phone)") is the normal path to a working token; Developer connection tools and
+the `MIRA_API_TOKEN` entry remain for diagnostics only (simulating the admin/full
+scope, not a paired patient).
 
 ## Run Tri's server (preferred)
 
@@ -129,7 +131,9 @@ running server) and `server/main.py`.
 
 The app keeps the token in the Keychain, next to the server address in Debug
 Settings. A missing token is "not paired" (nothing is attempted); a refused token is
-"token rejected" (no retry loop). Server logs redact `token=` values.
+"token rejected" (no retry loop). Server logs redact `token=` values. A paired
+patient token calling a route or another patient's resource it doesn't own gets
+`403 {"detail":"forbidden"}`, which maps to `APIError.forbidden`.
 
 **Envelope.** Every message is one flat JSON object with snake_case keys.
 `/ws/live` and `/ws/pose` are untagged; `/ws/events` messages have a `type`. The server
@@ -140,7 +144,7 @@ channel (also live and pose) receives `{"type":"ping"}`, which the app ignores.
 |---|---|
 | `/ws/pose` ~25 Hz | `{t, joints[33][3], confidence[33], load_l_pct, flags}` (`ws_pose.json`) |
 | `/ws/live` ~10 Hz | `{t, phase, exercise_id, rep, reps_target, set, sets_target, countdown, main_angle, load_l_pct, load_conf, hr, flags, cue_id, paused}`; most are null while idle (`ws_live.json`) |
-| `/ws/events` server → app | `arrived`, `greeting{text,audio_url}`, `awaiting_gesture`, `gesture`, `countdown{n,…}`, `cue{id,text,audio_url}`, `rep{index,quality,flags,…}`, `set_done`, `paused{reason}`, `resumed`, `fatigue`, `fall{stage,…}`, `fall_status{posture,moving,…}`, `alert{alert_id,kind,step,patient_id,message,show_call_911}`, `haptic{pattern}`, `summary_ready{spoken,therapist_note,audio_url}`, `coach_adapt{action,detail}`, `proposal_created`, `proposal_decided`, `device_health`, `hr` (`ws_events_*.json`) |
+| `/ws/events` server → app | `arrived`, `greeting{text,audio_url}`, `awaiting_gesture`, `gesture`, `countdown{n,…}`, `cue{id,text,audio_url}`, `rep{index,quality,flags,…}`, `set_done`, `paused{reason}`, `resumed`, `fatigue`, `fall{stage,…}`, `fall_status{posture,moving,…}`, `alert{alert_id,kind,step,patient_id,message,show_call_911}`, `haptic{pattern}`, `summary_ready{spoken,therapist_note,audio_url}`, `session_summary{…}` (see "Session end and the Summary screen" below), `coach_adapt{action,detail}`, `proposal_created`, `proposal_decided`, `device_status`, `device_health`, `hr` (`ws_events_*.json`) |
 | `/ws/events` app → server | only `command{name: start\|pause\|skip\|stop\|pain\|im_ok, payload}`, `hr{t,bpm}`, `wrist{t,quat,accel}`, `watch_button{name}`, `device_health{t,battery_pct,app}` (`ws_events_client_*.json`); anything else is dropped. At most 20 messages/s per socket (excess silently dropped). Accepted messages are echoed to every `/ws/events` client. `pain` takes `payload.level` (0–10); ≥ 7 opens a safety incident. |
 
 `audio_url` values are server paths (`/audio/<file>.mp3`), resolved against the
@@ -150,12 +154,37 @@ server address. Joint angles (`main_angle`) are knee flexion in degrees (0 = str
 free-form data: prescription targets/limits, proposal evidence/changes, Copilot
 charts, `coach_adapt.detail`, command payloads, unknown future events):
 `GET /health`, `GET /calibration/status`, `POST /sessions {patient_id?, exercise_id?}`,
-`POST /sessions/{id}/stop`, `POST /sessions/{id}/share`, `GET /sessions/{id}`,
-`GET /sessions/{id}/frames?downsample=`, `GET /patients/{id}/progress`,
-`GET /prescriptions/{id}`, `GET /proposals`, `POST /proposals/{id}/approve|edit|dismiss
-{therapist_id, change?, reason?}`, `GET /alerts`, `POST /alerts/{id}/resolve`,
-`GET /notifications/count`, `POST /copilot/ask {question, patient_id?}`.
+`POST /sessions/{id}/stop`, `POST /sessions/{id}/checkin {pain_post?, effort?, note?}`,
+`POST /sessions/{id}/share`, `GET /sessions/{id}` (now also carries `exercise_name` and
+`analysis`), `GET /sessions/{id}/frames?downsample=`, `GET /patients/{id}/progress`,
+`GET /patients/{id}/sessions?limit=&before=`, `GET /prescriptions/{id}`, `GET /proposals`,
+`POST /proposals/{id}/approve|edit|dismiss {therapist_id, change?, reason?}`, `GET /alerts`,
+`POST /alerts/{id}/resolve`, `GET /notifications/count`, `POST /copilot/ask {question, patient_id?}`.
 History routes need the database and return 503 with `DB_DISABLED=1`.
+
+## Session end and the Summary screen
+
+Every session the app runs follows one flow, start to finish:
+
+1. **Start** — `POST /sessions {patient_id?, exercise_id?}` → `{session_id, patient_id, exercise_id,
+   started_at, first_name}`. The app opens `/ws/live` and `/ws/events` (or they're already open) and drives
+   the Live screen from those streams.
+2. **Stop** — the patient taps "End session": `POST /sessions/{id}/stop` → `{session_id, stopped: true}`.
+   (A session can also end on its own — the engine's `stopped` event or the last set — in which case the
+   app sees `phase: "done"` on `/ws/live` without having called `stop` itself.)
+3. **Wait for the analysis** — open `SummaryView(sessionID:)` and poll `GET /sessions/{id}` every few
+   seconds until its `analysis` field is non-null (up to ~60 s: `SessionAnalyst` runs `ANALYST_DELAY_S`
+   after the stop, plus however long the Gemini call takes), **and** listen for a `session_summary` event on
+   `/ws/events` with a matching `session_id` — whichever arrives first fills the screen immediately instead
+   of waiting out the next poll. `GET /sessions/{id}`'s `analysis` and the `session_summary` event carry the
+   same shape: `form_score`, `reps_total`, `good_reps`, `sets_done`, `spoken` (voiced via `audio_url` or
+   on-device TTS), `note`, `highlights`, `next_focus`, `flagged_moments`, `comparison`, `source`, `model`.
+4. **Check in** — the patient rates pain/effort and adds a note: `POST /sessions/{id}/checkin {pain_post?,
+   effort?, note?}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` opens a Safety
+   Guardian incident on the server side (same as a live pain report), so the app should treat it the same
+   way it treats any other incident `alert`.
+5. **Share** — if the patient opts in, `POST /sessions/{id}/share` marks the session shared with their
+   therapist.
 
 ## Mira LCD
 
@@ -197,6 +226,88 @@ next `online:true`. Sample: `server/samples/ws_events_device_status.json`.
 | `exercise_name` | `string \| null` | display name for `exercise_id` (e.g. "Mini squats" for `squat`) |
 | `incident` | `boolean` | true while a fall/check-in/open alert is active, until it's resolved or closed |
 
+## PatientStore (care, progress, messaging)
+
+`device/ios/Mira/App/PatientStore.swift` (`@MainActor @Observable`) is the app's read model for Plan 3's
+Home/Progress/Care screens: `refreshAll(api:patientID:)` fetches `/me`, `/me/care`, the patient's sessions,
+milestones and messages in parallel, then per-exercise progress, each independently fault-tolerant (one
+endpoint failing doesn't blank the others — see `lastError`). `AppState.refreshMe()` calls it on foreground,
+right after `pair()` completes, and on every `session_summary` event, and exposes the typed results
+(`me`, `care`, `sessions`, `progress`, `milestones`, `messages`) plus pure helpers (`streakDays`, `weekDots`,
+`kneeTrend`, `forecast`, `balanceSeries`) used by the screens. `send(_:api:)` posts a new message
+(`POST /me/messages`) and `appendIncoming(_:)` folds an incoming `message` event from `/ws/events` into the
+thread — see below.
+
+### Messaging over `/ws/events`
+
+The patient/therapist message thread is both a REST resource and a live event. `GET /me/messages` and
+`POST /me/messages` carry the full history and send the patient's own messages; a `message` event on
+`/ws/events` (`{"type": "message", "patient_id", "message": {id, sender, kind, body, created_at, read_at}}`)
+delivers anything sent from the dashboard side (`POST /patients/{id}/messages`) or by the patient from
+another device, in real time. `LiveSessionStore.onMessageEvent` is wired to `PatientStore.appendIncoming` in
+`AppState.init`, so a therapist's message shows up in Care without a manual refresh.
+
+### ATS exception (plain-HTTP demo server)
+
+`Info.plist`'s `NSAppTransportSecurity` sets `NSAllowsArbitraryLoads = true` (alongside the existing
+`NSAllowsLocalNetworking`) because the demo server (Vultr, README "Deploy (Vultr)") is plain HTTP on a public
+IP — no TLS was set up for the hackathon, and `NSAllowsLocalNetworking` alone only covers LAN addresses, not
+a public one. This is a deliberate, documented exception, not an oversight: **remove it once the server gets
+HTTPS**, at which point `wss://`/`https://` addresses work without any ATS exception at all.
+
+## Apple Watch companion (WatchConnectivity relay)
+
+The `MiraWatch` watchOS target (Plan 4) never talks to the server directly — it only talks to the iPhone
+app over `WatchConnectivity`, and the iPhone relays that traffic onto the sockets described above. There is
+no new server endpoint and no new auth scope for the watch; from the server's point of view a watch tap or
+heart-rate sample is indistinguishable from one the phone sent itself.
+
+- **Codec:** `Mira/Net/WatchWire.swift` is pure Foundation, built into both the `Mira` and `MiraWatch`
+  targets, and covered by `Tests/WatchWireTests.swift` under plain `swift test` (the watch target itself
+  isn't exercised by `swift test`, only this shared codec). It converts between `[String: Any]` dictionaries
+  (what `WCSession.updateApplicationContext`/`sendMessage` take directly — no `Data`/JSON step) and two typed
+  enums: `ToWatch` (`snapshot`, `haptic(pattern:)`, `summary`) and `ToPhone` (`heartRate(bpm:t:)`,
+  `button(name:)`, `status(workoutActive:)`). Every case round-trips through `encode`/`decodeToWatch` or
+  `decodeToPhone`; an unrecognized `"type"`, a missing required field, or a non-JSON-safe value (e.g. a
+  nested dict where a `Double` is expected) decodes to `nil` on either side.
+- **iPhone-side relay:** `Mira/Watch/WatchBridge.swift` (`@MainActor @Observable final class WatchBridge:
+  NSObject, WCSessionDelegate`), excluded from the `MiraNetworking` SwiftPM package so it's free to import
+  `WatchConnectivity` (unavailable in the plain-macOS `swift test` build, which uses a same-shaped stub in
+  `AppState`). It exposes `isPaired`, `isWatchAppInstalled`, `isReachable`, `lastWatchHR` and
+  `workoutActive` (the watch's `.status(workoutActive:)`, stored for a future Settings row; nothing reads it
+  yet). Delegate callbacks copy the `WCSession` values they need before hopping to the main actor.
+  - **Phone → watch:** `push(_ live: LiveMessage?)` sends the live snapshot via `updateApplicationContext`
+    (delivered even while the watch app isn't foregrounded), skipped when the encoded snapshot hasn't changed
+    and throttled by `PushThrottle` (in `WatchWire.swift`, unit-tested): the first change in a quiet 0.5 s
+    window goes out at once, later ones wait for the window to close and the latest is sent then (a trailing
+    push), so the final state is never dropped. `push(nil)` sends `LiveSnapshot.idle`. `AppState` pushes idle
+    when `/ws/live` reports `done` or disappears — the server clears the session right after `done`, after
+    which this patient's `/ws/live` goes quiet — and again when `sessionSummary` arrives (unless a new session
+    is already live), so the watch always ends its workout. `forward(haptic:)` and `forward(summary:)` use
+    `sendMessage` instead — best-effort, silently dropped when the watch isn't reachable or the send errors,
+    since a missed haptic or summary isn't worth retrying.
+  - **Watch → phone:** incoming `didReceiveMessage` is decoded with `WatchWire.decodeToPhone`. `.heartRate`
+    updates `lastWatchHR` and calls `liveSession.send(.hr(HeartRateMessage(t:bpm:)))`; `.button(name)` calls
+    `liveSession.send(.watchButton(WatchButtonMessage(name:)))`. Both then flow into `/ws/events` exactly like
+    any other client-originated event (see `watch_button`/`hr` in the table above). The server forwards
+    `watch_button` `ready`/`stop` as `command start`/`stop` with `payload.source = "watch"` and also broadcasts
+    the raw `watch_button`. The watch sends heart rate only while the phone is reachable.
+  - `AppState.watch: WatchBridge` is created with the app's `LiveSessionStore` and activated at launch.
+    `WCSession.isSupported()` is true on every iPhone; the bridge is simply inert when no watch is paired or
+    the watch app isn't installed. `AppState.watchPaired`
+    (`watch.isPaired && watch.isWatchAppInstalled`) gates the Settings "Apple Watch tap" toggle.
+- **The `haptic` event:** `{"type": "haptic", "pattern": "good_rep" | "fix_form" | "set_done" |
+  "check_in", "session_id", "t"}` on `/ws/events` (server → app, already listed in the events table above).
+  `LiveSessionStore` decodes it into `haptic: HapticMessage?` plus a `hapticSeq: Int` that increments on every
+  occurrence — including a repeated pattern — so `AppState` can forward each one to the watch even when two
+  consecutive patterns are identical (the watch just replays the same haptic rather than deduping). The watch
+  app maps each pattern to a `WKInterfaceDevice` haptic type (`good_rep → .success`, `fix_form → .retry`
+  played twice 150 ms apart, `set_done → .notification`, `check_in` and any unknown pattern →
+  `.directionUp`); its own Ready/Stop buttons play `.click`/`.stop`.
+- **Not covered here:** `device/ios/MiraWatch/` (the watch app's own UI — live/paused/done screens, Stop as
+  tap-to-confirm or 1 s hold — and `HKWorkoutSession` heart-rate capture) — see the README "Apple Watch
+  companion" section and the sources in `device/ios/MiraWatch/`.
+
 ## Open items
 
 - Session commands (`start/pause/skip/stop`) are forwarded to the engine over the
@@ -204,9 +315,9 @@ next `online:true`. Sample: `server/samples/ws_events_device_status.json`.
   them. Eric's vision engine must implement the same four commands.
 - There is no `POST /sessions/{id}/cue` on the server; the provisional `sendCue`
   call was removed.
-- A customer-facing pairing flow (QR code or similar) is still needed; the token is
-  entered in Debug Settings only. The onboarding "Connect Mira" step saves a local
-  draft and does not pair the server (see ONBOARDING.md).
+- Onboarding's therapist step now pairs for real via `POST /pair` (see
+  ONBOARDING.md); Debug Settings' token entry is diagnostics-only, not the
+  customer-facing path.
 
 ## Behavior and limits
 

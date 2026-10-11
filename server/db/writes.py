@@ -141,6 +141,13 @@ async def insert_form_event(db: Database | None, time: Timestamp, patient_id: st
         sql, (ts(time), patient_id, session_id, rep, rule_id, severity, duration_s))), False, session_id=session_id)
 
 
+async def insert_heart_rate(db: Database | None, time: Timestamp, patient_id: str | None, session_id: str | None,
+                            bpm: int) -> bool:
+    sql = "INSERT INTO heart_rate (time, patient_id, session_id, bpm) VALUES (%s, %s, %s, %s)"
+    return await _safe(db, "insert_heart_rate", lambda d: _ok(d.execute(
+        sql, (ts(time), patient_id, session_id, bpm))), False, session_id=session_id)
+
+
 # ---- safety, agents, AI ---------------------------------------------------------------------------------
 
 async def insert_alert_step(db: Database | None, time: Timestamp, alert_id: str, patient_id: str | None,
@@ -362,6 +369,165 @@ async def mark_all_notifications_read(db: Database | None, therapist_id: str | N
     sql = ("UPDATE notifications SET read_at = now() "
            "WHERE read_at IS NULL AND (%(t)s::text IS NULL OR therapist_id = %(t)s)")
     return await _safe(db, "mark_all_notifications_read", lambda d: d.execute(sql, {"t": therapist_id}), None)
+
+
+# ---- session analysis (Plan 2) ------------------------------------------------------------------------------
+
+async def upsert_session_analysis(db: Database | None, session_id: str, *, form_score: int | None,
+                                  reps_total: int | None, good_reps: int | None, sets_done: int | None,
+                                  spoken: str, note: str, highlights: list[Any], next_focus: str | None,
+                                  flagged_moments: list[Any], comparison: dict[str, Any], audio_url: str | None,
+                                  source: str, model: str | None) -> bool:
+    """Whole-session analysis (§5.2); re-running on_stop for the same session overwrites with the latest
+    values (ON CONFLICT DO UPDATE), never duplicates."""
+    sql = ("INSERT INTO session_analyses (session_id, form_score, reps_total, good_reps, sets_done, spoken, "
+           "note, highlights, next_focus, flagged_moments, comparison, audio_url, source, model) "
+           "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+           "ON CONFLICT (session_id) DO UPDATE SET form_score = EXCLUDED.form_score, "
+           "reps_total = EXCLUDED.reps_total, good_reps = EXCLUDED.good_reps, sets_done = EXCLUDED.sets_done, "
+           "spoken = EXCLUDED.spoken, note = EXCLUDED.note, highlights = EXCLUDED.highlights, "
+           "next_focus = EXCLUDED.next_focus, flagged_moments = EXCLUDED.flagged_moments, "
+           "comparison = EXCLUDED.comparison, audio_url = EXCLUDED.audio_url, source = EXCLUDED.source, "
+           "model = EXCLUDED.model")
+    params = (session_id, form_score, reps_total, good_reps, sets_done, spoken, note, _jsonb(highlights),
+              next_focus, _jsonb(flagged_moments), _jsonb(comparison), audio_url, source, model)
+    return await _safe(db, "upsert_session_analysis", lambda d: _done(d.execute(sql, params)), False,
+                       session_id=session_id)
+
+
+# ---- patient identity (Plan 1) ------------------------------------------------------------------------------
+
+async def touch_patient_device(db: Database | None, token_hash: str) -> bool:
+    sql = "UPDATE patient_devices SET last_seen = now() WHERE token_hash = %s AND revoked_at IS NULL"
+    return await _safe(db, "touch_patient_device", lambda d: _ok(d.execute(sql, (token_hash,))), False)
+
+
+async def insert_patient_device(db: Database | None, token_hash: str, patient_id: str,
+                                device_name: str | None, via_reusable: bool = False) -> bool:
+    sql = "INSERT INTO patient_devices (token_hash, patient_id, device_name, via_reusable) VALUES (%s, %s, %s, %s)"
+    return await _safe(db, "insert_patient_device", lambda d: _ok(d.execute(sql, (token_hash, patient_id,
+                                                                                 device_name, via_reusable))),
+                       False, patient_id=patient_id)
+
+
+async def revoke_patient_devices(db: Database | None, patient_id: str) -> int | None:
+    sql = "UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s AND revoked_at IS NULL"
+    return await _safe(db, "revoke_patient_devices", lambda d: d.execute(sql, (patient_id,)), None,
+                       patient_id=patient_id)
+
+
+async def revoke_excess_patient_devices(db: Database | None, patient_id: str, keep: int = 10) -> int | None:
+    """Keep only the `keep` most recently paired active demo (`via_reusable`) devices for a patient; revoke any
+    older ones. Called right after a successful pair so a reusable demo code can't accumulate unbounded live
+    tokens. A phone paired with a single-use (therapist-minted) code is never evicted: strangers pairing with the
+    public demo code must not be able to sign the real patient's phone out."""
+    sql = ("UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s AND revoked_at IS NULL "
+           "AND via_reusable AND token_hash NOT IN (SELECT token_hash FROM patient_devices WHERE patient_id = %s "
+           "AND revoked_at IS NULL AND via_reusable ORDER BY created_at DESC LIMIT %s)")
+    return await _safe(db, "revoke_excess_patient_devices", lambda d: d.execute(sql, (patient_id, patient_id, keep)),
+                       None, patient_id=patient_id)
+
+
+async def claim_pairing_code(db: Database | None, code: str) -> dict[str, Any] | None:
+    """Atomically claim a pairing code: a reusable code is always claimable; a single-use code only while
+    unused and unexpired. Returns {patient_id, therapist_id, reusable}, or None if it can't be claimed right
+    now (lost the race to another request, or it was expired/used between the caller's lookup and this call).
+    Replaces the separate SELECT-then-UPDATE in `pair.py::pair` for the actual claim, closing the TOCTOU race
+    where two requests both see an unused single-use code."""
+    sql = ("UPDATE pairing_codes SET used_at = CASE WHEN reusable THEN used_at ELSE now() END "
+           "WHERE code = %s AND (reusable OR used_at IS NULL) AND (expires_at IS NULL OR expires_at > now()) "
+           "RETURNING patient_id, therapist_id, reusable")
+    return await _safe(db, "claim_pairing_code", lambda d: d.fetchrow(sql, (code,)), None)
+
+
+async def upsert_pairing_code(db: Database | None, code: str, patient_id: str, therapist_id: str | None,
+                              expires_at: Timestamp = None, reusable: bool = False) -> bool:
+    sql = ("INSERT INTO pairing_codes (code, patient_id, therapist_id, expires_at, reusable) "
+           "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (code) DO UPDATE SET patient_id = EXCLUDED.patient_id, "
+           "therapist_id = EXCLUDED.therapist_id, expires_at = EXCLUDED.expires_at, reusable = EXCLUDED.reusable, "
+           "used_at = NULL")
+    return await _safe(db, "upsert_pairing_code", lambda d: _done(d.execute(
+        sql, (code, patient_id, therapist_id, ts(expires_at) if expires_at is not None else None, reusable))),
+        False, patient_id=patient_id)
+
+
+async def mark_pairing_code_used(db: Database | None, code: str) -> bool:
+    sql = "UPDATE pairing_codes SET used_at = now() WHERE code = %s AND NOT reusable"
+    return await _safe(db, "mark_pairing_code_used", lambda d: _done(d.execute(sql, (code,))), False)
+
+
+PROFILE_FIELDS = ("name", "height_cm", "mass_kg", "affected_side", "condition", "emergency_contact_name",
+                  "emergency_contact_phone", "emergency_contact_relationship", "alert_therapist",
+                  "share_by_default", "device_prefs")
+
+
+async def update_patient_profile(db: Database | None, patient_id: str, **fields: Any) -> bool:
+    """Partial update of the patient's own fields (PROFILE_FIELDS); None leaves a column unchanged. Raises
+    InvalidInput for unknown fields."""
+    unknown = set(fields) - set(PROFILE_FIELDS)
+    if unknown:
+        raise InvalidInput(f"unknown profile fields: {sorted(unknown)}")
+    changes = {k: v for k, v in fields.items() if v is not None}
+    if not changes:
+        return True
+    assignments = ", ".join(f"{k} = %({k})s" for k in changes)
+    params: dict[str, Any] = {k: (_jsonb(v) if k == "device_prefs" else v) for k, v in changes.items()}
+    params["pid"] = patient_id
+    sql = f"UPDATE patients SET {assignments} WHERE id = %(pid)s"
+    return await _safe(db, "update_patient_profile", lambda d: _ok(d.execute(sql, params)), False,
+                       patient_id=patient_id)
+
+
+async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, int] | None:
+    """DELETE /me: the patient's own (non-simulated) sessions and everything hanging off them, their alerts,
+    memory events, notifications, agent actions, messages and phones; profile fields are blanked. Labeled simulated demo
+    history is kept: it is not the patient's data. The patient row and prescriptions stay (the therapist's plan).
+    One transaction; None on database failure."""
+    if db is None:
+        return None
+
+    async def run(d: Database) -> dict[str, int]:
+        async with d.connection() as conn, conn.transaction():
+            await conn.execute("SET LOCAL statement_timeout = 120000")
+            cur = await conn.execute("SELECT id FROM sessions WHERE patient_id = %s AND NOT simulated", (patient_id,))
+            ids = [r["id"] for r in await cur.fetchall()]
+            counts: dict[str, int] = {"sessions": len(ids)}
+            if ids:
+                for table in ("pose_frames", "reps", "form_events", "wrist_motion", "heart_rate"):
+                    cur = await conn.execute(f"DELETE FROM {table} WHERE session_id = ANY(%s)", (ids,))  # noqa: S608
+                    counts[table] = cur.rowcount
+            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals", "messages"):
+                cur = await conn.execute(f"DELETE FROM {table} WHERE patient_id = %s", (patient_id,))  # noqa: S608
+                counts[table] = cur.rowcount
+            if ids:
+                await conn.execute("DELETE FROM sessions WHERE id = ANY(%s)", (ids,))
+            cur = await conn.execute("UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s "
+                                     "AND revoked_at IS NULL", (patient_id,))
+            counts["devices_revoked"] = cur.rowcount
+            await conn.execute("UPDATE patients SET height_cm = NULL, mass_kg = NULL, emergency_contact_name = NULL, "
+                               "emergency_contact_phone = NULL, emergency_contact_relationship = NULL, "
+                               "device_prefs = '{}' WHERE id = %s", (patient_id,))
+            return counts
+
+    return await _safe(db, "purge_patient_data", run, None, patient_id=patient_id)
+
+
+# ---- messages (Plan 3 §6.4) -------------------------------------------------------------------------------
+
+async def insert_message(db: Database | None, patient_id: str, sender: str, kind: str,
+                         body: str) -> dict[str, Any] | None:
+    sql = ("INSERT INTO messages (patient_id, sender, kind, body) VALUES (%s, %s, %s, %s) "
+           "RETURNING id, sender, kind, body, created_at, read_at")
+    return await _safe(db, "insert_message", lambda d: d.fetchrow(sql, (patient_id, sender, kind, body)), None,
+                       patient_id=patient_id)
+
+
+async def mark_messages_read(db: Database | None, patient_id: str, sender_not: str) -> int | None:
+    """Marks every unread message of this patient's thread NOT sent by `sender_not` as read (the other side)."""
+    sql = ("UPDATE messages SET read_at = now() WHERE patient_id = %s AND kind = 'message' "
+           "AND sender != %s AND read_at IS NULL")
+    return await _safe(db, "mark_messages_read", lambda d: d.execute(sql, (patient_id, sender_not)), None,
+                       patient_id=patient_id)
 
 
 # ---- helpers ---------------------------------------------------------------------------------------------

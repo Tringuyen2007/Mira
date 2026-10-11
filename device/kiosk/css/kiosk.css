@@ -115,8 +115,10 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage:not([data-mood="none"]) .s-base { display: block; }
 #stage[data-screen="rep"] .s-rep,
 #stage[data-screen="setDone"] .s-done,
+#stage[data-screen="sessionDone"] .s-done,
 #stage[data-screen="countdown"] .s-count { display: block; }
-#stage[data-screen="setDone"] .bloom { display: block; }
+#stage[data-screen="setDone"] .bloom,
+#stage[data-screen="sessionDone"] .bloom { display: block; }
 #stage[data-screen="countdown"] .halos-center,
 #stage[data-screen="countdown"] .orbit-center,
 #stage[data-screen="unpaired"] .halos-center { display: block; }
@@ -131,6 +133,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage[data-screen="rep"] .screen[data-screen="cue-rep"],
 #stage[data-screen="paused"] .screen[data-screen="paused"],
 #stage[data-screen="setDone"] .screen[data-screen="setDone"],
+#stage[data-screen="sessionDone"] .screen[data-screen="sessionDone"],
 #stage[data-screen="fall"] .screen[data-screen="fall"],
 #stage[data-screen="unpaired"] .screen[data-screen="unpaired"] { display: block; }
 
@@ -139,7 +142,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage[data-screen="cue"] .top-row,
 #stage[data-screen="rep"] .top-row,
 #stage[data-screen="paused"] .top-row,
-#stage[data-screen="setDone"] .top-row { display: flex; }
+#stage[data-screen="setDone"] .top-row,
+#stage[data-screen="sessionDone"] .top-row { display: flex; }
 
 /* ---------- Shared type ---------- */
 
@@ -465,6 +469,23 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 }
 .done-pill { margin-top: 36px; }
 
+/* ---------- Session Complete: mirrors Set Done, adds the AI spoken line ---------- */
+
+.session-spoken {
+  margin-top: 28px;
+  width: 534px;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--color-ink-soft);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: break-word;
+}
+
 /* ---------- 8 Fall Alert (37:321): 20px red border, no decoration ---------- */
 
 .fall-border {
@@ -618,11 +639,16 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage[data-mood="worried"] #mira     { animation: droop 3s ease-in-out infinite; transform-origin: 50% 90%; }
 #stage[data-mood="sleeping"] #mira    { animation: breathe 5s ease-in-out infinite; transform-origin: 50% 85%; }
 #stage[data-mood="celebrating"] #mira { animation: celebrate 0.9s ease-in-out infinite; }
-#stage[data-screen="setDone"] .s-done { animation: twinkle 1.8s ease-in-out infinite; }
-#stage[data-screen="setDone"] .d2 { animation-delay: -0.4s; }
-#stage[data-screen="setDone"] .d3 { animation-delay: -0.8s; }
-#stage[data-screen="setDone"] .d4 { animation-delay: -1.2s; }
-#stage[data-screen="setDone"] .d5 { animation-delay: -1.5s; }
+#stage[data-screen="setDone"] .s-done,
+#stage[data-screen="sessionDone"] .s-done { animation: twinkle 1.8s ease-in-out infinite; }
+#stage[data-screen="setDone"] .d2,
+#stage[data-screen="sessionDone"] .d2 { animation-delay: -0.4s; }
+#stage[data-screen="setDone"] .d3,
+#stage[data-screen="sessionDone"] .d3 { animation-delay: -0.8s; }
+#stage[data-screen="setDone"] .d4,
+#stage[data-screen="sessionDone"] .d4 { animation-delay: -1.2s; }
+#stage[data-screen="setDone"] .d5,
+#stage[data-screen="sessionDone"] .d5 { animation-delay: -1.5s; }
 .orbit { animation: orbit 60s linear infinite; }
 .fall-border { animation: pulse 2s ease-in-out infinite; }
 

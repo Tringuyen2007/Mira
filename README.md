@@ -146,10 +146,13 @@ Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" b
 | `GEMINI_DISABLED=1` | 0 | every AI caller uses its fallback (templates, SQL-only notes, cached demo answer) |
 | `ELEVEN_DISABLED=1` | 0 | no ElevenLabs requests; captions and already-recorded MP3s only |
 | `CALLS_DISABLED=1` | 1 | log-only call simulator, no Retell calls, no credits spent |
+| `ALLOW_TEST_CALLS=1` | 0 | `POST /me/test-alert` may place a real call (still needs `CALLS_DISABLED=0` too; else it only logs a notification) |
 | `INSIGHT_ENABLED=0` | 1 | no scheduled Insight agent / milestones |
 | `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
 | `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
 | `DEMO_TOOLS_ENABLED=1` | 0 | enables `POST /demo/trigger_fall` (rehearsals only) |
+| `MOCK_LOOP=1` | 0 | the mock squat program repeats forever instead of finishing after 3 sets (pre-Plan-2 behaviour); implies no auto-stop/auto-restart (below) |
+| `AUTO_STOP_AFTER_LAST_SET=0` | 1 | don't auto-end the session once `set == sets_target` (needed for engines that already send their own `stopped`) |
 
 ## Run
 
@@ -278,6 +281,103 @@ Desktop pop-ups (browser Notification API) only work in a secure context: open t
 `http://localhost:8000/dashboard/` on the server laptop (or over HTTPS). On another machine via
 `http://<laptop>.local:8000` use in-page toasts. Request permission from a button click.
 
+## Patient identity (phone)
+
+Three token scopes (`server/security.py`):
+
+| scope | who | how | can |
+|---|---|---|---|
+| `full` | dashboard, ops, tests | `MIRA_API_TOKEN` | everything |
+| `device` | LCD kiosk | `MIRA_DEVICE_TOKEN` | `/ws/live`, `/ws/events` (allow-list), send `device_health` |
+| `patient` | iPhone | per-phone token from `POST /pair` | `/me/*`, its own sessions/progress/prescriptions, `/ws/*` for its own session, send `command`/`hr`/`wrist`/`watch_button` |
+
+Patient tokens (`pt_…`) are minted by `POST /pair` and stored hashed in `patient_devices`; `Principal.owns()`
+lets a patient token through only for its own `patient_id` (403 `forbidden` for anyone else's). `full` always
+passes.
+
+| route | auth | body → response |
+|---|---|---|
+| `POST /pair` | none, 5 attempts/min/IP (any outcome) | `{code, device_name?, profile{name, height_cm, mass_kg, affected_side?, condition}, emergency_contact{name, phone, relationship?}, alert_therapist}` → `{patient_id, token, me}`. `404` unknown code, `410` expired or already used, `429` rate-limited. |
+| `GET /me` | patient (or full with `?patient_id=`) | profile, care team, plan, LCD/calibration status |
+| `PUT /me` | patient (or full with `?patient_id=`) | partial `{profile?, emergency_contact?, alert_therapist?, share_by_default?, device_prefs?}` → the updated `GET /me` body |
+| `DELETE /me` | patient (or full with `?patient_id=`) | purges the patient's own non-simulated history (sessions, reps, pose frames, alerts, …), keeps the patient row and prescriptions, revokes the token; labeled simulated demo history is kept |
+| `GET /me/export` | patient (or full with `?patient_id=`) | JSON of everything `DELETE /me` would delete, for "download my data" |
+| `POST /patients/{id}/pairing-code` | full | mints a fresh single-use code, valid 24 h → `{code, expires_at}` |
+| `DELETE /patients/{id}/devices` | full | revokes every paired phone for that patient |
+
+A demo code `K7P4M2` is seeded for Maya and never expires; while `PAIRING_DEMO_CODE_REUSABLE=1` (default on)
+it can be reused so the demo phone can re-pair. Every phone remembers whether it paired with a reusable code
+(`patient_devices.via_reusable`, migration `004`). Setting `PAIRING_REUSABLE_UPDATES_PROFILE=0` on a public
+server, once the demo phone has paired, locks those demo phones down: `/pair` with the reusable code no longer
+rewrites Maya's profile or emergency contact, `PUT /me` from a demo phone ignores `profile` and
+`emergency_contact` (other fields still apply), `DELETE /me` from a demo phone is a `403`, and
+`POST /me/test-alert` from a demo phone only logs (never calls). Phones paired with a therapist-minted
+single-use code are unaffected. The 10-active-phones cap only ever evicts the oldest demo phones, so strangers
+pairing with the public code can never sign the real patient's phone out. The flag alone is not a secret,
+though: on a public box also rotate `PAIRING_DEMO_CODE` (re-run the seed) so the published `K7P4M2` stops
+working.
+
+Patient-scope `POST /me/messages`, `POST /me/test-alert` and `POST /sessions` are each limited to 10 per
+minute per patient (`429`; `server/api/ratelimit.py`); the admin token is never limited. A phone can't start
+a session while a Safety Guardian incident is open for its patient (`409`).
+
+Existing routes also accept a patient token, scoped to its own patient: `GET /sessions/{id}` (own session
+only), `GET /patients/{id}`, `GET /patients/{id}/progress`, `GET /prescriptions/{id}` (writes stay `full`-only).
+Any other patient's id is a `403`.
+
+Patient WebSockets (`/ws/live`, `/ws/events`, `/ws/pose`) are filtered per message: an event tagged with a
+`patient_id` reaches the phone only if it is the token's own patient; else one tagged with a `session_id`
+reaches it only if that session (live or recently ended) is its patient's; untagged messages (`/ws/live` and
+`/ws/pose` frames) reach it only while the current live session is its patient's. Otherwise the socket stays
+open (pings only). Patient
+clients may send `command`/`hr`/`wrist`/`watch_button`, not `device_health`.
+
+Migrations (`server/db/migrations/NNN_name.sql`, idempotent) run at `server/db/setup.py` step 1b, via
+`make db-migrate DSN=…`, and at server start when `DB_AUTO_MIGRATE=1` (default on).
+
+## Care API
+
+Plan 3: the therapist card, notes, AI-draft highlights, milestones and the patient/therapist message thread
+(`server/api/care.py`), plus a "send a test alert" button. All routes take the same principal as `/me`
+(patient token, or `full` with `?patient_id=`), via the shared `patient_for()` helper (`server/api/scope.py`).
+
+| route | body → response |
+|---|---|
+| `GET /me/care` | `{therapist, next_visit_at, hr_limit, emergency_contact, alert_therapist, notes, highlights, unread_messages}` |
+| `GET /me/messages?since_id=` | `{messages: [{id, sender, kind, body, created_at, read_at}, …]}` (ascending by id, `kind='message'` only); marks every unread message not sent by the patient as read |
+| `POST /me/messages {body}` | `{message}` (sender forced to `"patient"`); emits the `message` event and notifies the therapist |
+| `POST /patients/{id}/messages {body, kind?}` | full-token only; `kind` is `message`\|`note`\|`visit_highlight` (default `message`); `{message}`, sender `"therapist"` |
+| `GET /patients/{id}/milestones` | `{patient_id, milestones: [{id, time, message, evidence}, …]}` from `memory_events` kind `milestone`, newest first |
+| `POST /me/test-alert` | `{logged, called, note}` — always logs a therapist notification; only places a real call when `CALLS_DISABLED=0` **and** `ALLOW_TEST_CALLS=1` **and** the notifier supports it **and** the patient has an emergency contact phone |
+
+The `message` event (`/ws/events`, filtered like every other patient-tagged event):
+`{"type": "message", "patient_id": "...", "message": {id, sender, kind, body, created_at, read_at}}`.
+
+The `messages` table (`server/db/migrations/003_messages.sql`): `id bigserial`, `patient_id` (FK
+`patients.id`), `sender` (`patient`\|`therapist`\|`mira`), `kind` (`message`\|`note`\|`visit_highlight`,
+default `message`), `body`, `created_at`, `read_at`; indexed on `(patient_id, id)`. `DELETE /me` purges a
+patient's own rows along with the rest of their history.
+
+## Device prefs
+
+`PUT /me {device_prefs: {...}}` (at most 20 keys; flat values only: true/false, numbers or strings of at most
+64 characters, else `422`) saves the patient's device preferences (captions, volume, slower speech) to
+the `patients` row and, if that patient has a live session right now, pushes them straight onto the running
+`/ws/live` stream (`server/api/me.py::put_me` sets `state.bridge.live.device_prefs`, no session restart
+needed) — the next `/ws/live` tick already carries `device_prefs` (`server/engine_bridge.py`). The Mira LCD
+kiosk reads it on every tick: `device/kiosk/js/state.js`'s `view()` sets `captionsOn = live.device_prefs?.captions
+!== false`, hiding `#caption-bar` when false, and `main.js` applies `device_prefs.volume` (clamped 0..1,
+default 1) to the audio player before each clip.
+
+## Patient app data flow
+
+The iOS app's `PatientStore` (`device/ios/Mira/App/PatientStore.swift`) loads `GET /me`, `GET /me/care`, the
+patient's sessions, per-exercise progress, milestones and messages in parallel, and keeps each piece's
+failure independent so a down endpoint doesn't blank the rest of the screen. `AppState.refreshMe()` drives
+it and is called on app foreground, right after pairing, and whenever a `session_summary` event arrives on
+`/ws/events` (session end) — so Home, Progress and Care stay in sync with the server without the patient
+doing anything.
+
 ## Frame contract: joint angles
 
 `angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (the team plan's frame contract) are **flexion in degrees**:
@@ -405,6 +505,87 @@ takes effect the next time a session starts).
 - `GEMINI_MODE=fake` ships a default coach fake (`register_fake("coach", ...)`) that reads the set's
   stats and history and nudges the next set / picks a focus cue when a form flag was seen, so the agent
   is exercised in a plain `make run` with no live Gemini calls.
+
+## Session end and analysis
+
+Every session ends through **one** code path, whichever gets there first: `POST /sessions/{id}/stop` (REST;
+it first sends the engine a `stop` command for a live session, so the LCD/mock program stops counting too),
+the engine emitting `stopped` (its own program finished), or the last set's `set_done`
+(`set == sets_target`, for engines that don't send `stopped`; disable with `AUTO_STOP_AFTER_LAST_SET=0`).
+All three land on `SessionRegistry.stop()`, which is idempotent (a second stop for the same session is a
+no-op, tracked in `self.ended`) and fires `on_stop` hooks once per session — sync hooks run inline, a hook
+that returns a coroutine is scheduled as a task so `stop()` never waits on it, and a failing hook is logged,
+never raised. `server/session_end.py`'s `SessionEnder` is the `EngineBridge` event subscriber that implements
+the `stopped` / last-set rules above.
+
+The **mock** engine (`MIRA_SOURCE=mock`) now finishes its 3-set program and emits `stopped {reason:
+"program_complete"}` instead of looping forever, so the demo goes through a real session end every time.
+Three env flags control it:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MOCK_LOOP=1` | 0 | the mock program repeats forever (pre-Plan-2 behaviour); see Kill switches above. Implies no auto-stop/auto-restart: `SessionEnder`'s last-set check and `MockAutoRestart` are both skipped, since the mock program's own `stopped` never fires either |
+| `MOCK_AUTO_RESTART_S` | `60.0` | mock mode only (and not `MOCK_LOOP`): `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one, and keeps waiting while a Safety Guardian incident is open; auto-restarted and boot sessions are analysed with the fast model, phone/dashboard sessions with the smart one; `0` disables the auto-restart so the LCD stays on "Session complete" |
+| `AUTO_STOP_AFTER_LAST_SET=0` | 1 | see Kill switches above |
+| `ANALYST_DELAY_S` | `2.0` | how long `SessionAnalyst` waits after a session ends before reading it, so the last reps/form_events writes have landed |
+
+**`SessionAnalyst`** (`server/agents/session_analyst.py`) is registered as a `SessionRegistry.on_stop` hook
+and runs once per ended session, after `ANALYST_DELAY_S`:
+
+- Reads the finished session's `reps`, `form_events`, pain/effort and the last 5 same-patient-and-exercise
+  sessions (`queries.previous_sessions_stats`) from the database.
+- Computes the **form score deterministically** — `round(100 * mean(reps.quality))` (never from the LLM;
+  `quality` is 0..1 per `persist.QUALITY_SCORES`) — along with `good_reps` (`quality >= 1.0`) and `sets_done`
+  (distinct set numbers). An empty session (0 reps) under 20 s is skipped entirely (no analysis, no event:
+  a false start); 0 reps at 20 s or more still gets a template analysis ("No reps were counted…").
+- Asks Gemini (`analyst` agent, `models.smart()`, `json_mode=True`, 12 s timeout) for
+  `{spoken, note, highlights, next_focus}` with the same `validate_text`/`validate_json` number guard and
+  one retry as `SessionVoice`'s per-set summary; any validation failure (banned content, a number not in
+  DATA, bad JSON) falls back to a **template** analysis and `source` becomes `"template"` instead of `"ai"`.
+  Flagged moments come from `form_events` joined to the reps, labelled via `cue_library.pick(rule_id)` (falling
+  back to `session_voice.FLAG_REMINDERS`, then the humanised rule id), capped at 12, most severe/earliest
+  first.
+- Stores one row in **`session_analyses`** (`server/db/migrations/002_session_analysis.sql`; `session_id`
+  PK → `sessions(id) ON DELETE CASCADE`, `form_score`, `reps_total`, `good_reps`, `sets_done`, `spoken`,
+  `note` (stored **without** the `AI_DRAFT_LABEL`, added back on read/emit), `highlights`, `next_focus`,
+  `flagged_moments`, `comparison`, `audio_url`, `source`, `model`). A second analysis for the same session
+  upserts the row (latest values win).
+- Emits a `session_summary` event on `/ws/events` and `/device/`:
+  `{session_id, t, exercise_id, exercise_name, form_score, reps_total, good_reps, sets_done, spoken, note
+  (labeled "AI draft — review before use: …"), highlights: [{kind, text}], next_focus, flagged_moments:
+  [{set, rep, rule_id, label, severity, t}], comparison: {prev_sessions, good_rep_rate_delta, rom_delta_deg,
+  asym_delta_pct, form_score_delta}, audio_url, source: ai|template, model}`. Sample:
+  `server/samples/ws_events_session_summary.json`.
+- Raises a therapist notification (`kind="session_summary"`, `severity="info"`, title `"<first name> finished
+  <exercise>"`, body `"Form <score>/100 · <good>/<total> good reps"`, `link="/sessions/{id}"`, deduped per
+  session) through `server.notify.notifications.create`, same as the other agents.
+- Never raises into its caller: every DB read is individually guarded and an unexpected error is logged and
+  swallowed, so a broken analysis can never break the live stream or `stop()`.
+- On shutdown, `SessionAnalyst.close()` cancels every pending analysis task: a session that ends right at
+  shutdown gets no analysis (there's no live request left to serve one to, and the process is exiting).
+
+**New/changed REST:**
+
+- `GET /sessions/{id}` gains `"exercise_name"` (display name for `exercise_id`) and `"analysis"`
+  — the `session_analyses` row (with `note` labeled) or `null` if the analyst hasn't finished yet. Poll this
+  until `analysis` is non-null, or just listen for `session_summary` on `/ws/events`.
+- `POST /sessions/{id}/checkin` (owner or full scope) — `{pain_post?: 0..10, effort?: 1..10, note?: ≤1000
+  chars}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` raises a therapist notification
+  (`kind="pain"`, `severity="high"`, title `"<first name> reported pain <n>/10 after a session"`, deduped
+  per session so re-posting the same check-in is harmless) instead of opening a live Safety Guardian
+  incident — the check-in arrives after the session (and usually its analysis) already ended, so there is
+  no live call left for the Guardian to hold open.
+- `GET /patients/{id}/sessions?limit=30&before=` (owner or full scope) → `{patient_id, sessions: [...]}`,
+  newest first, ended and non-simulated sessions only, each row carrying `form_score`/`good_reps`/
+  `reps_total`/`spoken_preview` (first 140 chars of `spoken`) alongside the usual session fields.
+
+Samples for all of the above: `server/samples/ws_events_session_summary.json`,
+`server/samples/rest_get_patient_sessions.json`, `server/samples/rest_post_session_checkin.json`, and the
+regenerated `server/samples/rest_get_session.json` (now carries `exercise_name`/`analysis`).
+
+**LCD:** the kiosk's "Session complete" screen (`device/kiosk/README.md`) shows while a `session_summary`
+event is ≤ 60 s old and the phase is `idle`, `rest` or `done` — the form score out of 100, "N of M good
+reps", and the AI `spoken` line (captioned and voiced the same way as every other kiosk line).
 
 ## Care Copilot (therapist Q&A, plan proposals)
 
@@ -543,6 +724,77 @@ the number's outbound agent to that exact version number (not `"latest"`, which 
 someone last edited in the dashboard). It prints `RETELL_AGENT_ID` and `RETELL_AGENT_VERSION`; calls pass
 both as `override_agent_id` / `override_agent_version`. The LLM also has an `end_call` tool so the agent
 can hang up once the contact has said what they will do.
+
+## Apple Watch companion
+
+Plan 4 adds a real watchOS target, `MiraWatch` (bundle `com.mira.app.watchkitapp`, embedded in the `Mira`
+iPhone app as "Embed Watch Content"), alongside the design-review mock in `device/watch/` (unchanged — see
+[Watch mockup](device/watch/README.md)). The watch talks to the iPhone over `WatchConnectivity`; the phone
+relays everything onto the normal `/ws/events` socket, so the server never knows the difference between a
+phone tap and a watch tap.
+
+**Relay path:** watch → iPhone (`WCSession`) → `/ws/events` → server, and back: server → `/ws/events` →
+iPhone → watch (`updateApplicationContext`/`sendMessage`). The shared wire codec is
+`device/ios/Mira/Net/WatchWire.swift` (`WatchWire.encode`/`decodeToWatch`/`decodeToPhone`, dictionary ⇄ typed
+messages, JSON-safe scalars only); the iPhone-side relay is `device/ios/Mira/Watch/WatchBridge.swift`
+(`WCSessionDelegate`), driving and driven by `LiveSessionStore`. `AppState.watchPaired` (`watch.isPaired &&
+watch.isWatchAppInstalled`) gates the "Apple Watch tap" toggle in Settings.
+
+**`watch_button` mapping** (server, `server/main.py::_on_client_event`, `WATCH_BUTTON_COMMANDS`): the watch's
+**Ready** tap and **Stop** (tap, then confirm — or hold for 1 s) arrive as `{"type": "watch_button", "name": "ready" | "stop"}` on
+`/ws/events` and are forwarded as session commands exactly like a phone tap — `ready → command start`,
+`stop → command stop`, the forwarded command carrying `payload.source = "watch"` — and go through the same `_forward_session_command`
+path, so a Safety Guardian hold blocks a watch `ready` exactly like it blocks a phone `start`. The raw
+`watch_button` event is also broadcast to every connected `/ws/events` client either way.
+
+**On the watch** (`device/ios/MiraWatch/`): one screen driven by the phone's snapshot. `countdown`, `active`
+and `rest` show the live rep ring (rest stays on the live screen with "Rest a moment."); `paused`/`incident`
+show the paused screen (Resume is hidden during an `incident`, which reads "Mira is checking on you"
+instead); the end of a session shows the done screen (reps, good-form reps and form score once the summary
+arrives) until **Back to Mira**. Ready plays `.click`, Stop plays `.stop`. The `HKWorkoutSession` runs from
+`countdown`/`active` until the session ends — a `done`/`idle` snapshot, the summary, or a local Stop. Because
+the server clears the session right after `done` and the phone's `/ws/live` then goes quiet, the phone
+pushes an idle snapshot itself when `/ws/live` reports `done` or disappears, and again with the summary;
+snapshot pushes are throttled to one per 0.5 s with a trailing push, so the final state is never dropped.
+The watch's `.status(workoutActive:)` is stored on the phone as `WatchBridge.workoutActive` (nothing reads
+it yet). Heart rate is sent to the phone only while it is reachable.
+
+**Haptic coaching** (`server/agents/haptics.py`, `HapticCoach`): subscribes to engine events and emits a
+`haptic` event only while a session is live. `HAPTIC_PATTERNS = ("good_rep", "fix_form", "set_done",
+"check_in")`:
+- `good_rep` — a `rep` event with `quality == "good"`.
+- `fix_form` — a `rep` event with any other quality.
+- `set_done` — a `set_done` event.
+- `check_in` — emitted directly by the Safety Guardian (`templates.CHECKIN_HAPTIC`), not by `HapticCoach`,
+  to avoid a duplicate emit.
+
+On the watch: `good_rep → .success`, `fix_form → .retry` played twice 150 ms apart, `set_done →
+.notification`, `check_in` (and any unknown pattern) `→ .directionUp`.
+
+`haptic` stays off the LCD kiosk's event allow-list (patients and the dashboard only).
+
+**Heart rate** (`server/db/writes.py::insert_heart_rate`, `server/db/persist.py::SessionPersistence._on_hr`):
+an `hr` event with a numeric `bpm` is now persisted to the `heart_rate` table, throttled to at most one row
+per second per session (`_last_hr_at`, forgotten when the session stops).
+
+**What works on the simulator vs. a physical watch:** pairing, Ready/Stop, haptics, live rep/set counts and
+the exercise name all work on a paired Apple Watch *simulator* — nothing there depends on real hardware.
+Heart rate does not: `HKWorkoutSession`/`HKLiveWorkoutBuilder` only deliver live samples from a physical
+Apple Watch being worn. On the simulator the heart-rate card shows "—" with "Heart rate needs a real Apple
+Watch"; on a real watch with the workout permission denied it shows "Heart rate needs permission in the
+Watch app"; otherwise it streams into
+`WatchSessionModel` and is relayed to the phone as `heartRate` and on to `/ws/events` as `hr`.
+
+**Build and run:**
+1. Open `device/ios/Mira.xcodeproj` (or the `device/Mira.xcworkspace` that also has the mocks) in Xcode.
+2. Select the **MiraWatch** scheme for the watch app standalone, or the **Mira** scheme (which embeds
+   `MiraWatch.app`) to run the iPhone app with the watch companion attached.
+3. Pick an iPhone simulator and a paired Apple Watch simulator. To pair simulators: Xcode →
+   **Window ▸ Devices and Simulators**, or `xcrun simctl pair <watch-udid> <phone-udid>`. The watch app's
+   sources are in `device/ios/MiraWatch/`.
+4. Run Tri's server (above, "Try it") and pair the phone as usual (README "Patient identity (phone)"). Once
+   the phone is paired and a session is live, the watch mirrors reps/set/exercise and plays the matching
+   haptic on `good_rep`/`fix_form`/`set_done`/`check_in`.
 
 ## Dashboard notifications
 
