@@ -11,6 +11,18 @@ class FakeNode {
   remove() {
     if (this.parentNode) this.parentNode._removeChild(this);
   }
+
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const siblings = this.parentNode.childNodes;
+    return siblings[siblings.indexOf(this) + 1] ?? null;
+  }
+
+  get isConnected() {
+    let n = this;
+    while (n.parentNode) n = n.parentNode;
+    return Boolean(globalThis.document && n === globalThis.document.body);
+  }
 }
 
 class FakeText extends FakeNode {
@@ -153,7 +165,18 @@ class FakeElement extends FakeNode {
     return node;
   }
 
+  insertBefore(node, ref) {
+    if (ref === null || ref === undefined) return this.appendChild(node);
+    if (node.parentNode) node.parentNode._removeChild(node);
+    node.parentNode = this;
+    this.childNodes.splice(this.childNodes.indexOf(ref), 0, node);
+    return node;
+  }
+
+  get children() { return this.childNodes.filter((c) => c.nodeType === ELEMENT_NODE); }
+
   replaceChildren(...nodes) {
+    for (const c of this.childNodes) c.parentNode = null;
     this.childNodes = [];
     for (const n of nodes) this.appendChild(n);
   }

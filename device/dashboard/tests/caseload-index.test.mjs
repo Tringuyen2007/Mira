@@ -158,3 +158,39 @@ test("unmount closes the add-patient dialog so nothing lingers after sign-out", 
     document.createElement = realCreateElement;
   }
 });
+
+test("tab clicks and background refreshes keep the focused tab and row (no rebuilt controls)", async () => {
+  const root = fakeRoot();
+  document.body.append(root);
+  const { ctx, callCount } = makeCtx(CASELOAD_JSON);
+  const unmount = screen.mount(root, ctx, { name: "caseload", params: {}, query: {} });
+  await flush();
+  const tabsBefore = root.querySelectorAll('[role="tab"]');
+  const watchTab = tabsBefore.find((t) => t.getAttribute("data-tab") === "on_track");
+  watchTab.focus();
+  watchTab.dispatch("click");
+  const tabsAfter = root.querySelectorAll('[role="tab"]');
+  assert.deepEqual(tabsAfter, tabsBefore);
+  assert.equal(watchTab.getAttribute("aria-selected"), "true");
+  assert.equal(document.activeElement, watchTab);
+
+  // Back to "All", focus Maya's row, then a set_done refresh with changed data rebuilds the body.
+  tabsBefore[0].dispatch("click");
+  const mayaRow = root.querySelector('[data-row-id="maya"]');
+  mayaRow.focus();
+  CASELOAD_JSON.today.sessions_done = 2;
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => { fn(); return 0; };
+  try {
+    ctx.sockets.emit("events", { type: "set_done" });
+    await flush();
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    CASELOAD_JSON.today.sessions_done = 1;
+  }
+  assert.ok(callCount() >= 2);
+  const mayaAfter = root.querySelector('[data-row-id="maya"]');
+  assert.equal(document.activeElement, mayaAfter);
+  unmount();
+  root.remove();
+});

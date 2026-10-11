@@ -2,7 +2,7 @@
 // also today's shipped implementation: a calm placeholder card with live angle pills and the balance bar, no
 // canvas/WebGL). See README.md in this folder for the coordinate contract Eric's module must honour.
 //
-//   createAvatarView(container, { mode, affectedSide, ghost }) -> { setFrame, setView, setLabelsVisible, dispose }
+//   createAvatarView(container, { mode, affectedSide, ghost, viewControls }) -> { setFrame, setView, setLabelsVisible, dispose }
 //   registerAvatarRenderer(factory)  // factory has createAvatarView's signature; called once by Eric's module.
 //
 // If a renderer has been registered, createAvatarView delegates every call to it; otherwise it builds the
@@ -11,6 +11,7 @@
 import { h } from "../core/dom.js";
 import { kneeFlexion, hipFlexion, trunkLean, flagSegments, isValidJoints } from "../three/joints.js";
 import { balanceBar } from "../ui/balanceBar.js";
+import { loadSplit } from "../core/format.js";
 
 const THROTTLE_MS = 100; // ~10 Hz, per the live-mode DOM-update budget
 
@@ -18,6 +19,11 @@ let rendererFactory = null;
 
 export function registerAvatarRenderer(factory) {
   rendererFactory = factory;
+}
+
+// True once a real renderer has registered (screens show orbit/zoom hints only then).
+export function hasRegisteredRenderer() {
+  return rendererFactory !== null;
 }
 
 function fmtDeg(n) {
@@ -41,7 +47,9 @@ function pillRow(extraClass) {
 }
 
 function createPlaceholder(container, opts) {
-  const { affectedSide, ghost } = opts || {};
+  // viewControls: false when the screen has its own single View control (the time-lapse), so there's no
+  // duplicate Front/Side/Top toggle per card.
+  const { affectedSide, ghost, viewControls = true } = opts || {};
   let disposed = false;
   let view = "front";
   let labelsVisible = true;
@@ -61,12 +69,12 @@ function createPlaceholder(container, opts) {
 
   const floorEl = h("div", { class: "avatar-placeholder__floor" },
     h("p", { class: "avatar-placeholder__title" }, "3D view coming soon"),
-    h("p", { class: "avatar-placeholder__sub" }, "Eric's 3D renderer plugs in here"),
+    h("p", { class: "avatar-placeholder__sub" }, "Live angles and balance are shown below"),
     pillsEl, ghostRow ? ghostRow.el : null);
 
   const balanceHost = h("div", { class: "avatar-placeholder__balance" });
 
-  const el = h("div", { class: "avatar-placeholder" }, segmentedEl, floorEl, balanceHost);
+  const el = h("div", { class: "avatar-placeholder" }, viewControls ? segmentedEl : null, floorEl, balanceHost);
   container.append(el);
 
   function setView(next) {
@@ -110,31 +118,45 @@ function createPlaceholder(container, opts) {
 
   function applyFrame(frame) {
     const flagged = applyPills({ rKnee, lKnee, hips, trunk }, frame);
-    const loadL = Number(frame && frame.load_l_pct);
-    const affected = affectedSide === "left" ? loadL : 100 - loadL;
-    const other = 100 - affected;
+    // One value, two labels that add to 100 (browser bug 11).
+    const split = loadSplit(frame && frame.load_l_pct);
+    const affected = split ? (affectedSide === "left" ? split.left : split.right) : null;
     balanceHost.replaceChildren(balanceBar({
-      affected: Number.isFinite(loadL) ? affected : null,
-      other: Number.isFinite(loadL) ? other : null,
+      affected,
+      other: split ? 100 - affected : null,
       affectedSide,
       flagged: flagged.has(`${affectedSide === "left" ? "l" : "r"}_thigh`),
     }));
   }
 
+  let pending = null;
+  let trailingTimer = null;
+  function flush() {
+    if (disposed || !pending) return;
+    const [frame, ghostFrame] = pending;
+    pending = null;
+    lastUpdateAt = Date.now();
+    applyFrame(frame);
+    if (ghostRow && ghostFrame) applyPills(ghostRow, ghostFrame);
+  }
+
   return {
+    // Throttled to ~10 Hz, with a trailing update so the last frame before a pause/seek always lands
+    // (final review B, Minor 3).
     setFrame(frame, ghostFrame) {
       if (disposed) return;
-      const now = Date.now();
-      if (now - lastUpdateAt < THROTTLE_MS) return;
-      lastUpdateAt = now;
-      applyFrame(frame);
-      if (ghostRow && ghostFrame) applyPills(ghostRow, ghostFrame);
+      pending = [frame, ghostFrame];
+      const wait = THROTTLE_MS - (Date.now() - lastUpdateAt);
+      if (wait <= 0) { flush(); return; }
+      if (!trailingTimer) trailingTimer = setTimeout(() => { trailingTimer = null; flush(); }, wait);
     },
     setView,
     setLabelsVisible,
     dispose() {
       if (disposed) return;
       disposed = true;
+      clearTimeout(trailingTimer);
+      trailingTimer = null;
       el.remove();
     },
   };

@@ -6,14 +6,15 @@
 import { h, clear } from "../../core/dom.js";
 import { MESSAGE_MAX_CHARS } from "../../net/endpoints.js";
 import { href } from "../../core/router.js";
-import { firstName, fmtWhen, weeksSince } from "../../core/format.js";
-import { createAvatarView } from "../../avatar/avatarView.js";
+import { firstName, fmtWhenAt, capitalize, patientMeta } from "../../core/format.js";
+import { exerciseName } from "../../core/exercises.js";
+import { createAvatarView, hasRegisteredRenderer } from "../../avatar/avatarView.js";
 import { lerpJoints, isValidJoints } from "../../three/joints.js";
 import { createPlayer, loadSessionFrames } from "./player.js";
 import { sessionCardModel, repTimelineModel, trendModel, memoryModel, noteModel } from "./model.js";
 import {
   renderHead, renderSessionPicker, renderRoomCard, setFlagCallout, renderSessionCard, renderTimelineCard,
-  renderReps, renderTrendCard, renderMemoryCard, renderNoteCard, cardLoading, cardError, noSessions,
+  renderReps, setCurrentRep, renderTrendCard, renderMemoryCard, renderNoteCard, cardLoading, cardError, noSessions,
 } from "./view.js";
 
 const MESSAGES_CAP = "/patients/{patient_id}/messages";
@@ -21,21 +22,10 @@ const POSE_LERP_T = 0.4; // ~60ms-behind smoothing per frame (decisions: "lerp ~
 const SID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-// GET /patients/{id} doesn't expose first_session_at (only /caseload's server-computed `week` does, and that's
-// a different route), so "week N" here is approximated from the patient's registration date (created_at)
-// rather than their first session — close enough for the head's meta line, not used for any clinical logic.
-function patientMeta(patient) {
-  if (!patient) return "";
-  const parts = [patient.name, patient.age != null ? String(patient.age) : null].filter(Boolean).join(", ");
-  const week = patient.created_at != null ? `week ${Math.max(1, weeksSince(patient.created_at, new Date()) + 1)}` : null;
-  return [parts, patient.condition, week].filter(Boolean).join(" · ");
-}
-
+// "Squats, today at 9:10" (Figma): the shared exercise display name, then the session's day and time.
 function sessionTitle(session) {
   if (!session) return "—";
-  const name = session.exercise_id ? session.exercise_id.replace(/_/g, " ") : "Session";
-  const cap = name.charAt(0).toUpperCase() + name.slice(1);
-  return `${cap}, ${fmtWhen(session.started_at, new Date())}`;
+  return `${exerciseName(session.exercise_id)}, ${fmtWhenAt(session.started_at, new Date())}`;
 }
 
 export const screen = {
@@ -49,7 +39,7 @@ export const screen = {
       mode: "replay",
       currentRep: null,
       noSessions: false,
-      noteOverride: typeof route.query.note === "string" && route.query.note.trim() ? route.query.note.trim() : null,
+      noteDraft: null, // {patientId, text} handed over in memory by the time-lapse, consumed once (never via URL)
     };
     let frames = [];
     let framesAbort = null;
@@ -65,15 +55,17 @@ export const screen = {
       onPickSession: (btn) => togglePicker(btn),
       onMessage: (e) => toggleMessagePopover(e.currentTarget),
     });
-    const roomRefs = renderRoomCard();
+    const roomRefs = renderRoomCard({ interactive: hasRegisteredRenderer() });
     const sessionHost = h("div", {});
     const timelineHost = h("div", {});
     const trendHost = h("div", {});
     const memoryHost = h("div", {});
     const noteHost = h("div", {});
-    const mainEl = h("div", { class: "patient__main" }, roomRefs.el, timelineHost,
+    // Figma: room + "This session" on top, the rep timeline full width, then trend / memory / note in one row.
+    const gridEl = h("div", { class: "patient__layout" },
+      h("div", { class: "patient__grid" }, roomRefs.el, sessionHost),
+      timelineHost,
       h("div", { class: "patient__bottom-grid" }, trendHost, memoryHost, noteHost));
-    const gridEl = h("div", { class: "patient__grid" }, mainEl, sessionHost);
     const bodyHost = h("div", {});
     root.append(headRefs.el, bodyHost);
 
@@ -97,7 +89,7 @@ export const screen = {
     function togglePicker(btn) {
       if (pickerEl) { pickerEl.remove(); pickerEl = null; return; }
       const sessions = ((state.patientJson && state.patientJson.recent_sessions) || []).slice(0, 10).map((s) => ({
-        id: s.id, label: fmtWhen(s.started_at, new Date()),
+        id: s.id, label: capitalize(fmtWhenAt(s.started_at, new Date())),
         sub: `${s.reps_done != null ? s.reps_done : "—"} reps`,
       }));
       pickerEl = renderSessionPicker(sessions, {
@@ -151,8 +143,13 @@ export const screen = {
       headRefs.titleEl.textContent = sessionTitle(state.sessionJson && state.sessionJson.session);
       headRefs.liveBtn.setAttribute("aria-selected", state.mode === "live" ? "true" : "false");
       headRefs.replayBtn.setAttribute("aria-selected", state.mode === "replay" ? "true" : "false");
-      headRefs.sessionLabelEl.textContent = sessionTitle(state.sessionJson && state.sessionJson.session)
-        .replace(/^[A-Z][a-z ]*, /, "");
+      const session = state.sessionJson && state.sessionJson.session;
+      headRefs.sessionLabelEl.textContent = session ? capitalize(fmtWhenAt(session.started_at, new Date())) : "—";
+      if (state.pid) {
+        headRefs.askLink.setAttribute("href", href("assistant", {}, { patient: state.pid }));
+        headRefs.askLink.textContent = patient ? `Ask Mira Assistant about ${firstName(patient.name)}`
+          : "Ask Mira Assistant";
+      }
       const canMessage = Boolean(ctx.caps && ctx.caps.has && ctx.caps.has(MESSAGES_CAP));
       headRefs.messageBtn.hidden = !canMessage;
       if (canMessage && patient) headRefs.messageBtn.textContent = `Message ${firstName(patient.name)}`;
@@ -214,6 +211,7 @@ export const screen = {
           updateTimelineUi();
         },
       });
+      if (timelineRefs) renderReps(timelineRefs.repsHost, timelineRefs.repBlock, reps, null);
       player.seekTime(0); // shows the first frame's pills/balance bar immediately, before any Play click
       updateTimelineUi();
     }
@@ -252,7 +250,7 @@ export const screen = {
       timelineRefs.playBtn.setAttribute("aria-label", st.playing ? "Pause" : "Play");
       timelineRefs.timeEl.textContent = `${fmtClockLocal(st.t)} / ${fmtClockLocal(st.duration)}`;
       const reps = repTimelineModel(state.sessionJson);
-      renderReps(timelineRefs.repsHost, timelineRefs.repBlock, reps, st.rep);
+      setCurrentRep(timelineRefs.repsHost, st.rep);
       if (reps.length) {
         roomRefs.repPillEl.hidden = false;
         roomRefs.repPillEl.textContent = `Replaying rep ${st.rep} of ${reps.length}`;
@@ -293,7 +291,7 @@ export const screen = {
         const patient = state.patientJson.patient;
         const res = await ctx.api.progress(state.pid, { exerciseId: state.sessionJson.session.exercise_id, days: 21 });
         if (!alive) return;
-        const m = trendModel(res, patient.affected_side, new Date(), 21);
+        const m = trendModel(res, patient.affected_side, new Date(), 21, firstName(patient.name));
         trendHost.replaceChildren(renderTrendCard(m));
       } catch (err) {
         if (alive) trendHost.replaceChildren(cardError("3-week trend", err, loadTrendCard));
@@ -305,9 +303,8 @@ export const screen = {
       try {
         const res = await ctx.api.memory(state.pid, 21);
         if (!alive) return;
-        const patient = state.patientJson.patient;
-        const lastVisit = patient.next_visit_at || null;
-        const m = memoryModel(res, lastVisit);
+        // No "last visit" field exists yet, so the subtitle reads "in the last 3 weeks" (final review B, Minor 8).
+        const m = memoryModel(res, null);
         memoryHost.replaceChildren(renderMemoryCard(m));
       } catch (err) {
         if (alive) memoryHost.replaceChildren(cardError("Therapist Memory", err, loadMemoryCard));
@@ -325,16 +322,11 @@ export const screen = {
     }
 
     function buildNoteCard(approval) {
-      let m = noteModel(state.sessionJson, approval);
-      // Recovery time-lapse's "Add to progress note" navigates here with ?note=<headline>; prefilled into the
-      // AI draft (still unapproved — the therapist still has to click Approve, decisions: "the therapist still
-      // approves it"). Never applied on top of an already-approved note.
-      if (state.noteOverride && !(approval && approval.approved)) {
-        const text = [m.text, state.noteOverride].filter((s) => s && s.trim()).join("\n\n");
-        m = { ...m, text, canApprove: text.trim().length > 0 };
-      }
+      // The time-lapse's "Add to progress note" hands its headline over in memory (state.noteDraft); it is the
+      // therapist's own text, labelled "From time-lapse — review before approving", and approving still takes
+      // the explicit click. Never applied on top of an already-approved note.
+      const m = noteModel(state.sessionJson, approval, state.noteDraft);
       const refs = renderNoteCard(m, {
-        onEdit: () => {},
         onApprove: async (text) => {
           await ctx.api.approveProgressNote(state.sid, text);
           if (!alive) return;
@@ -368,7 +360,12 @@ export const screen = {
         if (!alive) return;
         state.pid = pid;
         state.patientJson = patientRes;
-        ctx.store.set({ selectedPatientId: pid });
+        const handoff = ctx.store.get && ctx.store.get().noteDraft;
+        if (handoff && handoff.patientId === pid && typeof handoff.text === "string") {
+          state.noteDraft = { text: handoff.text };
+        }
+        // Consumed once: a later visit to this patient never shows it again.
+        ctx.store.set({ selectedPatientId: pid, ...(handoff ? { noteDraft: null } : {}) });
         if (!sid) {
           const recent = (patientRes.recent_sessions || []);
           if (recent.length === 0) {

@@ -21,13 +21,15 @@ test("sessionCardModel: avgDepth is null when every rep's peak_angle is null (sa
   assert.equal(m.avgDepth, null);
 });
 
-test("sessionCardModel: affected load is 100 - tw_load_left_pct for a right-affected patient, not flagged above threshold", () => {
-  const m = sessionCardModel(session, patient);
-  const expectedAffected = 100 - session.tw_load_left_pct;
-  assert.ok(Math.abs(m.load.affected - expectedAffected) < 0.001);
+test("sessionCardModel: both sides come from one rounded value and add to 100; not flagged above threshold", () => {
+  const m = sessionCardModel(session, patient); // tw_load_left_pct 53.35 -> left 53, right 47
   assert.equal(m.load.affectedSide, "right");
-  assert.equal(m.load.other, session.tw_load_left_pct);
-  assert.equal(m.load.flagged, false); // 46.65 is not below 50 - 15 = 35
+  assert.equal(m.load.affected, 47);
+  assert.equal(m.load.other, 53);
+  assert.equal(m.load.affected + m.load.other, 100);
+  assert.equal(m.load.flagged, false); // 47 is not below 50 - 15 = 35
+  const half = sessionCardModel({ ...session, tw_load_left_pct: 52.5 }, patient);
+  assert.equal(half.load.affected + half.load.other, 100);
 });
 
 test("sessionCardModel: flagged when affected load drops below 50 - threshold", () => {
@@ -48,15 +50,26 @@ test("sessionCardModel: a prescription's rule_overrides.weight_shift_pct overrid
   assert.equal(m.load.flagged, true);
 });
 
-test("sessionCardModel: flags count and label come from session + rep flags", () => {
+test("sessionCardModel: flags use summary.flag_counts (session.flags are objects, never printed raw)", () => {
   const flagged = {
     ...session,
-    flags: ["trunk_lean"],
-    reps: session.reps.map((r, i) => (i === 0 ? { ...r, flags: ["weight_shift"] } : r)),
+    flags: [{ rule_id: "weight_shift", rep: 1 }, { rule_id: "weight_shift", rep: 3 }],
+    summary: { ...session.summary, flag_counts: { weight_shift: 2 } },
   };
   const m = sessionCardModel(flagged, patient);
   assert.equal(m.flags.count, 2);
-  assert.equal(m.flags.label, "2 trunk leans");
+  assert.equal(m.flags.label, "2 weight shifts");
+  assert.doesNotMatch(m.flags.label, /object/);
+});
+
+test("sessionCardModel: without flag_counts, rep flags are counted; mixed kinds read 'N flags'", () => {
+  const one = { ...session, summary: { ...session.summary, flag_counts: {} },
+    reps: session.reps.map((r, i) => (i === 0 ? { ...r, flags: ["knee_cave_r"] } : r)) };
+  assert.equal(sessionCardModel(one, patient).flags.label, "1 right knee cave");
+  const mixed = { ...session, summary: { ...session.summary, flag_counts: {} },
+    reps: session.reps.map((r, i) => (i === 0 ? { ...r, flags: ["weight_shift", "trunk_lean"] } : r)) };
+  assert.deepEqual(sessionCardModel(mixed, patient).flags, { count: 2, label: "2 flags" });
+  assert.equal(sessionCardModel(session, patient).flags.label, "No flags");
 });
 
 test("sessionCardModel: pain/effort pass through null when not recorded", () => {
@@ -100,11 +113,14 @@ test("trendModel: reproduces the Figma numbers (depth 70 -> 92, load 47 -> 36) a
       affected_load_pct: 47 - ((47 - 36) * i) / 20,
     });
   }
-  const m = trendModel({ series }, "right", now, 21);
+  const m = trendModel({ series }, "right", now, 21, "George");
   assert.equal(m.caption, "Depth 70° → 92°");
   assert.equal(m.loadCaption, "Right leg load 47% → 36%");
   assert.equal(m.compensating, true);
-  assert.equal(m.insight, "Depth is up while load on the injured leg drops. Maya is compensating.");
+  // Uses this patient's first name (final review B, I1), never a hard-coded "Maya".
+  assert.equal(m.insight, "Depth is up while load on the injured leg drops. George is compensating.");
+  assert.equal(trendModel({ series }, "right", now, 21).insight,
+    "Depth is up while load on the injured leg drops. They are compensating.");
   assert.equal(m.labels.length, 4);
   assert.equal(m.points.depth.length, 21);
   assert.equal(m.points.load.length, 21);
@@ -162,4 +178,17 @@ test("noteModel: a draft with text can be approved", () => {
   const m = noteModel(withDraft, null);
   assert.equal(m.text, "Draft text here.");
   assert.equal(m.canApprove, true);
+});
+
+test("noteModel: a time-lapse handoff is the therapist's text, labelled as such, and still needs Approve", () => {
+  const m = noteModel(session, null, { text: "Depth +22°, right-leg load 36% → 47%" });
+  assert.equal(m.text, "Depth +22°, right-leg load 36% → 47%");
+  assert.equal(m.label, "From time-lapse — review before approving");
+  assert.equal(m.source, "therapist");
+  assert.equal(m.canApprove, true);
+  const withAi = { ...session, session: { ...session.session, ai_note: "AI text." } };
+  const mixed = noteModel(withAi, null, { text: "Mine." });
+  assert.equal(mixed.text, "AI text.\n\nMine.");
+  assert.equal(mixed.source, "mixed");
+  assert.equal(noteModel(session, progressNote, { text: "ignored" }).label, "Approved by you");
 });

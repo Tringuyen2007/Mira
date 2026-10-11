@@ -36,7 +36,8 @@ test("placeholder renders angle pills from a ws_pose.json frame with correct val
   assert.equal(pillText(container, "Trunk lean"), expectTrunk);
 
   assert.match(container.textContent, /3D view coming soon/);
-  assert.match(container.textContent, /Eric's 3D renderer plugs in here/);
+  assert.match(container.textContent, /3D view coming soon/);
+  assert.doesNotMatch(container.textContent, /Eric/); // no developer names in product UI
   view.dispose();
 });
 

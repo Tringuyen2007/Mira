@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { installFakeDom } from "./fakedom.mjs";
 
 installFakeDom();
-const { renderSidebar } = await import("../js/ui/sidebar.js");
+const { renderSidebar, createSidebarView } = await import("../js/ui/sidebar.js");
 
 const therapist = { name: "Dr. Sam Lee, PT", clinic: "Lakeside Rehab" };
 
@@ -182,4 +182,38 @@ test("Mira Assistant links to #/assistant and is active on assistant, copilot an
     assert.equal(a.getAttribute("href"), "#/assistant");
     assert.equal(a.getAttribute("aria-current"), "page", name);
   }
+});
+
+test("updates happen in place: the bell, nav links and badges keep their identity (focus is never lost)", () => {
+  const view = createSidebarView({ route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null,
+    therapist, live: null, unreadCount: 0, bellOpen: false });
+  const bell = view.el.querySelector(".sidebar__bell");
+  const caseloadLink = navLinks(view.el)[0];
+  view.update({ route: { name: "patient" }, proposalsWaiting: 2, selectedPatientId: "maya", therapist,
+    live: null, unreadCount: 5, bellOpen: true, theme: "projector" });
+  assert.equal(view.el.querySelector(".sidebar__bell"), bell);
+  assert.equal(view.bellEl, bell);
+  assert.equal(navLinks(view.el)[0], caseloadLink);
+  assert.equal(bell.getAttribute("aria-expanded"), "true");
+  assert.equal(bell.querySelector(".sidebar__bell-badge").textContent, "5");
+  const links = Object.fromEntries(navLinks(view.el).map((a) => [a.querySelector(".nav-item__label").textContent, a]));
+  assert.equal(links["Patient review"].getAttribute("aria-current"), "page");
+  assert.equal(links["Patient review"].getAttribute("href"), "#/patients/maya");
+  assert.equal(links["Patient review"].getAttribute("aria-disabled"), null);
+  assert.equal(links["Mira Assistant"].querySelector(".nav-item__badge").textContent, "2");
+  assert.equal(view.el.querySelector(".sidebar__theme-toggle").getAttribute("aria-checked"), "true");
+  view.update({ route: { name: "patient" }, proposalsWaiting: 0, selectedPatientId: "maya", therapist,
+    live: null, unreadCount: 0, bellOpen: false });
+  assert.equal(bell.querySelector(".sidebar__bell-badge"), null);
+  assert.equal(links["Mira Assistant"].querySelector(".nav-item__badge"), null);
+});
+
+test("icons are inline SVG drawn in currentColor (readable in both themes)", () => {
+  const root = renderSidebar({ route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null,
+    therapist, live: null });
+  const svgIcon = root.querySelector(".sidebar__bell").querySelector(".icon");
+  assert.equal(svgIcon.tagName.toLowerCase(), "svg");
+  assert.equal(svgIcon.getAttribute("aria-hidden"), "true");
+  assert.ok(svgIcon.querySelector("path").getAttribute("stroke") === "currentColor");
+  assert.equal(root.querySelectorAll("img").filter((i) => /assets\/icons\//.test(i.getAttribute("src") || "")).length, 0);
 });

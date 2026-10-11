@@ -14,7 +14,7 @@ import { createApi } from "./net/api.js";
 import { createEndpoints } from "./net/endpoints.js";
 import { loadCapabilities } from "./net/capabilities.js";
 import { createSocketHub } from "./net/sockets.js";
-import { renderSidebar } from "./ui/sidebar.js";
+import { createSidebarView } from "./ui/sidebar.js";
 import { createToaster } from "./ui/toasts.js";
 import { createAlertBanner } from "./ui/alertBanner.js";
 import { createNotificationsBell } from "./ui/notificationsBell.js";
@@ -60,12 +60,13 @@ function showSignIn() {
   appEl.setAttribute("data-state", "signin");
   sidebarEl.hidden = true;
   contentEl.hidden = true;
-  signinEl.hidden = false;
   clear(signinEl);
   mountSignIn(signinEl, {
     storage: sessionStorage,
     onSignedIn: ({ token, therapistId }) => bootShell({ token, therapistId }),
   });
+  // Shown only once the form and its handler exist, so the first click always submits (browser bug 1).
+  signinEl.hidden = false;
 }
 
 async function bootShell({ token, therapistId }) {
@@ -95,6 +96,7 @@ async function bootShell({ token, therapistId }) {
     panelEl: notificationsEl, api: endpoints, navigate, toast: toaster.toast, onChange: renderSidebarInto,
   });
   let alertsState = [];
+  let patientsById = {}; // filled after boot's GET /patients; names alerts that first arrive over /ws/events
   let theme = getTheme();
 
   let currentRoute = parseRoute(globalThis.location.hash);
@@ -105,15 +107,23 @@ async function bootShell({ token, therapistId }) {
     renderSidebarInto();
   }
 
+  // Built once and updated in place (never cleared), so the bell/nav/theme controls keep focus.
+  let sidebarView = null;
   function renderSidebarInto() {
     if (!alive) return;
-    clear(sidebarEl);
     const bellState = bell.getState();
-    sidebarEl.append(renderSidebar({
+    const state = {
       route: currentRoute, ...store.get(),
       unreadCount: bellState.unread, bellOpen: bellState.open, onBellToggle: (btn) => bell.toggle(btn),
       theme, onThemeToggle,
-    }));
+    };
+    if (!sidebarView) {
+      clear(sidebarEl);
+      sidebarView = createSidebarView(state);
+      sidebarEl.append(sidebarView.el);
+    } else {
+      sidebarView.update(state);
+    }
   }
 
   // Sidebar badge (decisions): pending proposals only, never the unread-notification count — loaded once at
@@ -159,7 +169,7 @@ async function bootShell({ token, therapistId }) {
   const unsubEvents = sockets.subscribe("events", (msg) => {
     if (!msg) return;
     if (msg.type === "alert") {
-      alertsState = applyAlertEvent(alertsState, msg);
+      alertsState = applyAlertEvent(alertsState, msg, patientsById);
       alertBanner.render(alertsState);
     } else if (PROPOSAL_EVENTS.has(msg.type)) {
       refreshProposalsWaiting();
@@ -211,7 +221,6 @@ async function bootShell({ token, therapistId }) {
   // Therapist display name: GET /patients/{first} -> patient.therapist_name when available, else the id.
   // Clinic name has no data source yet (server TODO); the sidebar hides the line when it's empty. Also builds
   // patientsById for the alerts banner's "Fall — <name>" title.
-  let patientsById = {};
   try {
     const list = await endpoints.patients();
     if (!alive) return;

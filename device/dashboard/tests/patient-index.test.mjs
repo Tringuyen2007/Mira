@@ -51,7 +51,7 @@ function makeCtx({ framesPage } = {}) {
 }
 
 async function flush() {
-  for (let i = 0; i < 6; i++) await Promise.resolve();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 test("mounts from #/patients/:pid, loads the patient's latest session and renders the cards", async () => {
@@ -118,16 +118,59 @@ test("a failed progress fetch doesn't block the rest of the screen (Promise.allS
   unmount();
 });
 
-test("?note=<headline> from the time-lapse screen prefills the progress-note draft, unapproved", async () => {
+test("a time-lapse note handoff arrives in memory (not the URL), is consumed once and labelled as the therapist's", async () => {
   const { ctx } = makeCtx();
+  let storeState = { noteDraft: { patientId: "maya", text: "Depth +22°, right-leg load 36% → 47%" } };
+  ctx.store = { get: () => storeState, set: (p) => { storeState = { ...storeState, ...p }; }, subscribe: () => () => {} };
   const root = document.createElement("div");
-  const unmount = screen.mount(root, ctx, {
-    name: "patient", params: { pid: "maya" }, query: { note: "Depth +22°, right-leg load 36% → 47%" },
-  });
+  const unmount = screen.mount(root, ctx, { name: "patient", params: { pid: "maya" }, query: {} });
   await flush();
   assert.match(root.textContent, /Depth \+22°, right-leg load 36% → 47%/);
-  // Still an AI draft — the therapist must click Approve, same as any other AI-authored note.
-  assert.match(root.textContent, /AI draft/);
+  assert.match(root.textContent, /From time-lapse — review before approving/);
   assert.match(root.textContent, /Approve/);
+  assert.equal(storeState.noteDraft, null, "consumed once");
+  unmount();
+
+  // A ?note= query is ignored: URL text never reaches the clinical note.
+  const root2 = document.createElement("div");
+  const unmount2 = screen.mount(root2, ctx, { name: "patient", params: { pid: "maya" }, query: { note: "Injected" } });
+  await flush();
+  assert.doesNotMatch(root2.textContent, /Injected|From time-lapse/);
+  unmount2();
+});
+
+test("head: Figma title, capitalised condition, Ask Mira Assistant link; no orbit hint on the placeholder", async () => {
+  const { ctx } = makeCtx();
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "patient", params: { pid: "maya" }, query: {} });
+  await flush();
+  assert.match(root.querySelector(".page-title").textContent, /^Squats, (today|yesterday) at \d{1,2}:\d{2}$|^Squats, [A-Z][a-z]{2} \d{1,2} at \d{1,2}:\d{2}$/);
+  assert.match(root.querySelector(".patient__meta").textContent, /Right knee replacement/);
+  const ask = root.querySelector(".patient__ask");
+  assert.equal(ask.textContent, "Ask Mira Assistant about Maya");
+  assert.equal(ask.getAttribute("href"), "#/assistant?patient=maya");
+  assert.doesNotMatch(root.textContent, /Drag to orbit/);
+  assert.doesNotMatch(root.textContent, /object Object/);
+  unmount();
+});
+
+test("rep buttons are built once; playback only moves the current-rep class (a focused rep keeps focus)", async () => {
+  const start = Date.parse(SESSION.session.started_at);
+  const end = Math.max(...SESSION.reps.map((r) => Date.parse(r.ended_at)));
+  const frames = [];
+  for (let t = start; t <= end; t += 500) frames.push({ time: new Date(t).toISOString(), joints: null, load_l_pct: 50 });
+  const { ctx } = makeCtx({ framesPage: async () => ({ frames, next_t0: null }) });
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "patient", params: { pid: "maya" }, query: {} });
+  await flush();
+  const reps = root.querySelectorAll(".patient__rep");
+  assert.ok(reps.length >= 2);
+  reps[1].focus();
+  reps[1].dispatch("click");
+  const after = root.querySelectorAll(".patient__rep");
+  assert.deepEqual(after, reps);
+  assert.equal(document.activeElement, reps[1]);
+  assert.ok(reps[1].classList.contains("patient__rep--current"));
+  assert.equal(reps[0].classList.contains("patient__rep--current"), false);
   unmount();
 });

@@ -28,7 +28,7 @@
   border: 1px solid var(--color-line);
 }
 
-.search-field img {
+.search-field .icon {
   width: 18px;
   height: 18px;
 }
@@ -195,10 +195,15 @@
   display: inline-flex;
 }
 
-.status-icon img {
+.status-icon .icon {
   width: 20px;
   height: 20px;
 }
+
+/* Status colours (icons are inline SVG in currentColor; both themes' tokens are >= 3:1 against the card). */
+.status-icon--needs { color: var(--color-alert-text); }
+.status-icon--watch { color: var(--color-watch-text); }
+.status-icon--ok { color: var(--color-accent-text-small); }
 
 .caseload__rail {
   display: flex;

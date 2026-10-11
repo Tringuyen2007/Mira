@@ -4,8 +4,8 @@
 // and, later, Patient review.
 import { svg } from "../core/dom.js";
 
-const W = 560;
-const H = 260;
+const W_DEFAULT = 560;
+const H_DEFAULT = 260;
 const PAD = { top: 36, right: 16, bottom: 32, left: 44 };
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}/;
 const Y_TICKS = 4;
@@ -44,7 +44,11 @@ function niceRange(min, max) {
   return [Math.floor(min - pad), Math.ceil(max + pad)];
 }
 
-export function lineChart(chart) {
+// opts.width/height set the viewBox (default 560 × 260). A card narrower than 560 px should pass its own width
+// so the 12 px tick labels aren't scaled down below 12 px (browser bug 7: the Patient review trend).
+export function lineChart(chart, { width = W_DEFAULT, height = H_DEFAULT } = {}) {
+  const W = width;
+  const H = height;
   const series = chart.series;
   const kind = xKind(series);
   const labels = kind === "label" ? [...new Set(series.flatMap((s) => s.points.map((p) => String(p.x))))] : [];

@@ -41,10 +41,10 @@ make test                  # the whole repo: test-dashboard, then the Python tes
 
 | Screen | Route | Endpoints |
 |---|---|---|
-| Caseload | `#/caseload` (`?filter=needs_you\|watch\|on_track`) | `GET /caseload?therapist_id=` |
+| Caseload | `#/caseload` (`?filter=needs\|watch\|on_track`) | `GET /caseload?therapist_id=` |
 | Patient review | `#/patients/:pid`, `#/replay/:sid` | `GET /patients/{id}`, `GET /patients/{id}/memory?days=21`, `GET /sessions/{id}`, `GET /sessions/{id}/frames?...`, `POST /sessions/{id}/progress-note`, `GET /sessions/{id}/progress-note`; `POST /patients/{id}/messages` when capability-gated (see below) |
 | Prescribe | `#/patients/:pid/prescribe` | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}`, `PATCH /patients/{id}/limits`; `GET /exercises` when capability-gated |
-| Recovery time-lapse | `#/patients/:pid/timelapse` | `GET /sessions/{id}/frames?...` (two dates, Overlay toggle) |
+| Recovery time-lapse | `#/patients/:pid/timelapse` | `GET /patients/{id}/session-history` (date pickers: earliest vs latest by default), `GET /sessions/{id}`, `GET /sessions/{id}/frames?...` (two dates, Overlay toggle). "Add to progress note" hands the headline to Patient review in memory (`store.noteDraft`, consumed once, labelled "From time-lapse — review before approving"), never in the URL |
 | Mira Assistant | `#/assistant` (`#/copilot` kept as an alias, redirects) and `#/proposals/:id` | `POST /copilot/ask`, `POST /copilot/review/{patient_id}`, `GET /proposals?status=&patient_id=`, `POST /proposals/{id}/approve\|edit\|dismiss` |
 | Live session | `#/live`, `#/live/:pid` | `GET /caseload` (who's live), `/ws/live`, `/ws/pose`; `POST /live/say` when capability-gated |
 | Sidebar (every screen) | — | `GET /alerts?open=true`, `POST /alerts/{id}/resolve`, `GET /notifications?...`, `GET /notifications/count`, `POST /notifications/{id}/read\|read-all\|ack`, `/ws/events`, `/ws/notifications?since_id=` |

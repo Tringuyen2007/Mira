@@ -39,11 +39,34 @@ export function renderHead(model, { search, caps, onSearchInput, onAddPatient })
 }
 
 export function renderTabs(model, { onTabClick }) {
-  return h("div", { class: "pill-tabs", role: "tablist", "aria-label": "Filter by status" },
-    model.tabs.map((t) => h("button", {
-      type: "button", role: "tab", "aria-selected": t.active ? "true" : "false",
-      onclick: () => onTabClick(t.key),
-    }, `${t.label} `, h("span", { class: "pill-tabs__count" }, String(t.count)))));
+  const tabs = createTabs({ onTabClick });
+  tabs.update(model);
+  return tabs.el;
+}
+
+// The filter tablist, built once per mount and updated in place (aria-selected and counts), so a tab click,
+// a search keystroke or a background refresh never detaches the focused tab (final review B, I4).
+export function createTabs({ onTabClick }) {
+  const byKey = new Map();
+  const el = h("div", { class: "pill-tabs", role: "tablist", "aria-label": "Filter by status" });
+  function update(model) {
+    for (const t of model.tabs) {
+      let ref = byKey.get(t.key);
+      if (!ref) {
+        const countEl = h("span", { class: "pill-tabs__count" });
+        const labelEl = document.createTextNode("");
+        const btn = h("button", { type: "button", role: "tab", "data-tab": t.key, onclick: () => onTabClick(t.key) },
+          labelEl, countEl);
+        ref = { btn, countEl, labelEl };
+        byKey.set(t.key, ref);
+        el.append(btn);
+      }
+      ref.labelEl.textContent = `${t.label} `;
+      ref.countEl.textContent = String(t.count);
+      ref.btn.setAttribute("aria-selected", t.active ? "true" : "false");
+    }
+  }
+  return { el, update };
 }
 
 function rowAccessibleName(r) {

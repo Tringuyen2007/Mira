@@ -80,7 +80,7 @@ export function caseloadModel(caseloadJson, proposalsJson, { filter = "all", sea
   let moreOnTrack = 0;
   const groups = bucketsToShow.map((g) => {
     let rows = allPatients.filter((p) => p.bucket === g.key);
-    if (needle) rows = rows.filter((p) => p.name.toLowerCase().includes(needle));
+    if (needle) rows = rows.filter((p) => String(p.name || "").toLowerCase().includes(needle));
     const count = rows.length;
     if (g.key === "on_track" && !needle && !showAllOnTrack && rows.length > ON_TRACK_SHOWN) {
       moreOnTrack = rows.length - ON_TRACK_SHOWN;

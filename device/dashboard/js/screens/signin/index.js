@@ -31,15 +31,34 @@ export function mountSignIn(root, { storage = globalThis.sessionStorage, fetchIm
     }
   }
 
+  let inFlight = false;
+
+  function setBusy(busy) {
+    inFlight = busy;
+    submitBtn.toggleAttribute("disabled", busy);
+    submitBtn.setAttribute("aria-busy", busy ? "true" : "false");
+    submitBtn.textContent = busy ? "Signing in…" : "Sign in";
+  }
+
   // Probe before saving: a reload mid-probe must not boot the shell with a token that was never verified.
   async function onSubmit(e) {
-    e.preventDefault();
+    e?.preventDefault?.();
+    if (inFlight) return;
     clear(errorEl);
     const token = tokenInput.value.trim();
     const therapistId = idInput.value.trim() || "okafor";
-    submitBtn.setAttribute("disabled", "");
-    const result = await probe(token, therapistId);
-    submitBtn.removeAttribute("disabled");
+    if (!token) {
+      errorEl.textContent = "Enter your API token.";
+      tokenInput.focus?.();
+      return;
+    }
+    setBusy(true);
+    let result;
+    try {
+      result = await probe(token, therapistId);
+    } finally {
+      setBusy(false);
+    }
     if (!result.ok) {
       errorEl.textContent = result.message;
       return;
@@ -64,6 +83,8 @@ export function mountSignIn(root, { storage = globalThis.sessionStorage, fetchIm
     h("p", { class: "signin__hint" },
       "Your token stays in this browser tab and is cleared when you close it."));
 
+  // The form is complete, with its submit handler attached, before it is put on screen; main.js only unhides
+  // #signin after this returns (browser bug 1: a first click that did nothing).
   clear(root);
   root.append(form);
   tokenInput.focus?.();

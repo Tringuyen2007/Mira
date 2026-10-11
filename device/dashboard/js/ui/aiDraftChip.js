@@ -2,6 +2,6 @@
 // therapist approves it (spec "Security").
 import { h } from "../core/dom.js";
 
-export function aiDraftChip() {
-  return h("span", { class: "chip chip--ai" }, "AI draft");
+export function aiDraftChip(text = "AI draft") {
+  return h("span", { class: "chip chip--ai" }, text);
 }

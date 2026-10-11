@@ -5,12 +5,16 @@ import { h, clear } from "../../core/dom.js";
 import { icon } from "../../ui/icons.js";
 import { aiDraftChip } from "../../ui/aiDraftChip.js";
 import { lineChart } from "../../ui/lineChart.js";
+import { balanceBar } from "../../ui/balanceBar.js";
 import { loading, errorState, empty } from "../../ui/states.js";
-import { fmtDeg, fmtPct } from "../../core/format.js";
+import { fmtDeg } from "../../core/format.js";
+import { href } from "../../core/router.js";
 
 // ---- Head ---------------------------------------------------------------------------------------------------
 
 export function renderHead({ onModeChange, onPickSession, onMessage }) {
+  // "Ask Mira Assistant about Maya" (browser bug 8): opens the Assistant scoped to this patient.
+  const askLink = h("a", { class: "btn btn--secondary patient__ask", href: href("assistant") }, "Ask Mira Assistant");
   const metaEl = h("p", { class: "meta patient__meta" });
   const titleEl = h("h1", { class: "page-title" });
   const liveBtn = h("button", { type: "button", role: "tab", "aria-selected": "false",
@@ -25,8 +29,9 @@ export function renderHead({ onModeChange, onPickSession, onMessage }) {
     onclick: onMessage }, "Message");
   const el = h("div", { class: "page-head patient__head" },
     h("div", {}, metaEl, titleEl),
-    h("div", { class: "patient__head-actions" }, modeTabs, sessionBtn, messageBtn));
-  return { el, metaEl, titleEl, liveBtn, replayBtn, sessionBtn, sessionLabelEl: sessionBtn.querySelector("span"), messageBtn };
+    h("div", { class: "patient__head-actions" }, modeTabs, sessionBtn, askLink, messageBtn));
+  return { el, metaEl, titleEl, liveBtn, replayBtn, sessionBtn, sessionLabelEl: sessionBtn.querySelector("span"),
+    messageBtn, askLink };
 }
 
 // Session-picker popover: a plain list of buttons (not a native <select>, so each row can show date + reps).
@@ -42,13 +47,15 @@ export function renderSessionPicker(sessions, { selectedId, onPick }) {
 
 // ---- Room card ------------------------------------------------------------------------------------------------
 
-export function renderRoomCard() {
+// `interactive`: a real 3D renderer is registered, so the orbit/zoom hint is true; the placeholder can't orbit,
+// so the hint is hidden then (browser bug 6).
+export function renderRoomCard({ interactive = false } = {}) {
   const repPillEl = h("span", { class: "chip patient__replaying-pill", hidden: true });
   const avatarHost = h("div", { class: "patient__avatar-host" });
   const flagCalloutEl = h("div", { class: "patient__flag-callout", role: "status", hidden: true });
   const el = h("section", { class: "card patient__room", "aria-label": "3D replay" },
     h("div", { class: "patient__room-head" },
-      h("span", { class: "meta" }, "Drag to orbit · scroll to zoom"),
+      interactive ? h("span", { class: "meta" }, "Drag to orbit · scroll to zoom") : h("span", {}),
       repPillEl),
     avatarHost,
     flagCalloutEl);
@@ -75,14 +82,8 @@ export function renderSessionCard(m) {
     h("div", { class: "patient__stat-row" },
       h("span", {}, "Average depth"), h("strong", {}, fmtDeg(m.avgDepth))),
     h("p", { class: "meta patient__stat-label" }, "Time-weighted load"),
-    h("div", { class: `patient__load-bar${m.load.flagged ? " patient__load-bar--flagged" : ""}` },
-      h("span", { class: "patient__load-fill patient__load-fill--affected" }),
-      h("span", { class: "patient__load-fill patient__load-fill--other" })),
-    h("div", { class: "patient__stat-row" },
-      h("span", { class: m.load.flagged ? "patient__flag-text" : "" },
-        m.load.flagged ? h("span", { "aria-hidden": "true" }, "⚠ ") : null,
-        `${m.load.affectedSide === "left" ? "Left" : "Right"} ${fmtPct(m.load.affected)}`),
-      h("strong", {}, `${m.load.affectedSide === "left" ? "Right" : "Left"} ${fmtPct(m.load.other)}`)),
+    // The shared bar: widths from the data, red only when flagged (final review B I2, browser bug 4).
+    m.load.affected != null ? balanceBar(m.load) : h("p", { class: "meta" }, "No load data for this session."),
     h("div", { class: "patient__stat-row" },
       h("span", {}, "Flags"),
       h("strong", { class: m.flags.count ? "patient__flag-text" : "" },
@@ -109,7 +110,7 @@ export function renderTimelineCard({ onPlayPause, onRepClick }) {
       "· Click a rep to jump to it"));
   function repBlock(r, isCurrent) {
     return h("button", {
-      type: "button", role: "listitem",
+      type: "button", role: "listitem", "data-rep": String(r.rep),
       class: `patient__rep${r.flagged ? " patient__rep--flagged" : " patient__rep--good"}${isCurrent ? " patient__rep--current" : ""}`,
       "aria-current": isCurrent ? "true" : null, "aria-label": r.label,
       onclick: () => onRepClick(r.rep),
@@ -118,8 +119,19 @@ export function renderTimelineCard({ onPlayPause, onRepClick }) {
   return { el, playBtn, timeEl, repsHost, repBlock };
 }
 
+// Builds the rep buttons once per session (call again only when the reps change); every frame after that goes
+// through setCurrentRep, which only moves a class and aria-current, so a focused rep button keeps its focus and
+// nothing is rebuilt at frame rate (final review B, I4).
 export function renderReps(repsHost, repBlock, reps, currentRep) {
   repsHost.replaceChildren(...reps.map((r) => repBlock(r, r.rep === currentRep)));
+}
+
+export function setCurrentRep(repsHost, currentRep) {
+  for (const btn of repsHost.querySelectorAll("button")) {
+    const isCurrent = btn.getAttribute("data-rep") === String(currentRep);
+    btn.classList.toggle("patient__rep--current", isCurrent);
+    if (isCurrent) btn.setAttribute("aria-current", "true"); else btn.removeAttribute("aria-current");
+  }
 }
 
 // ---- 3-week trend ---------------------------------------------------------------------------------------------
@@ -134,7 +146,7 @@ export function renderTrendCard(m) {
     if (m.points.load.length) {
       series.push({ name: "Affected-side load", style: "dashed", points: m.points.load.map(([x, y]) => ({ x, y })) });
     }
-    chartHost.append(lineChart({ title: "", series }));
+    chartHost.append(lineChart({ title: "3-week trend", series }, { width: 420, height: 230 }));
   } else {
     chartHost.append(h("p", { class: "meta" }, "Not enough data yet."));
   }
@@ -162,13 +174,26 @@ export function renderMemoryCard(m) {
 
 // ---- Progress note ---------------------------------------------------------------------------------------------
 
-export function renderNoteCard(m, { onEdit, onApprove }) {
+// The chip follows the model's label: "AI draft — review before use" for the AI's draft, "From time-lapse —
+// review before approving" for the therapist's own carried-over text (not AI), "Approved by you" once approved.
+function noteChip(m) {
+  if (m.source === "approved") return null;
+  if (m.source === "therapist") return h("span", { class: "chip chip--source" }, m.label);
+  if (!m.text && !m.canApprove) return aiDraftChip();
+  return aiDraftChip(m.label);
+}
+
+export function renderNoteCard(m, { onApprove }) {
   const bodyHost = h("div", { class: "patient__note-body" });
-  const chipHost = h("div", { class: "patient__note-chip" }, m.canApprove || !m.text ? aiDraftChip() : null);
+  const chipHost = h("div", { class: "patient__note-chip" }, noteChip(m));
   const actionsHost = h("div", { class: "patient__note-actions" });
 
   function renderReadonly() {
-    bodyHost.replaceChildren(h("p", { class: "patient__note-text" }, m.text || "No note yet."));
+    const approvedLine = m.source === "approved"
+      ? h("p", { class: "meta" }, m.approvedAt ? `Approved by you · ${fmtApproved(m.approvedAt)}` : "Approved by you")
+      : null;
+    bodyHost.replaceChildren(...[approvedLine, h("p", { class: "patient__note-text" }, m.text || "No note yet.")]
+      .filter(Boolean));
     const actions = [];
     if (m.canApprove) {
       actions.push(h("button", { class: "btn btn--secondary", type: "button", onclick: startEdit }, "Edit"));
@@ -179,7 +204,7 @@ export function renderNoteCard(m, { onEdit, onApprove }) {
   }
 
   function startEdit() {
-    const textarea = h("textarea", { class: "patient__note-textarea", rows: 6 });
+    const textarea = h("textarea", { class: "patient__note-textarea", rows: 6, "aria-label": "Progress note" });
     textarea.value = m.text;
     const errorEl = h("p", { class: "patient__note-error", role: "alert" });
     bodyHost.replaceChildren(textarea, errorEl);
@@ -207,7 +232,6 @@ export function renderNoteCard(m, { onEdit, onApprove }) {
   }
 
   renderReadonly();
-  void onEdit;
   const el = h("section", { class: "card patient__note", "aria-label": "Progress note" },
     h("div", { class: "patient__note-head" },
       h("h2", { class: "card__title" }, "Progress note"), chipHost),
@@ -220,6 +244,13 @@ export function renderNoteCard(m, { onEdit, onApprove }) {
       h("p", { class: "meta" }, when ? `Approved by you · ${when}` : "Approved by you"),
       h("p", { class: "patient__note-text" }, name));
   } };
+}
+
+function fmtApproved(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    .format(d);
 }
 
 // ---- Shared loading/empty helpers reused by index.js ------------------------------------------------------------

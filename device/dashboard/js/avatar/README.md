@@ -78,9 +78,13 @@ than recomputing angles — they're the ones every other screen (and the therapi
 ## What the placeholder does today
 
 `avatarView.js`'s built-in implementation (used whenever nothing has called `registerAvatarRenderer`) is a
-calm card: centred "3D view coming soon" / "Eric's 3D renderer plugs in here", four angle pills (R knee, L
-knee, Hips, Trunk lean) computed live from `joints.js`, a red pill when the matching `BONES` segment is
-flagged, and the shared `ui/balanceBar.js` underneath. No canvas, no WebGL, no Three.js import — it only
-touches existing DOM nodes' `textContent`/classes per frame, never rebuilds. It's a reasonable reference for
+calm card: centred "3D view coming soon" / "Live angles and balance are shown below", four angle pills (R
+knee, L knee, Hips, Trunk lean) computed live from `joints.js`, a red pill when the matching `BONES` segment is
+flagged, and the shared `ui/balanceBar.js` underneath (left = round(`load_l_pct`), right = 100 − left, so the
+two labels always add to 100). No canvas, no WebGL, no Three.js import. It throttles to ~10 Hz with a trailing
+update, so the last frame before a pause or seek always lands. `createAvatarView(..., { viewControls: false })`
+hides its Front/Side/Top control when the screen has its own (the time-lapse). `hasRegisteredRenderer()` tells
+a screen whether a real renderer is plugged in (Patient review shows "Drag to orbit · scroll to zoom" only
+then). It's a reasonable reference for
 what the real renderer's HTML overlay (angle pills, flag callout) should look like even after the 3D scene
 replaces the "coming soon" card.

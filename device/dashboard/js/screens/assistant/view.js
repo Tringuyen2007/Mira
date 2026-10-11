@@ -186,11 +186,35 @@ export function renderNoteApproved(patientName) {
 }
 
 export function renderRailTabs(tabsModel, onTab) {
-  return h("div", { class: "pill-tabs assistant__tabs", role: "tablist", "aria-label": "Proposals by status" },
-    tabsModel.tabs.map((t) => h("button", {
-      type: "button", role: "tab", "aria-selected": t.active ? "true" : "false", "data-tab": t.key,
-      onclick: () => onTab(t.key),
-    }, t.label, t.key === "pending" && t.count > 0 ? h("span", { class: "pill-tabs__count" }, ` ${t.count}`) : null)));
+  const tabs = createRailTabs(onTab);
+  tabs.update(tabsModel);
+  return tabs.el;
+}
+
+// Built once per mount, updated in place (aria-selected, pending count) so the focused tab survives every rail
+// refresh (final review B, I4).
+export function createRailTabs(onTab) {
+  const byKey = new Map();
+  const el = h("div", { class: "pill-tabs assistant__tabs", role: "tablist", "aria-label": "Proposals by status" });
+  function update(tabsModel) {
+    for (const t of tabsModel.tabs) {
+      let ref = byKey.get(t.key);
+      if (!ref) {
+        const countEl = h("span", { class: "pill-tabs__count" });
+        const btn = h("button", { type: "button", role: "tab", "data-tab": t.key, onclick: () => onTab(t.key) },
+          t.label);
+        ref = { btn, countEl };
+        byKey.set(t.key, ref);
+        el.append(btn);
+      }
+      ref.btn.setAttribute("aria-selected", t.active ? "true" : "false");
+      const showCount = t.key === "pending" && t.count > 0;
+      ref.countEl.textContent = showCount ? ` ${t.count}` : "";
+      if (showCount && ref.countEl.parentNode !== ref.btn) ref.btn.append(ref.countEl);
+      else if (!showCount) ref.countEl.remove();
+    }
+  }
+  return { el, update };
 }
 
 const EMPTY_TAB = {

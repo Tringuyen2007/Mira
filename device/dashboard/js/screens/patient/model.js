@@ -2,7 +2,8 @@
 // memory and /sessions/{id}/progress-note JSON -> the data the cards render. No DOM here so these are unit-
 // testable without fakedom. `patientJson` throughout is the full GET /patients/{id} response ({patient,
 // prescriptions, recent_sessions}).
-import { fmtDeg, fmtPct } from "../../core/format.js";
+import { fmtDeg, fmtPct, loadSplit } from "../../core/format.js";
+import { flagCountLabel } from "../../core/exercises.js";
 
 const DEFAULT_WEIGHT_SHIFT_THRESHOLD = 15;
 const TREND_DAYS = 21;
@@ -22,14 +23,6 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const r1 = (n) => (n === null ? null : Math.round(n * 10) / 10);
 
-// "knee_cave_r" -> {noun: "knee cave", side: "right"}; "weight_shift" -> {noun: "weight shift", side: null}.
-function describeFlag(flag) {
-  const raw = String(flag || "");
-  const m = raw.match(/^(.*)_(l|r)$/);
-  if (m) return { noun: m[1].replace(/_/g, " "), side: m[2] === "l" ? "left" : "right" };
-  return { noun: raw.replace(/_/g, " "), side: null };
-}
-
 // ---- This session ------------------------------------------------------------------------------------------
 
 export function sessionCardModel(sessionJson, patientJson) {
@@ -42,34 +35,34 @@ export function sessionCardModel(sessionJson, patientJson) {
   const depths = reps.map((r) => num(r.peak_angle)).filter((v) => v !== null);
   const avgDepth = r1(avg(depths));
 
-  const twLoadLeft = num(sessionJson && sessionJson.tw_load_left_pct);
-  const affected = twLoadLeft === null ? null : (affectedSide === "right" ? 100 - twLoadLeft : twLoadLeft);
+  // One value, two labels that always add to 100 (browser bug 11): left = round(tw load), right = 100 - left.
+  const split = loadSplit(num(sessionJson && sessionJson.tw_load_left_pct));
+  const affected = split === null ? null : (affectedSide === "right" ? split.right : split.left);
   const other = affected === null ? null : 100 - affected;
 
   const prescriptions = (patientJson && Array.isArray(patientJson.prescriptions)) ? patientJson.prescriptions : [];
   const rx = prescriptions.find((p) => p.exercise_id === session.exercise_id && p.active !== false);
   const threshold = (rx && rx.rule_overrides && num(rx.rule_overrides.weight_shift_pct)) ?? DEFAULT_WEIGHT_SHIFT_THRESHOLD;
+  // Red only when flagged: the affected side carries less than (50 - threshold)% (browser bug 4).
   const flagged = affected !== null && affected < 50 - threshold;
 
-  const allFlags = [...(Array.isArray(sessionJson && sessionJson.flags) ? sessionJson.flags : []),
-    ...reps.flatMap((r) => (Array.isArray(r.flags) ? r.flags : []))];
-  const flagCount = allFlags.length;
-  let flagLabel = "No flags";
-  if (flagCount > 0) {
-    const counts = new Map();
-    for (const f of allFlags) counts.set(f, (counts.get(f) || 0) + 1);
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    const { noun, side } = describeFlag(top);
-    const plural = `${noun}${flagCount === 1 ? "" : "s"}`;
-    flagLabel = side ? `${flagCount} ${side} ${plural}` : `${flagCount} ${plural}`;
+  // summary.flag_counts ({rule_id: n}) when the server sends it; otherwise count the reps' own flag ids.
+  // (`sessionJson.flags` are flag rows — objects — and are already summarised there, so never mixed in.)
+  let counts = summary.flag_counts && typeof summary.flag_counts === "object" ? summary.flag_counts : null;
+  if (!counts || Object.keys(counts).length === 0) {
+    counts = {};
+    for (const f of reps.flatMap((r) => (Array.isArray(r.flags) ? r.flags : []))) {
+      if (typeof f === "string" && f) counts[f] = (counts[f] || 0) + 1;
+    }
   }
+  const flagSummary = flagCountLabel(counts);
 
   return {
     good: typeof summary.good_reps === "number" ? summary.good_reps : null,
     total: typeof summary.reps_total === "number" ? summary.reps_total : null,
     avgDepth,
     load: { affected, other, affectedSide, flagged },
-    flags: { count: flagCount, label: flagLabel },
+    flags: flagSummary,
     pain: num(session.pain_post) ?? num(session.pain_pre),
     effort: num(session.effort),
   };
@@ -119,7 +112,8 @@ function trendTicks(now, days) {
   return ticks;
 }
 
-export function trendModel(progressJson, affectedSide, now = new Date(), days = TREND_DAYS) {
+// `name`: the patient's first name for the compensation insight (falls back to "They").
+export function trendModel(progressJson, affectedSide, now = new Date(), days = TREND_DAYS, name = "") {
   const series = (progressJson && Array.isArray(progressJson.series)) ? progressJson.series.slice() : [];
   const inRange = series
     .filter((s) => s && inWindow(s.day, now, days))
@@ -155,7 +149,7 @@ export function trendModel(progressJson, affectedSide, now = new Date(), days = 
     loadCaption,
     compensating,
     insight: compensating
-      ? "Depth is up while load on the injured leg drops. Maya is compensating."
+      ? `Depth is up while load on the injured leg drops. ${String(name || "").trim() ? `${String(name).trim()} is` : "They are"} compensating.`
       : null,
   };
 }
@@ -176,18 +170,28 @@ export function memoryModel(memoryJson, lastVisitIso) {
 
 // ---- Progress note ----------------------------------------------------------------------------------------
 
-export function noteModel(sessionJson, approval) {
+// `draft` (optional): text the therapist carried over from the time-lapse ({text}). It is the therapist's own
+// text, not AI output, so it is labelled as such and still needs the explicit Approve click.
+export function noteModel(sessionJson, approval, draft = null) {
   if (approval && approval.approved) {
     return {
       text: String(approval.text || ""),
       label: "Approved by you",
+      source: "approved",
       canApprove: false,
       approvedAt: approval.approved_at || null,
     };
   }
   const session = (sessionJson && sessionJson.session) || {};
   const summary = (sessionJson && sessionJson.summary) || {};
-  const text = String(session.ai_note || summary.ai_note || "");
+  const aiText = String(session.ai_note || summary.ai_note || "");
+  const draftText = draft && typeof draft.text === "string" ? draft.text.trim() : "";
+  if (draftText) {
+    const text = [aiText.trim(), draftText].filter(Boolean).join("\n\n");
+    return { text, label: aiText.trim() ? "AI draft + from time-lapse — review before approving"
+      : "From time-lapse — review before approving", source: aiText.trim() ? "mixed" : "therapist",
+    canApprove: true, approvedAt: null };
+  }
   const label = summary.ai_note_label || "AI draft — review before use";
-  return { text, label, canApprove: text.trim().length > 0, approvedAt: null };
+  return { text: aiText, label, source: "ai", canApprove: aiText.trim().length > 0, approvedAt: null };
 }

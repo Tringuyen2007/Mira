@@ -41,16 +41,29 @@
 
 /* ---------- Chat ---------- */
 
+/* The chat fills the viewport below the page head (browser bug 10): the log scrolls, the composer stays pinned
+   at the bottom, and the panel stays in view (sticky) while the proposals rail scrolls. */
 .assistant__chat {
   display: flex;
   flex-direction: column;
   padding: 0;
-  height: calc(100vh - 200px);
-  min-height: 560px;
+  position: sticky;
+  top: var(--space-4);
+  height: calc(100vh - 150px);
+  height: calc(100dvh - 150px);
+  min-height: 520px;
 }
 
+.assistant__composer {
+  flex: none;
+}
+
+/* Once a conversation has started, the suggestion chips give their room to the answers. */
+.assistant__chat.has-turns .assistant__suggestions { display: none; }
+
 .assistant__log {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-6);
   display: flex;
@@ -382,7 +395,7 @@
   gap: var(--space-2);
 }
 
-.proposal-card__who img { width: 18px; height: 18px; }
+.proposal-card__who .icon { width: 18px; height: 18px; }
 
 .proposal-card__name { font-weight: 600; }
 

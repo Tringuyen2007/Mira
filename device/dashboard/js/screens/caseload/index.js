@@ -1,14 +1,14 @@
 // Caseload screen mount: fetches /caseload + pending proposals, builds the view-model, and keeps three
 // persistent regions (head, tabs, body) instead of tearing the whole screen down on every change (review
-// I5/I6). The head — and its search `<input>` — is built once per mount, so typing never loses focus or
-// the characters already typed (I5). Tab clicks only swap the tabs/body subtrees and sync the URL with
+// I5/I6). The head — and its search `<input>` — and the tablist are built once per mount and updated in
+// place, so typing or a tab click never loses focus (I5, final review B I4). Tab clicks only swap the body and sync the URL with
 // `history.replaceState` so they don't trigger main.js's hashchange remount (I6a). A background refresh
 // (from a live `events` message) never blanks the table to a loading state, and a failed refresh keeps the
 // last good data on screen with a toast instead of replacing it with the full error state (I6b).
 import { h, clear } from "../../core/dom.js";
 import { loading, errorState } from "../../ui/states.js";
 import { caseloadModel } from "./model.js";
-import { renderHead, renderTabs, renderBody } from "./view.js";
+import { renderHead, createTabs, renderBody } from "./view.js";
 
 const EVENT_TYPES = new Set(["alert", "proposal_created", "proposal_decided", "summary_ready", "set_done"]);
 const REFRESH_DEBOUNCE_MS = 1000;
@@ -22,6 +22,21 @@ function fmtExpiry(iso) {
   } catch {
     return d.toISOString();
   }
+}
+
+// A key that identifies the same control across a body rebuild: a row by its patient id, anything else by
+// tag, class and text (the "Show N more" button, the rail's links). Used to put focus back after a refresh.
+function focusKey(el) {
+  if (!el || !el.getAttribute) return null;
+  const rowId = el.getAttribute("data-row-id");
+  if (rowId) return `row:${rowId}`;
+  return `${el.tagName}|${el.getAttribute("class") || ""}|${el.textContent}`;
+}
+
+function restoreFocus(host, key) {
+  if (!key) return;
+  const match = [...host.querySelectorAll("a"), ...host.querySelectorAll("button")].find((el) => focusKey(el) === key);
+  match?.focus?.();
 }
 
 // Updates the URL to reflect the active tab without firing `hashchange` (I6a), so main.js never remounts
@@ -119,7 +134,9 @@ export const screen = {
     let headRefs = null;
 
     const headHost = h("div", {});
-    const tabsHost = h("div", {});
+    const tabs = createTabs({ onTabClick: (key) => onTabClick(key) });
+    const tabsHost = h("div", {}, tabs.el);
+    let lastBodyKey = null;
     const bodyHost = h("div", {});
     root.append(headHost, tabsHost, bodyHost);
 
@@ -166,13 +183,24 @@ export const screen = {
       if (!alive) return;
       const model = currentModel();
       if (headRefs) headRefs.subtitleEl.textContent = model.subtitle;
-      tabsHost.replaceChildren(renderTabs(model, { onTabClick }));
+      tabs.update(model);
       if (!state.loaded) {
+        lastBodyKey = null;
         bodyHost.replaceChildren(loading("Loading caseload…"));
       } else if (state.caseloadErr && !state.caseloadJson) {
+        lastBodyKey = null;
         bodyHost.replaceChildren(errorState(state.caseloadErr, () => load(false)));
       } else {
+        // A background refresh (every set_done during a live session) usually changes nothing visible: skip
+        // the rebuild then; otherwise rebuild and put focus back on the same row/control (final review B, I4).
+        const bodyKey = JSON.stringify({ groups: model.groups, moreOnTrack: model.moreOnTrack, today: model.today,
+          copilot: model.copilot, live: model.live });
+        if (bodyKey === lastBodyKey) return;
+        lastBodyKey = bodyKey;
+        const active = globalThis.document && globalThis.document.activeElement;
+        const key = active && bodyHost.contains(active) ? focusKey(active) : null;
         bodyHost.replaceChildren(renderBody(model, { onShowMoreOnTrack, onRowClick }));
+        restoreFocus(bodyHost, key);
       }
     }
 

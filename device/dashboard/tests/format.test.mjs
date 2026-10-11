@@ -24,3 +24,17 @@ test("invalid/missing dates and non-numeric degrees degrade to an em dash instea
   assert.equal(fmtDeg(undefined), "—");
   assert.equal(fmtPct(Infinity), "—");
 });
+
+test("fmtWhenAt, patientMeta, capitalize and loadSplit", async () => {
+  const { fmtWhenAt, patientMeta, capitalize, loadSplit } = await import("../js/core/format.js");
+  const now = new Date("2026-10-11T12:00:00");
+  assert.equal(fmtWhenAt("2026-10-11T09:10:00", now), "today at 9:10");
+  assert.equal(fmtWhenAt("2026-10-10T18:05:00", now), "yesterday at 18:05");
+  assert.equal(fmtWhenAt("2026-10-07T10:00:00", now), "Oct 7 at 10:00");
+  assert.equal(capitalize("right knee replacement"), "Right knee replacement");
+  assert.equal(patientMeta({ name: "Maya Ruiz", age: 67, condition: "right knee replacement",
+    created_at: "2026-09-20T12:00:00" }, now), "Maya Ruiz, 67 · Right knee replacement · week 4");
+  assert.deepEqual(loadSplit(47.5), { left: 48, right: 52 });
+  assert.deepEqual(loadSplit(52.5), { left: 53, right: 47 });
+  assert.equal(loadSplit(null), null);
+});

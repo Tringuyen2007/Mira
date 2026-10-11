@@ -17,6 +17,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
   position: relative;
 }
 
@@ -24,7 +25,7 @@
   min-width: 64px;
 }
 
-.patient__session-btn img {
+.patient__session-btn .icon {
   width: 18px;
   height: 18px;
 }
@@ -75,24 +76,26 @@
   margin-top: var(--space-3);
 }
 
+/* Figma 206:202: room + "This session" in the top row, the rep timeline full width, then trend / memory /
+   note as one full-width row (browser bug 7). */
+.patient__layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 .patient__grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: var(--space-6);
-  align-items: start;
+  grid-template-columns: minmax(0, 2.6fr) minmax(260px, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
 }
 
 @media (max-width: 1279px) {
   .patient__grid {
     grid-template-columns: 1fr;
   }
-}
-
-.patient__main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  min-width: 0;
 }
 
 /* ---- Room card (avatar placeholder host) ---- */
@@ -201,8 +204,9 @@
   overflow: hidden;
 }
 
+/* Neutral unless flagged: red only when the affected side is below the weight-shift threshold (bug 4). */
 .balance-bar__fill--affected {
-  fill: var(--color-flag);
+  fill: var(--color-ink-soft);
 }
 
 .balance-bar--flagged .balance-bar__fill--affected {
@@ -268,28 +272,6 @@
   font-weight: 600;
 }
 
-.patient__load-bar {
-  display: flex;
-  height: 10px;
-  border-radius: var(--radius-track);
-  overflow: hidden;
-  background: var(--color-line);
-}
-
-.patient__load-fill--affected {
-  flex: 1 1 50%;
-  background: var(--color-flag);
-}
-
-.patient__load-bar--flagged .patient__load-fill--affected {
-  background: var(--color-alert);
-}
-
-.patient__load-fill--other {
-  flex: 1 1 50%;
-  background: var(--color-line-strong);
-}
-
 /* ---- Timeline card ---- */
 
 .patient__timeline-controls {
@@ -312,17 +294,11 @@
   cursor: pointer;
 }
 
-.patient__play img {
+.patient__play .icon {
   width: 18px;
   height: 18px;
-  /* Same dark-stroke-icon-on-ink-filled-circle problem as the sidebar's active nav pill (shell.css): invert in
-     the light theme (dark circle), not in the projector theme (circle flips light, icon is already dark-on-light). */
-  filter: invert(1) brightness(2);
 }
 
-:root[data-theme="projector"] .patient__play img {
-  filter: none;
-}
 
 .patient__time {
   font-weight: 600;
@@ -342,17 +318,20 @@
   padding: 0 var(--space-2);
   border-radius: var(--radius-control);
   border: 2px solid transparent;
-  color: var(--color-on-ink);
   font-weight: 600;
   cursor: pointer;
 }
 
+/* Accent (not the brighter --color-good) so the rep number reaches 4.5:1 in both themes (white on #1d9e75 is
+   only 3.4:1). */
 .patient__rep--good {
-  background: var(--color-good);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
 .patient__rep--flagged {
   background: var(--color-flag);
+  color: var(--color-on-alert);
 }
 
 .patient__rep--current {
@@ -383,7 +362,7 @@
 }
 
 .patient__legend-swatch--good {
-  background: var(--color-good);
+  background: var(--color-accent);
 }
 
 .patient__legend-swatch--flag {
@@ -394,9 +373,13 @@
 
 .patient__bottom-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-6);
-  align-items: start;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.patient__bottom-grid > div > .card {
+  height: 100%;
 }
 
 @media (max-width: 1279px) {
@@ -405,9 +388,18 @@
   }
 }
 
+/* Readable trend (browser bug 7): at least 160 px tall, tick labels at least 12 px. lineChart is given a
+   420 × 230 viewBox, close to the card's width, so its 12-13 px labels render at about that size. */
 .patient__trend-chart svg {
   width: 100%;
   height: auto;
+  min-height: 180px;
+}
+
+.patient__trend-chart .chart__xtick,
+.patient__trend-chart .chart__ytick,
+.patient__trend-chart .chart__legend-text {
+  font-size: 13px;
 }
 
 .patient__trend-captions {
@@ -448,6 +440,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
 

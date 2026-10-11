@@ -7,10 +7,11 @@ import { h } from "../../core/dom.js";
 import { MESSAGE_MAX_CHARS } from "../../net/endpoints.js";
 import { href } from "../../core/router.js";
 import { proposalCard } from "../../ui/proposalCard.js";
+import { decideProposal } from "../../ui/proposalDecision.js";
 import { answerModel, contextFrom, proposalsTabsModel } from "./model.js";
 import {
   renderHead, patientOptions, renderComposer, renderIntro, renderQuestion, renderAnswer, renderError,
-  renderNoteEditor, renderNoteApproved, renderRailTabs, renderRailEmpty, MAX_QUESTION,
+  renderNoteEditor, renderNoteApproved, createRailTabs, renderRailEmpty, MAX_QUESTION,
 } from "./view.js";
 
 const PROPOSAL_EVENTS = new Set(["proposal_created", "proposal_decided"]);
@@ -74,7 +75,10 @@ export const screen = {
     logEl.append(introEl);
     const composer = renderComposer({ onSend: () => send(composer.textarea.value), onSuggestion: (q) => send(q),
       onInput });
-    const railTabsHost = h("div", {});
+    const chatEl = h("section", { class: "card assistant__chat", "aria-label": "Chat with Mira Assistant" },
+      logEl, composer.el);
+    const railTabs = createRailTabs((key) => { state.tab = key; renderRail(); });
+    const railTabsHost = h("div", {}, railTabs.el);
     const railListHost = h("div", { class: "assistant__cards" });
     const rail = h("section", { class: "assistant__rail", "aria-labelledby": "assistant-proposals-title" },
       h("div", { class: "assistant__rail-head" },
@@ -84,7 +88,7 @@ export const screen = {
     root.append(h("div", { class: "assistant" },
       head.el,
       h("div", { class: "assistant__grid" },
-        h("section", { class: "card assistant__chat", "aria-label": "Chat with Mira Assistant" }, logEl, composer.el),
+        chatEl,
         rail)));
 
     // ---- patients ----
@@ -165,8 +169,10 @@ export const screen = {
       composer.thinkingEl.classList.toggle("is-active", on);
     }
 
+    // Newest message in view: now, and again on the next frame once a chart/answer has laid out.
     function scrollLog() {
       logEl.scrollTop = logEl.scrollHeight;
+      globalThis.requestAnimationFrame?.(() => { logEl.scrollTop = logEl.scrollHeight; });
     }
 
     function send(raw) {
@@ -189,6 +195,7 @@ export const screen = {
 
     async function run({ question, pid, call }) {
       introEl.remove();
+      chatEl.classList.add("has-turns");
       const context = contextFrom(state.turns);
       const turn = { question, status: "pending", answerText: "" };
       state.turns.push(turn);
@@ -344,7 +351,7 @@ export const screen = {
       if (!alive) return;
       const m = proposalsTabsModel(state.proposals, state.tab);
       state.tab = m.tab;
-      railTabsHost.replaceChildren(renderRailTabs(m, (key) => { state.tab = key; renderRail(); }));
+      railTabs.update(m);
       if (!state.proposalsLoaded) {
         railListHost.replaceChildren(h("p", { class: "meta assistant__rail-empty", role: "status" }, "Loading proposals…"));
       } else if (m.items.length === 0) {
@@ -359,25 +366,9 @@ export const screen = {
     }
 
     async function decide(p, call, successText) {
-      try {
-        await call();
-      } catch (err) {
-        if (!alive) return false;
-        const status = err && err.status;
-        if (status === 409) {
-          ctx.toast({ kind: "info", text: "Already decided" });
-          reloadProposals(true);
-        } else if (status === 403) {
-          ctx.toast({ kind: "error", text: "Only the patient's therapist can decide this" });
-        } else if (status === 400 || status === 422) {
-          ctx.toast({ kind: "error", text: status === 400 && err.detail ? `Not saved: ${err.detail}.` : "Check the values and try again." });
-        } else {
-          ctx.toast({ kind: "error", text: "Couldn't save the decision. Try again." });
-        }
-        return false;
-      }
-      if (!alive) return true;
-      ctx.toast({ kind: "success", text: successText });
+      const ok = await decideProposal(ctx, call, { successText, isAlive: () => alive,
+        onConflict: () => reloadProposals(true) });
+      if (!ok || !alive) return ok;
       const entry = cards.get(p.id);
       entry?.el.classList.add("proposal-card--leaving");
       later(() => reloadProposals(true), reducedMotion() ? 0 : LEAVE_MS);
@@ -430,7 +421,10 @@ export const screen = {
     function highlightProposal(id, { quietIfMissing = true } = {}) {
       const p = state.proposals.find((x) => x.id === id);
       if (!p) {
-        if (!quietIfMissing) ctx.toast({ kind: "info", text: "That proposal is no longer in the list." });
+        // "Open proposal" clicked before the post-answer reload landed: apply it when that reload finishes
+        // (final review B, Minor 15) instead of silently doing nothing.
+        if (quietIfMissing) state.highlightId = id;
+        else ctx.toast({ kind: "info", text: "That proposal is no longer in the list." });
         return;
       }
       state.tab = tabFor(p.status);
