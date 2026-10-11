@@ -56,3 +56,36 @@ def test_compose_view_draws_tracking_area_and_ignored_people():
     plain = compose_view(cams, MatConfig(), {"A": np.zeros((720, 1280, 3), np.uint8)}, out.raw, None, None, None, None)
     assert (img[:360, :640] != plain[:360, :640]).any()
     assert (img[:360, :640] == (255, 255, 0)).all(axis=2).any()  # the cyan tracking-area outline
+
+
+def test_compose_view_shows_the_3d_person_and_toggles_back_to_front_view():
+    from vision.avatar import AvatarView
+    from vision.debug_view import render_front
+
+    cams, X = target_cams(), standing_skeleton()
+    out = Pipeline(cams).process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+    view = AvatarView()
+    img3d = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    view.handle_key(ord("v"))
+    img2d = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    br3d, br2d = img3d[360:, 640:], img2d[360:, 640:]
+    assert (br3d != br2d).any()
+    b, r = br3d[..., 0].astype(int), br3d[..., 2].astype(int)
+    assert (r > b + 80).sum() > 100  # the orange (left) side of the 3D body is drawn
+    np.testing.assert_array_equal(img2d[:360], img3d[:360])  # camera panels unchanged
+    assert br2d.shape == render_front(out.frame, []).shape
+
+
+def test_view_mouse_drag_in_3d_panel_only():
+    from vision.avatar import AvatarView
+    from vision.debug_view import ViewMouse
+
+    view = AvatarView()
+    yaw = view.yaw_deg
+    mouse = ViewMouse(view)
+    mouse(1, 100, 100, 0, None)  # press outside the 3D panel (top-left camera)
+    mouse(0, 160, 100, 1, None)
+    assert view.yaw_deg == yaw
+    mouse(1, 900, 500, 0, None)  # press inside the bottom-right panel, then drag
+    mouse(0, 960, 500, 1, None)
+    assert view.yaw_deg != yaw

@@ -5,8 +5,9 @@
     python -m vision.debug_view --poses 1         # live, pose looking for one person per camera
 
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
-Bottom: top-down view of the mat and a front view from Mira; orange = person's left, blue = right.
-Keys: r record on/off, m markers on/off, q quit.
+Bottom: top-down view of the mat and a low-poly 3D person (v switches to a flat front view);
+orange = person's left, blue = right. Drag in the 3D view to orbit.
+Keys: r record on/off, m markers on/off, q quit; 3D view: j/l orbit, i/k tilt, +/- zoom, 0 reset, v toggle.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from vision.avatar import AvatarView, render_avatar
 from vision.capture import mono_to_unix
 from vision.config import CameraConfig, MatConfig, load_cameras, load_mat, mat_raw
 from vision.draw import GREEN, MAGENTA, RED, WHITE, YELLOW, draw_points, draw_skeleton, draw_text, fit, pt
@@ -147,13 +149,34 @@ def render_front(frame: FrameResult | None, hud_lines: list[str]) -> np.ndarray:
         draw_skeleton(img, FRONT(frame.joints[:, [0, 1]]))
     for k, line in enumerate(hud_lines):
         draw_text(img, line, (8, 20 + 18 * k), RED if line.startswith("REC") else WHITE, 0.45)
-    draw_text(img, "front view (from Mira)", (8, PANEL_H - 10), WHITE, 0.45)
+    draw_text(img, "front view (from Mira)    v: 3D view", (8, PANEL_H - 10), WHITE, 0.45)
     return img
+
+
+class ViewMouse:
+    """OpenCV mouse callback: drag inside the bottom-right panel to orbit the 3D view, wheel to zoom."""
+
+    def __init__(self, view: AvatarView, panel=(PANEL_W, PANEL_H, 2 * PANEL_W, 2 * PANEL_H)):
+        self.view, self.panel = view, panel
+        self._last: tuple[int, int] | None = None
+
+    def __call__(self, event, x, y, flags, param) -> None:
+        x0, y0, x1, y1 = self.panel
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self._last = (x, y) if x0 <= x < x1 and y0 <= y < y1 else None
+        elif event == cv2.EVENT_MOUSEMOVE and self._last is not None and flags & cv2.EVENT_FLAG_LBUTTON:
+            self.view.drag(x - self._last[0], y - self._last[1])
+            self._last = (x, y)
+        elif event == cv2.EVENT_LBUTTONUP:
+            self._last = None
+        elif event == cv2.EVENT_MOUSEWHEEL and x0 <= x < x1 and y0 <= y < y1:
+            self.view.handle_key(ord("+") if flags > 0 else ord("-"))
 
 
 def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, poses: dict,
                  out: PipelineOutput | None, stats: dict | None, skew: dict | None, recording: str | None,
-                 detector: MarkerDetector | None = None, alarms: dict[str, str | None] | None = None) -> np.ndarray:
+                 detector: MarkerDetector | None = None, alarms: dict[str, str | None] | None = None,
+                 view: AvatarView | None = None) -> np.ndarray:
     frame = out.frame if out is not None else None
     panels = []
     for name in ("A", "B"):
@@ -191,9 +214,21 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     if recording:
         hud.append(recording)
     hud.append("keys: r record   m markers   q quit")
-    bottom = np.hstack([render_topdown(frame, mat, cams, out.feet_locked if out is not None else None),
-                        render_front(frame, hud)])
+    feet = out.feet_locked if out is not None else None
+    if view is not None and view.show_3d:
+        right = render_avatar(frame.joints if frame is not None else None, mat, view, feet_locked=feet, hud=hud)
+    else:
+        right = render_front(frame, hud)
+    bottom = np.hstack([render_topdown(frame, mat, cams, feet), right])
     return np.vstack([np.hstack(panels), bottom])
+
+
+def _open_window() -> AvatarView:
+    """Create the window and hook up mouse orbiting of the 3D view."""
+    view = AvatarView()
+    cv2.namedWindow(WINDOW, cv2.WINDOW_AUTOSIZE)
+    cv2.setMouseCallback(WINDOW, ViewMouse(view))
+    return view
 
 
 def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_poses: int | None = None) -> None:
@@ -208,6 +243,7 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
     last_draw = 0.0
+    view = _open_window()
     with LiveSource(cams, model, mat, num_poses=num_poses) as src:
         try:
             while True:
@@ -226,11 +262,12 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
                     alarms = {n: monitor.message(n) for n in cams}
                     rec = f"REC {recorder.count} frames -> {recorder.path.name}" if recorder else None
                     img = compose_view(cams, mat, images, poses, last, src.stats(), src.skew.summary(), rec,
-                                       detector if show_markers else None, alarms)
+                                       detector if show_markers else None, alarms, view)
                     cv2.imshow(WINDOW, img)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
+                view.handle_key(key)
                 if key == ord("m"):
                     show_markers = not show_markers
                 if key == ord("r"):
@@ -250,12 +287,15 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
 
 def run_replay(path: Path, cams: dict[str, CameraConfig], mat: MatConfig, retriangulate: bool, speed: float) -> None:
     view_cams = cams if retriangulate else cams_from_header(read_header(path))
+    view = _open_window()
     try:
         for out in replay_outputs(path, retriangulate=retriangulate, cams=cams, realtime=True, speed=speed):
-            img = compose_view(view_cams, mat, {}, out.raw, out, None, None, f"replay {path.name}")
+            img = compose_view(view_cams, mat, {}, out.raw, out, None, None, f"replay {path.name}", view=view)
             cv2.imshow(WINDOW, img)
-            if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
                 break
+            view.handle_key(key)
     finally:
         cv2.destroyAllWindows()
 

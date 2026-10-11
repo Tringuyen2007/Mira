@@ -60,6 +60,13 @@ means someone is standing over them.
 
 If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on macOS cannot.
 
+### 3D view
+
+The debug view's bottom-right panel shows a low-poly 3D person rebuilt every frame from the joints
+(left side orange, right side blue, a shadow on the floor, anchored feet outlined white). Drag in it
+to orbit; keys: j/l orbit, i/k tilt, +/- zoom, 0 reset, v switch to the flat front view. Works on
+replays too.
+
 ### Who gets tracked
 
 Only the person on the mat or within 1 m of it. Each camera's pose detection searches only the area
