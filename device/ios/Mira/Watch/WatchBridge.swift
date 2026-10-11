@@ -160,6 +160,9 @@ final class WatchBridge: NSObject, WCSessionDelegate {
                 try? await self.liveSession.send(.watchButton(WatchButtonMessage(name: name)))
             case .status(let workoutActive):
                 self.workoutActive = workoutActive
+            case .wrist, .syncWindow, .tremor, .prefs, .setupDone:
+                // W2 relays these on to the server / `/me`; not wired up yet.
+                break
             }
         }
     }

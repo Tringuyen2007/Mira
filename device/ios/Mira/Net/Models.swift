@@ -112,7 +112,15 @@ struct LiveMessage: Codable, Sendable {
     let flags: [String]
     let cueId: String?
     let paused: Bool
+    // W1: `caption` mirrors the server's actual `{text, source, t}` shape (server/engine_bridge.py
+    // `EngineBridge.caption`) — the watch only ever sees `caption.text`, relayed as the flat
+    // `ToWatch.caption(text:)`. Both fields optional since the server may omit them.
+    var caption: LiveCaption? = nil
+    var restRemaining: Int? = nil
 }
+
+/// What Mira last said on `/ws/live` (late joiners repaint it): `source` ∈ cue | greeting | summary.
+struct LiveCaption: Codable, Sendable { let text: String; let source: String?; let t: Double? }
 
 // MARK: - /ws/events, server → app
 
@@ -215,11 +223,45 @@ struct CareMessage: Codable, Sendable, Identifiable {
 }
 struct MessageEvent: Codable, Sendable { let patientId: String?; let message: CareMessage }
 
+// MARK: - Apple Watch events (server → clients; server/samples/ws_events_{breather,hr_recovery,
+// rotation_rep,rotation_set,sync_progress,limits_changed,watch_features_changed}.json)
+
+struct BreatherMessage: Codable, Sendable { let state: String; let bpm: Int?; let limit: Int?; let resolution: String? }
+struct HrRecoveryMessage: Codable, Sendable {
+    let setIndex: Int; let peakBpm: Int; let bpm60s: Int; let dropBpm: Int
+
+    // `convertFromSnakeCase` turns the wire's "bpm_60s" into "bpm60S" (capitalizing the
+    // letter after a digit run), not "bpm60s" — spell that out explicitly rather than
+    // rename the property away from the exact name later tasks depend on.
+    enum CodingKeys: String, CodingKey {
+        case setIndex, peakBpm
+        case bpm60s = "bpm60S"
+        case dropBpm
+    }
+}
+struct RotationRepMessage: Codable, Sendable {
+    let exerciseId: String; let setIndex: Int?; let rep: Int; let repsTarget: Int
+    let angleDeg: Double; let goalDeg: Double; let reached: Bool
+}
+struct RotationSetMessage: Codable, Sendable {
+    let exerciseId: String; let setIndex: Int; let angles: [Double]
+    let bestDeg: Double; let avgDeg: Double; let goalDeg: Double
+}
+/// Watch⇄server clock phase-lock progress (derived from the client's `watch_sync` windows).
+struct SyncProgressMessage: Codable, Sendable { let progress: Double; let locked: Bool; let offsetMs: Int?; let method: String? }
+struct LimitsChangedMessage: Codable, Sendable { let patientId: String?; let hrLimit: Int; let setByName: String? }
+struct WatchFeaturesChangedMessage: Codable, Sendable { let patientId: String?; let tremorMonitoring: Bool }
+
 // MARK: - /ws/events, app → server (server allow-list: command, hr, wrist, watch_button, device_health)
 
 struct HeartRateMessage: Codable, Sendable { let t: Double; let bpm: Double }
-struct WristMessage: Codable, Sendable { let t: Double; let quat: [Double]; let accel: [Double] }
+/// `rotationDeg` (optional, `rotation_deg` on the wire) is the watch's measured twist;
+/// omitted from the encoded JSON entirely when nil (Plan-4 wrist messages carry none).
+struct WristMessage: Codable, Sendable { let t: Double; let quat: [Double]; let accel: [Double]; var rotationDeg: Double? = nil }
 struct WatchButtonMessage: Codable, Sendable { let name: String }
+/// Client → server: one window/second of user-acceleration magnitude, used only to
+/// phase-lock the watch's clock to the server's (never broadcast back; see `sync_progress`).
+struct WatchSyncMessage: Codable, Sendable { let t0: Double; let dtMs: Int; let accelMag: [Double] }
 /// Sent by the app/watch (`t`, `battery_pct`, `app`) and by the engine (`cameras`, `fps`).
 struct DeviceHealthMessage: Codable, Sendable {
     var t: Double?
@@ -258,6 +300,9 @@ enum SocketEvent: Codable, Sendable {
     case watchButton(WatchButtonMessage), deviceHealth(DeviceHealthMessage)
     case sessionSummary(SessionSummaryMessage), deviceStatus(DeviceStatusMessage)
     case message(MessageEvent)
+    case watchSync(WatchSyncMessage), breather(BreatherMessage), hrRecovery(HrRecoveryMessage)
+    case rotationRep(RotationRepMessage), rotationSet(RotationSetMessage), syncProgress(SyncProgressMessage)
+    case limitsChanged(LimitsChangedMessage), watchFeaturesChanged(WatchFeaturesChangedMessage)
     case unknown(type: String, body: JSONValue)
 
     var type: String {
@@ -290,6 +335,14 @@ enum SocketEvent: Codable, Sendable {
         case .sessionSummary: return "session_summary"
         case .deviceStatus: return "device_status"
         case .message: return "message"
+        case .watchSync: return "watch_sync"
+        case .breather: return "breather"
+        case .hrRecovery: return "hr_recovery"
+        case .rotationRep: return "rotation_rep"
+        case .rotationSet: return "rotation_set"
+        case .syncProgress: return "sync_progress"
+        case .limitsChanged: return "limits_changed"
+        case .watchFeaturesChanged: return "watch_features_changed"
         case .unknown(let type, _): return type
         }
     }
@@ -327,6 +380,14 @@ enum SocketEvent: Codable, Sendable {
         case "session_summary": self = .sessionSummary(try SessionSummaryMessage(from: decoder))
         case "device_status": self = .deviceStatus(try DeviceStatusMessage(from: decoder))
         case "message": self = .message(try MessageEvent(from: decoder))
+        case "watch_sync": self = .watchSync(try WatchSyncMessage(from: decoder))
+        case "breather": self = .breather(try BreatherMessage(from: decoder))
+        case "hr_recovery": self = .hrRecovery(try HrRecoveryMessage(from: decoder))
+        case "rotation_rep": self = .rotationRep(try RotationRepMessage(from: decoder))
+        case "rotation_set": self = .rotationSet(try RotationSetMessage(from: decoder))
+        case "sync_progress": self = .syncProgress(try SyncProgressMessage(from: decoder))
+        case "limits_changed": self = .limitsChanged(try LimitsChangedMessage(from: decoder))
+        case "watch_features_changed": self = .watchFeaturesChanged(try WatchFeaturesChangedMessage(from: decoder))
         default: self = .unknown(type: type, body: try JSONValue(from: decoder))
         }
     }
@@ -360,6 +421,14 @@ enum SocketEvent: Codable, Sendable {
         case .sessionSummary(let v): try v.encode(to: encoder)
         case .deviceStatus(let v): try v.encode(to: encoder)
         case .message(let v): try v.encode(to: encoder)
+        case .watchSync(let v): try v.encode(to: encoder)
+        case .breather(let v): try v.encode(to: encoder)
+        case .hrRecovery(let v): try v.encode(to: encoder)
+        case .rotationRep(let v): try v.encode(to: encoder)
+        case .rotationSet(let v): try v.encode(to: encoder)
+        case .syncProgress(let v): try v.encode(to: encoder)
+        case .limitsChanged(let v): try v.encode(to: encoder)
+        case .watchFeaturesChanged(let v): try v.encode(to: encoder)
         case .unknown(_, let v): try v.encode(to: encoder)
         }
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -368,7 +437,7 @@ enum SocketEvent: Codable, Sendable {
 
     /// Types the server accepts from a client on /ws/events (server/main.py
     /// CLIENT_EVENT_TYPES); anything else is silently dropped by the server.
-    static let clientTypes: Set<String> = ["command", "hr", "wrist", "watch_button", "device_health"]
+    static let clientTypes: Set<String> = ["command", "hr", "wrist", "watch_button", "device_health", "watch_sync"]
 }
 
 // MARK: - REST (server/samples/rest_*.json)
@@ -684,3 +753,35 @@ struct MilestoneList: Codable, Sendable { let patientId: String; let milestones:
 
 /// POST /me/test-alert.
 struct TestAlertResponse: Codable, Sendable { let logged: Bool; let called: Bool; let note: String }
+
+// MARK: - Apple Watch setup + tremor (Plan 4/W1; server/samples/rest_get_me_watch.json,
+// rest_post_me_tremor_request.json)
+
+/// Defaults when unset: `watchTaps` "normal" (normal|strong), `watchArm` "right" (left|right),
+/// `watchDoubleTap`/`watchCaptions` true.
+struct MeWatchPrefs: Codable, Sendable { var watchTaps: String?; var watchArm: String?; var watchDoubleTap: Bool?; var watchCaptions: Bool? }
+struct MeWatchPlanItem: Codable, Sendable {
+    let exerciseId: String; let name: String; let sets: Int; let reps: Int
+    let doneSets: Int; let watch: Bool; let goalDeg: Double?
+}
+/// GET /me/watch.
+struct MeWatchResponse: Codable, Sendable {
+    let firstName: String
+    let hrLimit: Int?
+    let hrLimitSetByName: String?
+    let therapistName: String?
+    let tremorMonitoring: Bool
+    let prefs: MeWatchPrefs
+    let plan: [MeWatchPlanItem]
+}
+
+/// `dyskinesia` ∈ none|few|some|many; `source` ∈ device|simulated.
+struct TremorDayBody: Codable, Sendable {
+    let day: String
+    let noneMin, slightMin, mildMin, strongMin, unknownMin: Int
+    let dyskinesia: String
+    let source: String
+}
+/// POST /me/tremor request body (≤ 14 days; 403 when `tremorMonitoring` is off).
+struct TremorUpload: Codable, Sendable { let days: [TremorDayBody] }
+struct TremorStored: Codable, Sendable { let stored: Int }

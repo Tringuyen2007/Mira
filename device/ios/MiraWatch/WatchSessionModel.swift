@@ -101,6 +101,9 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
             // The session is over: end the workout and show the done screen.
             summary = Summary(formScore: formScore, goodReps: goodReps, repsTotal: repsTotal)
             heartRate.end()
+        case .setup, .breather, .recovery, .rotationRep, .rotationSet, .sync, .caption, .formCue:
+            // W5–W7 screens handle these; not wired up yet.
+            break
         }
     }
 

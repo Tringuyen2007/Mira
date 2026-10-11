@@ -181,4 +181,11 @@ struct APIClient {
         try await request(path: ["patients", patientID, "milestones"])
     }
     func testAlert() async throws -> TestAlertResponse { try await request("POST", path: ["me", "test-alert"]) }
+
+    // MARK: Apple Watch (Plan 4/W1)
+
+    func meWatch() async throws -> MeWatchResponse { try await request(path: ["me", "watch"]) }
+    func uploadTremor(_ body: TremorUpload) async throws -> TremorStored {
+        try await request("POST", path: ["me", "tremor"], body: json(body))
+    }
 }
