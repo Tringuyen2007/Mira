@@ -11,9 +11,11 @@ diagnostics are compiled into **Debug builds only** and require the explicit
 launch argument `--network-debug`. With that argument, open Settings → Developer
 connection tools. Without it, the app shows the user design. Diagnostics are
 absent from Release builds. Home and Live show only a plain-language availability
-message when needed, without server addresses or protocol details. A final
-customer-facing pairing/provisioning flow is still needed to configure a server
-on a fresh installation; hiding developer controls does not implement pairing.
+message when needed, without server addresses or protocol details. Pairing in
+onboarding (`POST /pair` with the therapist code, README "Patient identity
+(phone)") is the normal path to a working token; Developer connection tools and
+the `MIRA_API_TOKEN` entry remain for diagnostics only (simulating the admin/full
+scope, not a paired patient).
 
 ## Run Tri's server (preferred)
 
@@ -129,7 +131,9 @@ running server) and `server/main.py`.
 
 The app keeps the token in the Keychain, next to the server address in Debug
 Settings. A missing token is "not paired" (nothing is attempted); a refused token is
-"token rejected" (no retry loop). Server logs redact `token=` values.
+"token rejected" (no retry loop). Server logs redact `token=` values. A paired
+patient token calling a route or another patient's resource it doesn't own gets
+`403 {"detail":"forbidden"}`, which maps to `APIError.forbidden`.
 
 **Envelope.** Every message is one flat JSON object with snake_case keys.
 `/ws/live` and `/ws/pose` are untagged; `/ws/events` messages have a `type`. The server
@@ -204,9 +208,9 @@ next `online:true`. Sample: `server/samples/ws_events_device_status.json`.
   them. Eric's vision engine must implement the same four commands.
 - There is no `POST /sessions/{id}/cue` on the server; the provisional `sendCue`
   call was removed.
-- A customer-facing pairing flow (QR code or similar) is still needed; the token is
-  entered in Debug Settings only. The onboarding "Connect Mira" step saves a local
-  draft and does not pair the server (see ONBOARDING.md).
+- Onboarding's therapist step now pairs for real via `POST /pair` (see
+  ONBOARDING.md); Debug Settings' token entry is diagnostics-only, not the
+  customer-facing path.
 
 ## Behavior and limits
 

@@ -252,6 +252,44 @@ Desktop pop-ups (browser Notification API) only work in a secure context: open t
 `http://localhost:8000/dashboard/` on the server laptop (or over HTTPS). On another machine via
 `http://<laptop>.local:8000` use in-page toasts. Request permission from a button click.
 
+## Patient identity (phone)
+
+Three token scopes (`server/security.py`):
+
+| scope | who | how | can |
+|---|---|---|---|
+| `full` | dashboard, ops, tests | `MIRA_API_TOKEN` | everything |
+| `device` | LCD kiosk | `MIRA_DEVICE_TOKEN` | `/ws/live`, `/ws/events` (allow-list), send `device_health` |
+| `patient` | iPhone | per-phone token from `POST /pair` | `/me/*`, its own sessions/progress/prescriptions, `/ws/*` for its own session, send `command`/`hr`/`wrist`/`watch_button` |
+
+Patient tokens (`pt_…`) are minted by `POST /pair` and stored hashed in `patient_devices`; `Principal.owns()`
+lets a patient token through only for its own `patient_id` (403 `forbidden` for anyone else's). `full` always
+passes.
+
+| route | auth | body → response |
+|---|---|---|
+| `POST /pair` | none, 5 failed attempts/min/IP | `{code, device_name?, profile{name, height_cm, mass_kg, affected_side?, condition}, emergency_contact{name, phone, relationship?}, alert_therapist}` → `{patient_id, token, me}`. `404` unknown code, `410` expired or already used, `429` rate-limited. |
+| `GET /me` | patient (or full with `?patient_id=`) | profile, care team, plan, LCD/calibration status |
+| `PUT /me` | patient (or full with `?patient_id=`) | partial `{profile?, emergency_contact?, alert_therapist?, share_by_default?, device_prefs?}` → the updated `GET /me` body |
+| `DELETE /me` | patient (or full with `?patient_id=`) | purges the patient's own non-simulated history (sessions, reps, pose frames, alerts, …), keeps the patient row and prescriptions, revokes the token; labeled simulated demo history is kept |
+| `GET /me/export` | patient (or full with `?patient_id=`) | JSON of everything `DELETE /me` would delete, for "download my data" |
+| `POST /patients/{id}/pairing-code` | full | mints a fresh single-use code, valid 24 h → `{code, expires_at}` |
+| `DELETE /patients/{id}/devices` | full | revokes every paired phone for that patient |
+
+A demo code `K7P4M2` is seeded for Maya and never expires; while `PAIRING_DEMO_CODE_REUSABLE=1` (default on)
+it can be reused so the demo phone can re-pair.
+
+Existing routes also accept a patient token, scoped to its own patient: `GET /sessions/{id}` (own session
+only), `GET /patients/{id}`, `GET /patients/{id}/progress`, `GET /prescriptions/{id}` (writes stay `full`-only).
+Any other patient's id is a `403`.
+
+Patient WebSockets (`/ws/live`, `/ws/events`, `/ws/pose`) only receive frames while the live session's
+`patient_id` matches the token's own `patient_id` — otherwise the socket stays open (pings only). Patient
+clients may send `command`/`hr`/`wrist`/`watch_button`, not `device_health`.
+
+Migrations (`server/db/migrations/NNN_name.sql`, idempotent) run at `server/db/setup.py` step 1b, via
+`make db-migrate DSN=…`, and at server start when `DB_AUTO_MIGRATE=1` (default on).
+
 ## Frame contract: joint angles
 
 `angles.knee_l`, `knee_r`, `hip_l` and `hip_r` in every engine frame (the team plan's frame contract) are **flexion in degrees**:
