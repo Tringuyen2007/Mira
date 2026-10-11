@@ -88,8 +88,10 @@ compare with the rules off. Measure any recording with:
 python -m vision.avatar_eval data/recordings/<file>.jsonl [--plain]
 ```
 
-It prints arm-in-torso %, hinge violations %, foot yaw change per frame (median/p95/max), bone-length
-std, how far confidently tracked wrists/ankles are from the detections, and ms per frame.
+It prints arm-in-torso % (elbows, wrists, hands), hinge violations %, foot yaw change per frame
+(median/p95/max), bone-length std, how far confidently tracked wrists/ankles are from the detections
+(mean/p95, then the mean for mid-confidence and low-confidence ones), p95 of the avatar's foot yaw vs
+confidently tracked heel->toe, and ms per frame.
 It replays with the calibration saved in each recording; `--current-calibration` uses `config/cameras.yaml` instead.
 
 ### Who gets tracked

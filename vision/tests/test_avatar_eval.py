@@ -1,6 +1,6 @@
 import numpy as np
 
-from vision.avatar_eval import HEADER, evaluate, hinge_violation, inside_torso
+from vision.avatar_eval import HEADER, arm_in_torso, evaluate, hinge_violation, inside_torso
 from vision.pipeline import Pipeline
 from vision.rig import BodyRig
 from vision.tests.synth import pose_from_points, standing_skeleton, target_cams
@@ -12,6 +12,14 @@ def test_inside_torso_detects_a_hand_in_the_belly_only():
     assert inside_torso(X, belly)
     assert not inside_torso(X, X[15])  # hand hanging at the side
     assert not inside_torso(X, belly + [0.0, 0.0, 0.3])  # in front of the body
+
+
+def test_a_hand_inside_the_torso_counts_as_arm_in_torso():
+    X = standing_skeleton()
+    assert not arm_in_torso(X)
+    J = X.copy()
+    J[19] = (X[11] + X[12] + X[23] + X[24]) / 4  # left index finger in the belly, elbow and wrist outside
+    assert arm_in_torso(J)
 
 
 def test_hinge_violation_flags_a_backwards_knee_and_over_flexion():
@@ -34,7 +42,8 @@ def test_evaluate_reports_a_still_synthetic_person_as_clean():
     r = evaluate(iter(outs), BodyRig())
     assert r.frames > 30 and r.arm_in_torso_pct == 0 and r.hinge_pct == 0
     assert r.bone_std_mm < 1e-6 and r.foot_yaw_max < 10 and r.truth_mean_cm < 5
-    assert "arm∈torso" in HEADER and r.row("synthetic").startswith("synthetic")
+    assert r.truth_mid_cm < 5 and r.truth_held_cm < 5 and r.foot_vs_tracked_p95 < 10
+    assert "arm∈torso" in HEADER and r.row("synthetic").startswith("synthetic") and "\n" not in r.row("x")
 
 
 def test_recording_outputs_use_the_recordings_own_calibration(tmp_path, monkeypatch):

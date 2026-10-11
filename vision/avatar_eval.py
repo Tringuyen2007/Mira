@@ -3,9 +3,10 @@
     python -m vision.avatar_eval data/recordings/<file>.jsonl [...] [--plain] [--current-calibration]
 
 For each recording, replays it through the pipeline (the calibration saved in the recording) and the avatar rig, and
-prints: arm (elbow/wrist) inside the torso %, elbow/knee hinge violations %, foot yaw change per frame
-(median/p95/max), bone-length std, how far confidently tracked wrists/ankles end up from tracking,
-and rig time per frame. --plain evaluates the rig without anatomical constraints, for comparison;
+prints: arm (elbow/wrist/hand) inside the torso %, elbow/knee hinge violations %, foot yaw change per
+frame (median/p95/max), bone-length std, how far confidently tracked wrists/ankles end up from
+tracking (mean/p95; then the mean for mid-confidence 0.5-0.8 and held < 0.5 ones), p95 of avatar foot
+yaw vs the confidently tracked heel->toe (foot±), and rig time per frame. --plain evaluates the rig without anatomical constraints, for comparison;
 --current-calibration replays with config/cameras.yaml instead.
 """
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-ARM_POINTS = (13, 14, 15, 16)
+ARM_POINTS = (13, 14, 15, 16, 17, 18, 19, 20, 21, 22)  # elbows, wrists and hands
 LIMBS = {"knee_l": (23, 25, 27), "knee_r": (24, 26, 28), "elbow_l": (11, 13, 15), "elbow_r": (12, 14, 16)}
 FEET = {"l": (29, 31), "r": (30, 32)}
 ENDS = (15, 16, 27, 28)
@@ -35,16 +36,21 @@ class Report:
     bone_std_mm: float
     truth_mean_cm: float
     truth_p95_cm: float
+    truth_mid_cm: float  # mean, wrists/ankles with 0.5 <= conf < 0.8
+    truth_held_cm: float  # mean, wrists/ankles with conf < 0.5
+    foot_vs_tracked_p95: float  # degrees, avatar foot yaw vs confidently tracked heel->toe
     ms_per_frame: float
 
     def row(self, name: str) -> str:
         return (f"{name:32s} {self.frames:6d}  {self.arm_in_torso_pct:5.1f}%  {self.hinge_pct:5.1f}%  "
                 f"{self.foot_yaw_p50:4.0f}/{self.foot_yaw_p95:4.0f}/{self.foot_yaw_max:4.0f}°  "
-                f"{self.bone_std_mm:6.2f}  {self.truth_mean_cm:5.1f}/{self.truth_p95_cm:5.1f}  {self.ms_per_frame:5.2f}")
+                f"{self.bone_std_mm:6.2f}  {self.truth_mean_cm:5.1f}/{self.truth_p95_cm:5.1f}  "
+                f"{self.truth_mid_cm:5.1f}/{self.truth_held_cm:5.1f}  {self.foot_vs_tracked_p95:5.0f}°  "
+                f"{self.ms_per_frame:5.2f}")
 
 
 HEADER = (f"{'recording':32s} {'frames':>6s}  {'arm∈torso':>6s} {'hinge':>6s}  {'foot yaw p50/p95/max':>18s}  "
-          f"{'bone mm':>6s}  {'truth cm':>11s}  {'ms':>5s}")
+          f"{'bone mm':>6s}  {'truth cm':>11s}  {'mid/held':>11s}  {'foot±':>6s}  {'ms':>5s}")
 
 
 def torso_axes(J):
@@ -63,6 +69,11 @@ def inside_torso(J, p) -> bool:
     h = r @ up
     return (0.05 < h < np.linalg.norm(sh - hip) - 0.03 and abs(r @ left) < 0.85 * np.linalg.norm(J[11] - J[12]) / 2
             and abs(r @ fwd) < 0.09)
+
+
+def arm_in_torso(J) -> bool:
+    """Any elbow, wrist or hand point inside the torso."""
+    return any(inside_torso(J, J[k]) for k in ARM_POINTS if np.isfinite(J[k]).all())
 
 
 def hinge_violation(J, a, b, c, is_knee: bool) -> bool:
@@ -85,7 +96,7 @@ def foot_yaw(J, heel, toe) -> float:
 
 def evaluate(outputs, rig) -> Report:
     n = inside = hinge = 0
-    yaw_steps, bones, truth = [], [], []
+    yaw_steps, bones, truth, truth_mid, truth_held, foot_err = [], [], [], [], [], []
     prev_yaw = None
     spent = 0.0
     for o in outputs:
@@ -96,7 +107,7 @@ def evaluate(outputs, rig) -> Report:
             prev_yaw = None
             continue
         n += 1
-        inside += any(inside_torso(P, P[k]) for k in ARM_POINTS)
+        inside += arm_in_torso(P)
         hinge += any(hinge_violation(P, *idx, name.startswith("knee")) for name, idx in LIMBS.items())
         y = np.array([foot_yaw(P, *FEET[s]) for s in FEET])
         if prev_yaw is not None:
@@ -104,13 +115,22 @@ def evaluate(outputs, rig) -> Report:
         prev_yaw = y
         bones.append([np.linalg.norm(P[a] - P[b]) for a, b in BONES])
         J, conf = o.frame.joints, o.frame.conf
-        truth += [float(np.linalg.norm(P[k] - J[k])) for k in ENDS if conf[k] >= 0.8 and np.isfinite(J[k]).all()]
+        for k in ENDS:
+            if np.isfinite(J[k]).all():
+                (truth if conf[k] >= 0.8 else truth_mid if conf[k] >= 0.5 else truth_held).append(
+                    float(np.linalg.norm(P[k] - J[k])))
+        for s, (heel, toe) in FEET.items():
+            if min(conf[heel], conf[toe]) >= 0.8 and np.isfinite(J[[heel, toe]]).all():
+                foot_err.append(abs((foot_yaw(P, heel, toe) - foot_yaw(J, heel, toe) + 180) % 360 - 180))
     yaw = np.array(yaw_steps) if yaw_steps else np.zeros(1)
     tr = np.array(truth) * 100 if truth else np.zeros(1)
     return Report(n, 100 * inside / max(n, 1), 100 * hinge / max(n, 1), float(np.median(yaw)),
                   float(np.percentile(yaw, 95)), float(yaw.max()),
                   float(np.array(bones).std(axis=0).max() * 1000) if bones else 0.0,
-                  float(tr.mean()), float(np.percentile(tr, 95)), 1000 * spent / max(n, 1))
+                  float(tr.mean()), float(np.percentile(tr, 95)),
+                  100 * float(np.mean(truth_mid)) if truth_mid else 0.0,
+                  100 * float(np.mean(truth_held)) if truth_held else 0.0,
+                  float(np.percentile(foot_err, 95)) if foot_err else 0.0, 1000 * spent / max(n, 1))
 
 
 def recording_outputs(path, current_calibration: bool = False):
