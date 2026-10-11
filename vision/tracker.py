@@ -292,6 +292,7 @@ class ModelTracker:
     def reset(self) -> None:
         self.shape: BodyShape | None = None
         self.world_scale = 1.0  # a new person or session is measured afresh, at MediaPipe's own scale
+        self.upright: np.ndarray | None = None  # one camera: turns MediaPipe's leaning world shape upright
         self._samples: list[np.ndarray] = []
         self._p: np.ndarray | None = None
         self._last_seen: float | None = None
@@ -338,6 +339,8 @@ class ModelTracker:
         W = world_shape(v, self.cfgs[n]) if v is not None else None
         if W is None:
             return None
+        if self.upright is not None:
+            W = W @ self.upright.T
         ww = np.where(v.vis >= 0.5, 1.0, 0.2) * np.where(np.isfinite(W).all(axis=1), 1.0, 0.0)
         return np.nan_to_num(W * self.world_scale), ww
 
@@ -422,12 +425,15 @@ class ModelTracker:
                 self._samples.append(np.array(joints, float) / (produced_at if self.single else 1.0))
                 if len(self._samples) >= self.frames_needed:
                     self.shape = measure(self._samples)
-                    if self.shape is not None and self.single and self.height_m:
-                        from vision.mono import stature
+                    if self.shape is not None and self.single:
+                        from vision.mono import stature, upright_rotation
 
-                        est = float(np.median([stature(J - (J[23] + J[24]) / 2) for J in self._samples]))
-                        self.world_scale = self.height_m / est
-                        self.shape = self.shape.scaled(self.world_scale)
+                        self.upright = upright_rotation(self._samples)
+                        if self.height_m:
+                            U = np.eye(3) if self.upright is None else self.upright
+                            est = float(np.median([stature((J - (J[23] + J[24]) / 2) @ U.T) for J in self._samples]))
+                            self.world_scale = self.height_m / est
+                            self.shape = self.shape.scaled(self.world_scale)
             if self.shape is None:
                 return None
         obs = []

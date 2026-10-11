@@ -61,12 +61,12 @@ def test_one_camera_without_feet_keeps_the_last_position():
 FEET_JOINTS = [27, 28, 29, 30, 31, 32]
 
 
-def _feet_hidden_run(bystander_x=None, good=30, hidden=20, lean=0.0):
+def _feet_hidden_run(bystander_x=None, good=30, hidden=20, sway=0.0):
     """One camera (B), list input: someone on the mat for `good` frames, then their feet hidden for
     `hidden` frames; optionally a bystander with visible feet beside the mat throughout."""
     cam = _cam_b()
     X = standing_skeleton()
-    X[:, 2] += lean * np.clip(X[:, 1] - 0.09, 0, None)  # top leaning forward (hips not over the ankles)
+    X[[23, 24], 2] += sway  # hips pushed forward, shoulders still over the ankles: hips not over the feet
     pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
     outs = []
     for k in range(good + hidden):
@@ -99,7 +99,7 @@ def test_one_camera_feet_hidden_without_bystander_stays_tracked():
 
 
 def test_one_camera_hold_with_feet_hidden_does_not_drift():
-    outs = _feet_hidden_run(lean=0.15)  # hips ~13 cm in front of the ankles
+    outs = _feet_hidden_run(sway=0.10)  # hips 10 cm in front of the ankles
     held = np.array([_hip_xz(o) for o in outs[30:]])
     start = _hip_xz(outs[29])
     assert np.max(np.linalg.norm(held - start, axis=1)) < 0.01
@@ -152,3 +152,35 @@ def test_floor_feet_says_which_joints_placed_the_person():
     np.testing.assert_allclose(xz, floor_position(p, cam))
     p = pose_from_points(cam, standing_skeleton())
     assert sorted(floor_feet(p, cam)[1]) == [27, 28, 29, 30]  # both planted: both feet
+
+
+def _tilted_world_pose(cam, X, deg, t=0.0):
+    """2D from the upright body X, but MediaPipe's world shape tilted `deg` toward the camera about the hips."""
+    p = pose_from_points(cam, X, t=t)
+    c = np.asarray(cam.R).T @ -np.ravel(cam.t)  # camera centre
+    d = np.array([c[0], 0.0, c[2]]) / np.hypot(c[0], c[2])
+    axis = np.cross([0.0, 1.0, 0.0], d)
+    a = np.radians(deg)
+    Kx = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    R = np.eye(3) + np.sin(a) * Kx + (1 - np.cos(a)) * Kx @ Kx  # top of the body toward the camera
+    hip = (X[23] + X[24]) / 2
+    p.world = ((X - hip) @ R.T) @ np.asarray(cam.R).T
+    return p
+
+
+def test_one_camera_body_is_upright_when_mediapipe_leans_toward_the_camera():
+    from vision.checks import body_tilt_deg
+
+    cam, X = _cam_b(), standing_skeleton()
+    assert body_tilt_deg(np.stack([world_shape(_tilted_world_pose(cam, X, 8.0), cam)] * 10)) > 7.5
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    seq = []
+    for k in range(120):
+        out = pipe.process(k / 30, None, [_tilted_world_pose(cam, X, 8.0, t=k / 30)])
+        if out.tracker == "model":
+            seq.append(out.frame.joints)
+    assert len(seq) > 60
+    assert body_tilt_deg(np.array(seq)) < 2.0
+    assert pipe._model.upright is not None
+    pipe._model.reset()
+    assert pipe._model.upright is None

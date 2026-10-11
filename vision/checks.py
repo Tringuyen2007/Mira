@@ -216,7 +216,7 @@ def _single_camera_checks(outputs, cams, fps, height_cm, moved, pose_ms) -> list
     foot_h = foot_height_cm(seq) if seq is not None else None
     checks.append(_check("foot height above mat", foot_h, "cm", "-1 to 5", lambda v: -1 <= v <= 5))
     tilt = body_tilt_deg(seq) if seq is not None else None
-    checks.append(_check("standing straight", tilt, "°", "≤ 3 (else re-run calib_extrinsics)", lambda v: v <= 3))
+    checks.append(_check("standing straight", tilt, "°", "≤ 3", lambda v: v <= 3))  # a lean here is MediaPipe's
     if height_cm is not None:
         est = estimate_height_cm(seq) if seq is not None else None
         checks.append(_check("estimated height", est, "cm", f"{height_cm:.0f} ± 5%",

@@ -140,7 +140,9 @@ class Pipeline:
         if self._single is not None:  # one camera: shape from MediaPipe's 3D, position from the feet on the floor
             pose = {"A": a, "B": b}.get(self._single)
             scale = self._model.world_scale if self._model is not None else 1.0
-            mono = mono_joints(pose, self.cams[self._single], scale, self._last_xz) if pose is not None else None
+            upright = self._model.upright if self._model is not None else None
+            mono = (mono_joints(pose, self.cams[self._single], scale, self._last_xz, upright)
+                    if pose is not None else None)
             if mono is None:
                 joints, conf, tracking = np.full((33, 3), np.nan), np.zeros(33), "lost"
                 self._last_xz = None  # lost: a new person or session must not be held at the old spot

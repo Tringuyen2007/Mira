@@ -146,3 +146,4 @@ def test_one_camera_checks_skip_two_camera_ones():
     assert not {"median triangulation angle", "pair skew p95", "thigh_l length std"} & set(checks)
     for name in ("frames tracked", "body fit to the camera", "jitter while still", "estimated height"):
         assert checks[name].passed is True, (name, checks[name].value)
+    assert checks["standing straight"].target == "≤ 3"  # one camera: a lean is MediaPipe's, not the calibration

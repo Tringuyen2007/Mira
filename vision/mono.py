@@ -3,7 +3,8 @@
 MediaPipe estimates a metric, hip-centred 3D pose for each person (world landmarks, camera-aligned
 axes). Rotated into the mat frame with the camera's rotation it gives the body's shape and depth; the
 floor fixes where it stands: rays through the visible feet meet the mat surface, and the body is moved so
-its feet are there and its lowest point is on the floor.
+its feet are there and its lowest point is on the floor. The world shape leans (mostly toward the
+camera); the model tracker measures that lean once per person (upright_rotation) and it is taken out.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from vision.types import LEFT_HIP, RIGHT_HIP, PoseResult
 FEET = [27, 28, 29, 30, 31, 32]
 EYES = (2, 5)
 EYE_HEIGHT_RATIO = 0.936  # eye height / stature
+STRAIGHT_KNEE_DEG = 165.0
 
 
 def world_shape(pose: PoseResult, cam: CameraConfig) -> np.ndarray | None:
@@ -27,13 +29,17 @@ def world_shape(pose: PoseResult, cam: CameraConfig) -> np.ndarray | None:
     return world_to_mat(pose.world - hip, cam.R)
 
 
-def mono_joints(pose: PoseResult, cam: CameraConfig, scale: float = 1.0, last_xz=None) -> np.ndarray | None:
-    """Full 33-joint body in the mat frame from one camera: the world-landmark shape (times scale), moved so
-    the feet stand where their rays meet the floor (or, when the feet aren't visible, with the ankle midpoint
-    at last_xz: pass the previous result's ankle midpoint (x, z) to hold it in place)."""
+def mono_joints(pose: PoseResult, cam: CameraConfig, scale: float = 1.0, last_xz=None,
+                upright: np.ndarray | None = None) -> np.ndarray | None:
+    """Full 33-joint body in the mat frame from one camera: the world-landmark shape (turned by `upright`
+    about the hips, times scale), moved so the feet stand where their rays meet the floor (or, when the feet
+    aren't visible, with the ankle midpoint at last_xz: pass the previous result's ankle midpoint (x, z) to
+    hold it in place)."""
     body = world_shape(pose, cam)
     if body is None:
         return None
+    if upright is not None:
+        body = body @ np.asarray(upright).T
     body = body * scale
     placed = floor_feet(pose, cam)
     if placed is None:  # holding: last_xz is the ankle midpoint of the last placed body
@@ -52,6 +58,42 @@ def _side_mean(body: np.ndarray, used: list[int]) -> np.ndarray:
     within each foot, the mean of the two feet."""
     sides = [[j for j in side if j in used] for side in ((27, 29), (28, 30))]
     return np.mean([np.median(body[side][:, [0, 2]], axis=0) for side in sides if side], axis=0)
+
+
+def _knee_deg(J: np.ndarray, hip: int, knee: int, ankle: int) -> float:
+    u, v = J[hip] - J[knee], J[ankle] - J[knee]
+    with np.errstate(invalid="ignore"):
+        c = u @ v / (np.linalg.norm(u) * np.linalg.norm(v))
+    return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
+
+
+def upright_rotation(shapes) -> np.ndarray | None:
+    """Rotation (tilt only, about a horizontal axis) that makes the median ankles-to-shoulders line of
+    `shapes` (bodies in the mat frame) vertical, from the frames with both knees straight (> 165 degrees).
+    MediaPipe's world shape leans (mostly toward the camera); this takes the lean out. None if no frame
+    qualifies."""
+    ups = []
+    for J in shapes:
+        J = np.asarray(J, float)
+        if not np.isfinite(J[[11, 12, 23, 24, 25, 26, 27, 28]]).all():
+            continue
+        if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= STRAIGHT_KNEE_DEG:
+            continue
+        v = (J[11] + J[12]) / 2 - (J[27] + J[28]) / 2
+        n = float(np.linalg.norm(v))
+        if n > 1e-6:
+            ups.append(v / n)
+    if not ups:
+        return None
+    u = np.median(ups, axis=0)
+    u = u / np.linalg.norm(u)
+    axis = np.cross(u, [0.0, 1.0, 0.0])  # horizontal: no yaw
+    s, c = float(np.linalg.norm(axis)), float(u[1])
+    if s < 1e-9:
+        return np.eye(3)
+    k = axis / s
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + s * K + (1 - c) * (K @ K)
 
 
 def stature(shape_rel: np.ndarray) -> float:
