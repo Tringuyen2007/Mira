@@ -305,3 +305,28 @@ def test_upright_rotation_gives_up_when_the_standing_lean_is_scattered():
 
     shapes = [_bent_lean(lean_deg=d) for d in np.linspace(-15.0, 15.0, 31)]
     assert upright_rotation(shapes) is None
+
+
+def _toward_camera(cam):
+    """Horizontal unit vector from the mat centre toward the camera."""
+    c = np.asarray(cam.R).T @ -np.ravel(cam.t)
+    return np.array([c[0], 0.0, c[2]]) / np.hypot(c[0], c[2])
+
+
+def _walk_toward_camera_errors(speed):
+    cam, X0 = _cam_b(), standing_skeleton()
+    h = stature(X0 - (X0[23] + X0[24]) / 2)
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=h)
+    d = _toward_camera(cam)
+    errs = []
+    for k in range(120):
+        X = X0 + d * speed * max(k - 60, 0) / 30  # walks toward the camera for 2 s after measuring
+        out = pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30))
+        if k > 60:
+            errs.append(np.linalg.norm((out.frame.joints[23] + out.frame.joints[24]) / 2 - (X[23] + X[24]) / 2))
+    return np.median(errs)
+
+
+def test_one_camera_walking_toward_the_camera_keeps_up():
+    assert _walk_toward_camera_errors(0.5) < 0.08
+    assert _walk_toward_camera_errors(1.2) < 0.12
