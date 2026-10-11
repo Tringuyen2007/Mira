@@ -24,6 +24,27 @@ Markers sit in the corners as in the spec. If the sheets are all turned the same
 down, printed top edge toward the back of the mat), set `marker_rotation_deg` in `config/mat.yaml`
 (0/90/180/270, clockwise seen from above with Mira at the top). The rig currently uses 180.
 
+## One-camera setup (current rig: camera B only)
+
+The rig now uses one webcam (B, front-diagonal ~45° to the mat). 3D comes from the floor and MediaPipe:
+rays through the planted foot meet the calibrated floor (where you stand, in metres), MediaPipe's own 3D
+estimate gives the body's shape and depth, and the body model (`vision/tracker.py`) is fitted to B's 2D
+points with that depth cue, feet on the floor and smooth motion. Your height sets the scale — enter it
+accurately once (a 3% error shifts the body ~6 cm in depth):
+
+```
+python -m vision.cams --remove A              # drop camera A from the config (or assign only B)
+python -m vision.calib_extrinsics             # B and the markers: the whole calibration
+python -m vision.debug_view --height-cm 175   # your height, saved in config/person.yaml
+python -m vision.checks                       # one-camera checks (uses the saved height)
+python -m vision.mono_eval FILE...            # B-only replay of a two-camera recording vs triangulation
+```
+
+Place B so it sees your whole body anywhere on the mat (head to feet) and at least two markers, ideally one
+at each end. `calib_refine` needs two cameras and says so. Limits: depth along B's line of sight is the weak
+direction (a few cm typically, ~15–35 cm in the worst 10% of frames); the side of the body facing away from
+B is partly estimated by MediaPipe.
+
 ## Workflow
 
 No lens calibration: each camera's zoom comes from the floor markers. These webcams (~48° wide) need
