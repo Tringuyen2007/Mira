@@ -233,3 +233,32 @@ def test_clasped_hands_right_of_the_midline_stay_where_they_are():
         J[16] = _chest_point(X, -0.04, 0.30, 0.10) + rng.normal(0, 0.01, 3)
         P = rig.update(AFTER + k * DT, J, "3d")
         assert np.linalg.norm(P[15] - J[15]) < 0.06, k
+
+
+def _arm_pose(rig, X, flex_deg):
+    """Left arm with the upper arm pointing forward and the forearm bent up by flex_deg, at the rig's lengths."""
+    l1, l2 = rig.lengths["upper_arm"], rig.lengths["forearm"]
+    J = X.copy()
+    J[13] = X[11] + [0.0, 0.0, l1]
+    a = np.radians(flex_deg)
+    J[15] = J[13] + l2 * np.array([0.0, np.sin(a), np.cos(a)])
+    J[17:23:2] = J[15] + (X[17:23:2] - X[15])
+    return J
+
+
+def test_bicep_curl_elbow_follows_the_tracked_elbow():
+    X = standing_skeleton()
+    rig = BodyRig()
+    _measure(rig, X)
+    J = _arm_pose(rig, X, 90)  # forearm pointing straight up
+    P = rig.update(AFTER, J, "3d")
+    assert np.linalg.norm(P[13] - J[13]) < 0.02
+
+
+def test_elbows_forward_hands_at_the_shoulders_follow_the_tracked_elbow():
+    X = standing_skeleton()
+    rig = BodyRig()
+    _measure(rig, X)
+    J = _arm_pose(rig, X, 145)  # nearly folded, hand back by the shoulder
+    P = rig.update(AFTER, J, "3d")
+    assert np.linalg.norm(P[13] - J[13]) < 0.03

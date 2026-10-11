@@ -232,14 +232,15 @@ class BodyRig:
                 ankle = knee + C.unit(target - knee) * l2
             self._held[f"{side}{s['ankle']}"] = ankle - hip
             P[s["knee"]], P[s["ankle"]] = knee, ankle
-            # arms: elbow bends one way (points back/out), never inside the torso
+            # arms: elbow flexes at most FLEX_MAX_DEG, bending toward the tracked elbow (or the last bend);
+            # never inside the torso
             sh = P[s["shoulder"]]
             l1, l2 = L["upper_arm"], L["forearm"]
             target = self._target(J, conf, f"{side}{s['wrist']}", s["wrist"], sh, np.array([0.0, -(l1 + l2), 0.0]))
             target = self._min_reach(sh, target, l1, l2)
-            allowed = C.unit(sign * chest.left - chest.fwd)
-            pole = C.hinge_pole(sh, target, J[s["elbow"]] if _ok(J[s["elbow"]]) else None, allowed)
-            elbow, wrist = two_bone_ik(sh, target, pole, l1, l2)
+            bend_key = f"{side}{s['elbow']}bend"
+            elbow, wrist = two_bone_ik(sh, target, J[s["elbow"]] if _ok(J[s["elbow"]]) else None, l1, l2,
+                                       self._held.get(bend_key))
             length = float(np.linalg.norm((P[11] + P[12]) / 2 - hip_mid))
             hw = L["shoulder_width"] / 2
 
@@ -267,6 +268,7 @@ class BodyRig:
                     q[0] = sign * (hw + C.LIMB_MARGIN_M)
                     elbow, wrist = two_bone_ik(sh, wrist, chest.world(q), l1, l2)
             self._held[f"{side}{s['wrist']}"] = wrist - sh
+            self._held[bend_key] = elbow - sh
             P[s["elbow"]], P[s["wrist"]] = elbow, wrist
             for k in s["hand"]:
                 off = self._hold(f"{k}", J[k] - J[s["wrist"]] if _ok(J[k], J[s["wrist"]]) else None)
