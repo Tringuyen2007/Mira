@@ -191,6 +191,14 @@ async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> 
         WHERE p.id = %s""", (patient_id,), timeout_s=timeout_s)
 
 
+# ---- patient identity (Plan 1) ------------------------------------------------------------------------------
+
+async def patient_device(db: Database, token_hash: str, timeout_s: float = 1.5) -> dict[str, Any] | None:
+    """The phone that owns a patient token (by hash), including revoked_at so the caller can refuse it."""
+    return await db.fetchrow("SELECT token_hash, patient_id, device_name, last_seen, revoked_at FROM patient_devices "
+                             "WHERE token_hash = %s", (token_hash,), timeout_s=timeout_s)
+
+
 async def prescriptions(db: Database, patient_id: str, history: bool = False) -> list[dict[str, Any]]:
     return await db.fetch(PRESCRIPTIONS_SQL, (patient_id, history))
 

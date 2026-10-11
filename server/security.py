@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
+import time
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
@@ -11,6 +14,7 @@ from retell import Retell
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.config import cfg
+from server.db.pool import DBError
 from server.logging_setup import get_logger
 
 log = get_logger("security")
@@ -18,38 +22,128 @@ log = get_logger("security")
 WEBHOOK_PATH = "/retell/webhook"
 MAX_WEBHOOK_BYTES = 1_000_000
 
+PATIENT_TOKEN_PREFIX = "pt_"
+TOKEN_CACHE_S = 60.0
+TOUCH_INTERVAL_S = 60.0
+
+PrincipalScope = Literal["full", "device", "patient"]
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Who a token belongs to. `full` = MIRA_API_TOKEN (dashboard/ops), `device` = the LCD, `patient` = one phone."""
+
+    scope: PrincipalScope
+    patient_id: str | None = None
+
+    def owns(self, patient_id: str) -> bool:
+        return self.scope == "full" or (self.scope == "patient" and self.patient_id == patient_id)
+
+    def require(self, patient_id: str) -> None:
+        if not self.owns(patient_id):
+            raise HTTPException(status_code=403, detail="forbidden")
+
 
 def _token_matches(given: str, expected: str) -> bool:
-    if not cfg.MIRA_API_TOKEN:
+    if not expected:
         return False
     return secrets.compare_digest(given.encode("utf-8"), expected.encode("utf-8"))
 
 
+def new_patient_token() -> str:
+    return PATIENT_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def mask(token: str) -> str:
+    """For logs: never the token, only its tail."""
+    return "…" + token[-4:]
+
+
+# token hash → (Principal, expires_at, last_touched). Positive results only; a revoked token is refused as soon as
+# the entry expires (≤ 60 s) or invalidate_token_cache() runs (DELETE /me, device revocation).
+_cache: dict[str, tuple[Principal, float, float]] = {}
+
+
+def invalidate_token_cache() -> None:
+    _cache.clear()
+
+
+async def _patient_principal(token: str) -> Principal | None:
+    from server.db import queries, writes  # local import: security is imported by the db layer's callers
+    from server.state import get_state
+
+    digest = token_hash(token)
+    now = time.monotonic()
+    cached = _cache.get(digest)
+    if cached is not None and cached[1] > now:
+        principal, expires, touched = cached
+        if now - touched > TOUCH_INTERVAL_S:
+            _cache[digest] = (principal, expires, now)
+            writes.fire(writes.touch_patient_device(get_state().db, digest))
+        return principal
+    db = get_state().db
+    if db is None:
+        return None
+    row = await queries.patient_device(db, digest)  # DBError propagates → 503, never a false 401
+    if row is None or row["revoked_at"] is not None:
+        return None
+    principal = Principal("patient", row["patient_id"])
+    _cache[digest] = (principal, now + TOKEN_CACHE_S, now)
+    writes.fire(writes.touch_patient_device(db, digest))
+    return principal
+
+
+async def resolve_token(token: str) -> Principal | None:
+    """Which principal a bearer/`?token=` value is, or None. Static tokens never touch the database."""
+    if not token:
+        return None
+    if _token_matches(token, cfg.MIRA_API_TOKEN):
+        return Principal("full")
+    if _token_matches(token, cfg.MIRA_DEVICE_TOKEN):
+        return Principal("device")
+    if token.startswith(PATIENT_TOKEN_PREFIX):
+        return await _patient_principal(token)
+    return None
+
+
+def _bearer(request: Request) -> str:
+    header = request.headers.get("authorization", "")
+    return header[7:] if header.startswith("Bearer ") else ""
+
+
+async def require_principal(request: Request) -> Principal:
+    """FastAPI dependency for routes patients may call: the full token or a patient token, else 401. The LCD's
+    device token is never accepted on REST."""
+    principal = await resolve_token(_bearer(request))
+    if principal is None or principal.scope == "device":
+        raise HTTPException(status_code=401, detail="unauthorized", headers={"WWW-Authenticate": "Bearer"})
+    return principal
+
+
 async def require_token(request: Request) -> None:
-    """FastAPI dependency: `Authorization: Bearer <MIRA_API_TOKEN>` or 401."""
-    given = request.headers.get("authorization", "")
-    if not _token_matches(given, f"Bearer {cfg.MIRA_API_TOKEN}"):
+    """FastAPI dependency: `Authorization: Bearer <MIRA_API_TOKEN>` or 401 (unchanged: full scope only)."""
+    if not _token_matches(_bearer(request), cfg.MIRA_API_TOKEN):
         raise HTTPException(status_code=401, detail="unauthorized", headers={"WWW-Authenticate": "Bearer"})
 
 
 async def ws_token_ok(ws: WebSocket) -> bool:
-    """Check `?token=` before `ws.accept()` (browsers can't set headers on WebSockets)."""
+    """Check `?token=` before `ws.accept()` (browsers can't set headers on WebSockets). Full token only."""
     return _token_matches(ws.query_params.get("token", ""), cfg.MIRA_API_TOKEN)
 
 
-Scope = Literal["full", "device"]
-
-
-async def ws_scope(ws: WebSocket) -> Scope | None:
-    """Which token the `?token=` query carries: the API token ("full"), the LCD device token ("device") or
-    neither (None). Device scope is only honoured on the channels that opt in (see server.main)."""
-    given = ws.query_params.get("token", "")
-    if _token_matches(given, cfg.MIRA_API_TOKEN):
-        return "full"
-    device = cfg.MIRA_DEVICE_TOKEN
-    if device and secrets.compare_digest(given.encode("utf-8"), device.encode("utf-8")):
-        return "device"
-    return None
+async def ws_scope(ws: WebSocket) -> Principal | None:
+    """The principal behind `?token=`: full, the LCD device token, a patient's phone, or None. Device scope is
+    only honoured on the channels that opt in (see server.main). A database failure while checking a patient
+    token returns None (the phone reconnects with backoff)."""
+    try:
+        return await resolve_token(ws.query_params.get("token", ""))
+    except DBError as exc:
+        log.warning("ws token check failed (database)", extra={"error": str(exc)})
+        return None
 
 
 @lru_cache(maxsize=1)

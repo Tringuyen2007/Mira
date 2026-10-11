@@ -50,6 +50,8 @@ class Config:
     MOCK_PATIENT_ID: str = "maya"
     MOCK_FALL_RESPONDS_AT: float | None = None
     DEMO_TOOLS_ENABLED: bool = False
+    PAIRING_DEMO_CODE: str = "K7P4M2"  # therapist code the seed binds to Maya (the iOS design preview uses it)
+    PAIRING_DEMO_CODE_REUSABLE: bool = True  # the demo code may pair many phones; real codes are single-use
 
     TIGER_DSN: str | None = None
     COPILOT_DSN: str | None = None

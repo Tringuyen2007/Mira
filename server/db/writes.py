@@ -364,6 +364,13 @@ async def mark_all_notifications_read(db: Database | None, therapist_id: str | N
     return await _safe(db, "mark_all_notifications_read", lambda d: d.execute(sql, {"t": therapist_id}), None)
 
 
+# ---- patient identity (Plan 1) ------------------------------------------------------------------------------
+
+async def touch_patient_device(db: Database | None, token_hash: str) -> bool:
+    sql = "UPDATE patient_devices SET last_seen = now() WHERE token_hash = %s AND revoked_at IS NULL"
+    return await _safe(db, "touch_patient_device", lambda d: _ok(d.execute(sql, (token_hash,))), False)
+
+
 # ---- helpers ---------------------------------------------------------------------------------------------
 
 async def _ok(count: Awaitable[int]) -> bool:

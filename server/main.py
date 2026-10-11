@@ -45,7 +45,7 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
+from server.security import Principal, TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -299,14 +299,17 @@ def _parse_since_id(raw: str | None) -> int | None:
 
 
 async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allow_device: bool = False) -> None:
-    scope = await ws_scope(ws)
-    if scope is None or (scope == "device" and not allow_device):
+    principal = await ws_scope(ws)
+    if principal is None or (principal.scope == "device" and not allow_device):
         await ws.close(code=1008)
         return
     await ws.accept()
     hub = get_state().hub
-    if scope == "full":
+    if principal.scope == "full":
         await hub.connect(channel, ws, on_message)
+        return
+    if principal.scope == "patient":
+        await _serve_patient_ws(ws, channel, principal)
         return
     if channel != "events":
         await hub.connect(channel, ws)
@@ -319,6 +322,13 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
     finally:
         if devices is not None:
             devices.disconnected()
+
+
+async def _serve_patient_ws(ws: WebSocket, channel: str, principal: Principal) -> None:
+    """Placeholder until Task 7: a patient socket behaves like a full one. Task 7 adds the own-session filter and
+    the restricted client handler."""
+    hub = get_state().hub
+    await hub.connect(channel, ws, _client_event_handler() if channel == "events" else None)
 
 
 def _mount_static(app: FastAPI) -> None:
