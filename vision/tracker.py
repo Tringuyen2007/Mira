@@ -258,6 +258,7 @@ ROOT_MIN_CUTOFF = 3.0  # Hz: two cameras pin the body's position well, so it is 
 SINGLE_SMOOTH_TOO = True  # one camera: One Euro on the pose numbers before the 2D-motion gate
 GATE_FULL_PX = 8.0  # one camera: a landmark moving this many px per frame passes its change through fully
 GATE_MIN_GAIN = 0.08  # ... a landmark still in 2D lets only this fraction of a depth change through per frame
+GATE_GAP_S = 0.2  # ... after a gap longer than this (s) the gate and smoother start afresh
 SINGLE_BETA = 2.0  # one camera: noisier depth, so follow speed-ups more cautiously
 SINGLE_ROOT_MIN_CUTOFF = 1.0  # one camera: the floor position wobbles ~2 cm, smooth it more
 
@@ -306,6 +307,7 @@ class ModelTracker:
         cutoff = np.r_[[root] * 3, [SMOOTH_MIN_CUTOFF] * (N_PARAMS - 3)]
         self._smooth = OneEuroFilter(cutoff, beta) if SMOOTH_MIN_CUTOFF else None
         self._gate_uv = self._gate_w = self._gate_out = None
+        self._gate_t: float | None = None  # time of the last gated frame
 
     @property
     def progress(self) -> float:
@@ -483,6 +485,10 @@ class ModelTracker:
         self.last_cost = float(cost)
         # smooth the pose numbers (not the joints): steady when still, quick when moving, bones exact
         if self.single:  # adaptive smoothing first, then the 2D-motion gate
+            if self._gate_t is not None and t - self._gate_t > GATE_GAP_S:  # back after a gap: start afresh
+                self._gate_uv = self._gate_w = self._gate_out = None
+                self._smooth.reset() if self._smooth is not None else None
+            self._gate_t = t
             smoothed = self._smooth(x, t) if (self._smooth is not None and SINGLE_SMOOTH_TOO) else x
             return forward(self._gate(smoothed, obs[0]), self.shape)
         return forward(self._smooth(x, t) if self._smooth is not None else x, self.shape)

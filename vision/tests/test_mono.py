@@ -252,3 +252,23 @@ def test_one_camera_real_movement_still_comes_through():
         if k > 100:
             errs.append(np.linalg.norm((out.frame.joints[23] + out.frame.joints[24]) / 2 - (X[23] + X[24]) / 2))
     assert np.median(errs) < 0.05
+
+
+def test_one_camera_catches_up_quickly_when_the_person_comes_back():
+    cam, X0 = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X0 - (X0[23] + X0[24]) / 2))
+    t = 0.0
+    for _ in range(60):
+        pipe.process(t, None, pose_from_points(cam, X0, t=t))
+        t += 1 / 30
+    for _ in range(16):  # nobody: lost
+        assert pipe.process(t, None, None).frame.tracking == "lost"
+        t += 1 / 30
+    c = np.asarray(cam.R).T @ -np.ravel(cam.t)
+    X = X0 + np.array([c[0], 0.0, c[2]]) / np.hypot(c[0], c[2]) * 1.0  # back 1 m nearer the camera
+    errs = []
+    for _ in range(5):
+        out = pipe.process(t, None, pose_from_points(cam, X, t=t))
+        t += 1 / 30
+        errs.append(np.linalg.norm((out.frame.joints[23] + out.frame.joints[24]) / 2 - (X[23] + X[24]) / 2))
+    assert errs[-1] < 0.05, errs  # within 5 frames
