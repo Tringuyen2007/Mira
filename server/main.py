@@ -26,6 +26,7 @@ from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
 from server.agents.session_analyst import SessionAnalyst
 from server.agents.session_coach import SessionCoach
+from server.agents.trainer_voice import TrainerVoice
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, lcd_link, patients, prescriptions
@@ -206,6 +207,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     state.coach = coach
     haptics = HapticCoach(hub)
     bridge.subscribe_events(haptics.on_event)
+    # The LCD's trainer voice: engine events from the bridge, agent events (alert, check_in cue,
+    # session_summary, summary_ready) from hub.emit; it handles an event seen on both only once.
+    trainer = TrainerVoice(hub, sessions)
+    bridge.subscribe_events(trainer.on_event)
+    hub.emit_observers.append(trainer.observe)
 
     ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
@@ -244,6 +250,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bridge.stop()
         await voice.close()
         await coach.close()
+        await trainer.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
         await analyst.close()

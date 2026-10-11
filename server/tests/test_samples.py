@@ -10,7 +10,7 @@ SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdow
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
                  "proposal_created", "coach_adapt", "device_health", "device_status", "session_summary", "message",
                  "breather", "hr_recovery", "rotation_rep", "rotation_set", "sync_progress", "limits_changed",
-                 "watch_features_changed"}
+                 "watch_features_changed", "say"}
 CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health", "watch_sync"}
 REST_SAMPLES_REQUIRED_KEYS = {
     "rest_get_me.json": {"patient", "therapist", "prescriptions", "lcd", "calibration"},
