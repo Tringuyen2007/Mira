@@ -35,3 +35,4 @@ build/
 # Vision (Eric's rig)
 vision/models/*.task
 config/backups/
+.demo_patient_token
