@@ -100,6 +100,10 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
         checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
                              lambda v: 170 <= v <= 180))
 
+    locks = [o.feet_locked for o in outputs if o.frame.tracking == "3d" and o.feet_locked is not None]
+    frac_locked = 100.0 * sum(lk.get("l", False) and lk.get("r", False) for lk in locks) / len(locks) if locks else None
+    checks.append(_check("feet anchored while standing", frac_locked, "%", "≥ 80", lambda v: v >= 80))
+
     if height_cm is not None:
         est = estimate_height_cm(seq) if seq is not None else None
         checks.append(_check("estimated height", est, "cm", f"{height_cm:.0f} ± 5%",

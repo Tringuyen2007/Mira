@@ -60,4 +60,6 @@ def test_replay_can_retriangulate_without_smoothing(tmp_path):
             rec.write(pipe.process(1000 + k / 30, a, b, 0.0))
     raw = list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
     for out in raw:
-        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])
+        body = out.tri.ok.copy()
+        body[27:33] = False  # feet may be held by the FootAnchor; everything else is unsmoothed
+        np.testing.assert_allclose(out.frame.joints[body], out.tri.points[body])

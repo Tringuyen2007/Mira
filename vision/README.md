@@ -72,6 +72,15 @@ lens), the camera whose person stands at the mat is kept and the other is ignore
 ("ignoring camera A (disagrees)"). Recordings keep everyone found, so `--retriangulate` re-runs the
 selection.
 
+### Foot anchoring
+
+A planted foot (heel and toe within 12 cm of the floor, barely moving for 0.2 s) is held still at its
+average position with its lowest point on the mat surface, so MediaPipe's wobble doesn't make the
+feet jitter while standing or squatting. It releases on a real step or lift (the detected foot more
+than 5 cm away, or the heel off the floor, for 2 frames) and fades back to the live position over
+0.1 s. The debug view's top view draws a white square under an anchored foot; `checks` reports
+"feet anchored while standing". `Pipeline(..., anchor_feet=False)` turns it off.
+
 ### Left/right flips
 
 Both cameras are at the same height, so a MediaPipe left/right flip in one camera still looks

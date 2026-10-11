@@ -96,7 +96,8 @@ def render_camera(image, pose: PoseResult | None, frame: FrameResult | None, cam
     return panel
 
 
-def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, CameraConfig]) -> np.ndarray:
+def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, CameraConfig],
+                   feet_locked: dict[str, bool] | None = None) -> np.ndarray:
     img = _blank()
     for x in np.arange(-2.5, 2.51, 0.5):
         a, b = TOP([[x, -1.3], [x, 2.9]])
@@ -124,10 +125,14 @@ def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, Ca
         draw_text(img, name, pt(p + [8, -8]), YELLOW)
     if frame is not None:
         draw_skeleton(img, TOP(frame.joints[:, [0, 2]]))
+        for side, heel in (("l", 29), ("r", 30)):
+            if (feet_locked or {}).get(side) and np.isfinite(frame.joints[heel]).all():
+                c = TOP([frame.joints[heel][[0, 2]]])[0]
+                cv2.rectangle(img, pt(c - 7), pt(c + 7), WHITE, 2)  # this foot is anchored
     a, b = TOP([[0.0, -1.15], [0.5, -1.15]])
     cv2.arrowedLine(img, pt(a), pt(b), WHITE, 1, tipLength=0.2)
     draw_text(img, "+x", pt(b + [-24, -6]), WHITE, 0.4)
-    draw_text(img, "top view   orange = left, blue = right", (8, PANEL_H - 10), WHITE, 0.45)
+    draw_text(img, "top view   orange = left, blue = right, square = foot anchored", (8, PANEL_H - 10), WHITE, 0.45)
     return img
 
 
@@ -185,7 +190,8 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     if recording:
         hud.append(recording)
     hud.append("keys: r record   m markers   q quit")
-    bottom = np.hstack([render_topdown(frame, mat, cams), render_front(frame, hud)])
+    bottom = np.hstack([render_topdown(frame, mat, cams, out.feet_locked if out is not None else None),
+                        render_front(frame, hud)])
     return np.vstack([np.hstack(panels), bottom])
 
 

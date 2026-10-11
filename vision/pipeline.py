@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from vision.anchor import FootAnchor
 from vision.cleanup import Cleaner
 from vision.config import CameraConfig, MatConfig
 from vision.filters import OneEuroFilter
@@ -28,6 +29,7 @@ class PipelineOutput:
     people: dict[str, list[PoseResult]] | None = None  # everyone found per camera (multi-person input)
     ignored: dict[str, list[PoseResult]] | None = None  # people not tracked, per camera
     dropped: str | None = None  # camera ignored this frame because it disagreed with the other
+    feet_locked: dict[str, bool] | None = None  # "l"/"r" -> foot held by the FootAnchor this frame
 
 
 def _flipped(p: PoseResult) -> PoseResult:
@@ -79,8 +81,10 @@ def _as_people(x) -> list[PoseResult] | None:
 
 class Pipeline:
     def __init__(self, cams: dict[str, CameraConfig], smoothing: bool = True,
-                 min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None):
+                 min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None,
+                 anchor_feet: bool = True):
         self.cams = cams
+        self._anchor = FootAnchor() if anchor_feet else None
         self._selector = PersonSelector(cams, mat or MatConfig())
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
         self._cleaner = Cleaner(cams)
@@ -117,8 +121,14 @@ class Pipeline:
                     best, swapped, a, b, tri = cost, name, a2, b2, tri2
         usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
         joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
+        feet_locked = None
+        if self._anchor is not None:
+            if tracking == "lost":
+                self._anchor.reset()
+            else:
+                joints, feet_locked = self._anchor.update(t, joints)
         if self._filter is not None:
             joints = self._filter(joints, t)
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
-                              people=people, ignored=ignored, dropped=dropped)
+                              people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked)
