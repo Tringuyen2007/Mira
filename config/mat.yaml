@@ -9,4 +9,4 @@ camera_targets:
   A: {eye: [1.98, 0.85, 1.98]}
   B: {eye: [-1.98, 0.85, 1.98]}
 aim_point: [0.0, 0.8, 0.0]
-placement_tolerance: {position_m: 0.10, angle_deg: 5.0}
+placement_tolerance: {position_m: 0.05, angle_deg: 2.0}

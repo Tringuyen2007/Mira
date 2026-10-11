@@ -33,15 +33,16 @@ def test_cameras_round_trip_and_backup(tmp_path):
     assert load_cameras(path) == {}
     cam = CameraConfig(
         name="A", index=1, hint="1280x720",
-        K=np.eye(3), dist=np.zeros(5), intrinsics_rms=0.3,
+        K=np.eye(3), dist=np.zeros(5),
         R=np.eye(3), t=np.array([0.0, 0.0, 3.0]), extrinsics_source="markers", extrinsics_rms=0.8,
-        marker_obs={0: np.arange(8.0).reshape(4, 2)},
+        marker_obs={0: np.arange(8.0).reshape(4, 2)}, target_eye=np.array([3.2, 0.85, 3.2]),
     )
     assert save_cameras({"A": cam}, path) is None
     loaded = load_cameras(path)["A"]
     assert loaded.index == 1 and loaded.calibrated
     np.testing.assert_allclose(loaded.t, [0.0, 0.0, 3.0])
     np.testing.assert_allclose(loaded.marker_obs[0], cam.marker_obs[0])
+    np.testing.assert_allclose(loaded.target_eye, [3.2, 0.85, 3.2])
     backup = save_cameras({"A": cam}, path)
     assert backup is not None and backup.exists()
 
@@ -50,3 +51,12 @@ def test_uncalibrated_camera_flags():
     cam = CameraConfig(name="B", index=0)
     assert not cam.has_intrinsics and not cam.calibrated
     assert CameraConfig.from_dict("B", cam.to_dict()).index == 0
+
+
+def test_old_file_with_intrinsics_rms_still_loads(tmp_path):
+    path = tmp_path / "cameras.yaml"
+    path.write_text("cameras:\n  A:\n    index: 0\n    K: [[900, 0, 640], [0, 900, 360], [0, 0, 1]]\n"
+                    "    dist: [0, 0, 0, 0, 0]\n    intrinsics_rms: 0.22\n")
+    cam = load_cameras(path)["A"]
+    assert cam.has_intrinsics and cam.target_eye is None
+    assert "intrinsics_rms" not in cam.to_dict()
