@@ -92,3 +92,11 @@ with the plain rig); the panel says "constraints off" when off.
 
 Constraining `FrameResult.joints` for the team; finger/hand articulation; full-body physics or
 self-collision beyond arms vs torso; head/neck limits beyond the spine direction.
+
+## Addendum: tuned on the recordings (prototype results)
+
+- Foot yaw: rate cap **240°/s** (not 360), adaptive smoothing (changes under 60° damped, min gain 0.1); when the heel/toe are uncertain the foot **keeps its previous yaw** (dragged along only if the body turns past ±35°) instead of snapping to the body's facing; the body facing used by the feet is itself smoothed (changes under 30° damped, min gain 0.2). Cost: a fast 90° turn reaches the foot ~0.3 s late.
+- Arms: after up to 3 push/re-solve rounds, an elbow still inside the torso is swung out sideways (pole = shoulder + side·left − 0.3·forward).
+- Fix in the existing rig: the frame that completes measuring is posed, not raw (it was the only source of non-zero bone std).
+- `avatar_eval` passes `feet_locked` like `debug_view` does.
+- Measured, constrained vs plain, on the three recordings: arm-in-torso 1.0/0.0/0.8% (plain 7.6/29.0/7.5%); hinge 0% (plain ≤1%); foot yaw p95 8/5/8° (plain 19/16/20°), max 16/16/9° (plain 141/129/75°); bone std 0 mm; truth mean 1.2–2.7 cm; ≤ 0.5 ms/frame. Targets revised to what was reached: arm-in-torso **≤ 1%**, foot yaw p95 **≤ 9°**.
