@@ -127,6 +127,31 @@ test("the clinic line is rendered when the therapist has a clinic", () => {
   assert.equal(root.querySelector(".sidebar__clinic").textContent, "Lakeside Rehab");
 });
 
+test("the bell shows an unread badge and aria-label, and toggling it calls onBellToggle with the button", () => {
+  let clicked = null;
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+    unreadCount: 3, bellOpen: false, onBellToggle: (el) => { clicked = el; },
+  });
+  const bell = root.querySelector(".sidebar__bell");
+  assert.equal(bell.getAttribute("aria-label"), "3 unread notifications");
+  assert.equal(bell.getAttribute("aria-expanded"), "false");
+  assert.equal(bell.querySelector(".sidebar__bell-badge").textContent, "3");
+  bell.dispatch("click");
+  assert.equal(clicked, bell);
+});
+
+test("the bell has no badge and aria-expanded=true when open with zero unread", () => {
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+    unreadCount: 0, bellOpen: true, onBellToggle: () => {},
+  });
+  const bell = root.querySelector(".sidebar__bell");
+  assert.equal(bell.getAttribute("aria-label"), "0 unread notifications");
+  assert.equal(bell.getAttribute("aria-expanded"), "true");
+  assert.equal(bell.querySelector(".sidebar__bell-badge"), null);
+});
+
 test("Mira Assistant links to #/assistant and is active on assistant, copilot and proposal routes", () => {
   for (const name of ["assistant", "copilot", "proposal"]) {
     const root = renderSidebar({ route: { name }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null });

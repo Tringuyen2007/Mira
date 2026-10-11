@@ -125,6 +125,17 @@ class FakeElement extends FakeNode {
   get hidden() { return this.hasAttribute("hidden"); }
   set hidden(v) { v ? this.setAttribute("hidden", "") : this.removeAttribute("hidden"); }
 
+  // Test-only: enough of focus()/blur() for a focus-management assertion (Esc returns focus to the trigger).
+  focus() {
+    this._focused = true;
+    if (globalThis.document) globalThis.document.activeElement = this;
+  }
+
+  blur() {
+    this._focused = false;
+    if (globalThis.document && globalThis.document.activeElement === this) globalThis.document.activeElement = null;
+  }
+
   _removeChild(child) {
     const i = this.childNodes.indexOf(child);
     if (i !== -1) this.childNodes.splice(i, 1);
@@ -211,6 +222,7 @@ class FakeDocument {
   constructor() {
     this.listeners = new Map();
     this.body = new FakeElement("body");
+    this.activeElement = null;
   }
 
   createElement(tag) {

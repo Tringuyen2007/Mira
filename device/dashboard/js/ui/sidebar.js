@@ -41,8 +41,23 @@ function navItem({ id, label, iconName, active, href: linkHref, disabled, badge 
       : null);
 }
 
+function bellButton({ unread, bellOpen, onBellToggle }) {
+  const count = typeof unread === "number" && unread > 0 ? (unread > 99 ? "99+" : String(unread)) : null;
+  return h("button", {
+    class: "sidebar__bell",
+    type: "button",
+    "aria-haspopup": "dialog",
+    "aria-expanded": bellOpen ? "true" : "false",
+    "aria-label": `${unread || 0} unread notifications`,
+    onclick: onBellToggle ? (e) => onBellToggle(e.target) : null,
+  },
+    icon("bell"),
+    count ? h("span", { class: "sidebar__bell-badge" }, count) : null);
+}
+
 export function renderSidebar(state) {
-  const { route, proposalsWaiting, selectedPatientId, therapist, live } = state || {};
+  const { route, proposalsWaiting, selectedPatientId, therapist, live, unreadCount, bellOpen, onBellToggle } =
+    state || {};
   const activeKey = ACTIVE_FOR[route && route.name] || null;
   const patientHref = selectedPatientId ? href("patient", { pid: selectedPatientId }) : href("caseload");
   const prescribeHref = selectedPatientId ? href("prescribe", { pid: selectedPatientId }) : href("caseload");
@@ -58,7 +73,8 @@ export function renderSidebar(state) {
       h("img", { class: "sidebar__mark", src: "assets/mira-mark.png", alt: "" }),
       h("div", {},
         h("p", { class: "sidebar__brand" }, "Mira"),
-        h("p", { class: "sidebar__subbrand" }, "Care team"))),
+        h("p", { class: "sidebar__subbrand" }, "Care team")),
+      bellButton({ unread: unreadCount, bellOpen, onBellToggle })),
     h("nav", { class: "sidebar__nav", "aria-label": "Main" },
       navItem({ id: "caseload", label: "Caseload", iconName: "caseload",
         active: activeKey === "caseload", href: href("caseload") }),

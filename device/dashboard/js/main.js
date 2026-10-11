@@ -10,6 +10,9 @@ import { loadCapabilities } from "./net/capabilities.js";
 import { createSocketHub } from "./net/sockets.js";
 import { renderSidebar } from "./ui/sidebar.js";
 import { createToaster } from "./ui/toasts.js";
+import { createAlertBanner } from "./ui/alertBanner.js";
+import { createNotificationsBell } from "./ui/notificationsBell.js";
+import { alertsModel, applyAlertEvent } from "./core/alerts-model.js";
 import { empty } from "./ui/states.js";
 import { mountSignIn } from "./screens/signin/index.js";
 import { screen as caseloadScreen } from "./screens/caseload/index.js";
@@ -22,11 +25,16 @@ const SCREENS = {
   caseload: caseloadScreen, assistant: assistantScreen, patient: patientScreen, prescribe: prescribeScreen,
 };
 const SCREEN_ALIAS = { replay: "patient", proposal: "assistant" };
+// Events that mean the pending-proposals count (sidebar's Mira Assistant badge) may have changed.
+const PROPOSAL_EVENTS = new Set(["proposal_created", "proposal_decided"]);
 
 const appEl = document.getElementById("app");
 const signinEl = document.getElementById("signin");
 const sidebarEl = document.getElementById("sidebar");
+const contentEl = document.getElementById("content");
 const mainEl = document.getElementById("main");
+const alertBannerEl = document.getElementById("alertBanner");
+const notificationsEl = document.getElementById("notifications");
 const toastsEl = document.getElementById("toasts");
 
 const toaster = createToaster(toastsEl);
@@ -34,7 +42,7 @@ const toaster = createToaster(toastsEl);
 function showSignIn() {
   appEl.setAttribute("data-state", "signin");
   sidebarEl.hidden = true;
-  mainEl.hidden = true;
+  contentEl.hidden = true;
   signinEl.hidden = false;
   clear(signinEl);
   mountSignIn(signinEl, {
@@ -47,7 +55,7 @@ async function bootShell({ token, therapistId }) {
   signinEl.hidden = true;
   clear(signinEl);
   sidebarEl.hidden = false;
-  mainEl.hidden = false;
+  contentEl.hidden = false;
   appEl.setAttribute("data-state", "app");
 
   // Set false (once, idempotently) by signOut. Checked after every await below so a sign-out that happens
@@ -63,13 +71,36 @@ async function bootShell({ token, therapistId }) {
   const sockets = createSocketHub({ location: globalThis.location, token, therapistId });
   const store = createStore({ proposalsWaiting: 0, selectedPatientId: null, therapist: null, live: null });
 
+  function navigate(hashString) { globalThis.location.hash = hashString; }
+
+  const alertBanner = createAlertBanner(alertBannerEl, { resolveAlert: endpoints.resolveAlert });
+  const bell = createNotificationsBell({
+    panelEl: notificationsEl, api: endpoints, navigate, toast: toaster.toast, onChange: renderSidebarInto,
+  });
+  let alertsState = [];
+
   let currentRoute = parseRoute(globalThis.location.hash);
   let unmount = null;
 
   function renderSidebarInto() {
     if (!alive) return;
     clear(sidebarEl);
-    sidebarEl.append(renderSidebar({ route: currentRoute, ...store.get() }));
+    const bellState = bell.getState();
+    sidebarEl.append(renderSidebar({
+      route: currentRoute, ...store.get(),
+      unreadCount: bellState.unread, bellOpen: bellState.open, onBellToggle: (btn) => bell.toggle(btn),
+    }));
+  }
+
+  // Sidebar badge (decisions): pending proposals only, never the unread-notification count — loaded once at
+  // boot and refreshed on proposal_created/proposal_decided events, independent of the notifications bell.
+  async function refreshProposalsWaiting() {
+    if (!alive) return;
+    try {
+      const res = await endpoints.proposals({ status: "pending" });
+      if (!alive) return;
+      store.set({ proposalsWaiting: ((res && res.proposals) || []).length });
+    } catch { /* leave the last known count on a transient failure */ }
   }
 
   function render() {
@@ -101,12 +132,16 @@ async function bootShell({ token, therapistId }) {
   }
 
   const unsubStore = store.subscribe(renderSidebarInto);
-  const unsubEvents = sockets.subscribe("events", () => { /* live-session/alert screens wire this up later */ });
-  const unsubNotifications = sockets.subscribe("notifications", (msg) => {
-    if (msg && msg.type === "notification" && typeof msg.unread_count === "number") {
-      store.set({ proposalsWaiting: msg.unread_count });
+  const unsubEvents = sockets.subscribe("events", (msg) => {
+    if (!msg) return;
+    if (msg.type === "alert") {
+      alertsState = applyAlertEvent(alertsState, msg);
+      alertBanner.render(alertsState);
+    } else if (PROPOSAL_EVENTS.has(msg.type)) {
+      refreshProposalsWaiting();
     }
   });
+  const unsubNotifications = sockets.subscribe("notifications", (msg) => bell.handlePush(msg));
 
   function onHashChange() { render(); }
   globalThis.addEventListener("hashchange", onHashChange);
@@ -124,10 +159,13 @@ async function bootShell({ token, therapistId }) {
     sockets.closeAll();
     unmount?.();
     unmount = null;
-    // Clear patient data and any lingering toasts before handing the workstation back to the sign-in screen
-    // (shared clinic workstation / projector: nothing from this session should stay on screen).
+    // Clear patient data and any lingering toasts/alerts/notifications before handing the workstation back to
+    // the sign-in screen (shared clinic workstation / projector: nothing from this session should stay on screen).
     clear(mainEl);
     clear(sidebarEl);
+    alertsState = [];
+    alertBanner.render([]);
+    bell.destroy();
     toaster.clearAll();
     clearAuth(sessionStorage);
     globalThis.location.hash = "";
@@ -139,17 +177,22 @@ async function bootShell({ token, therapistId }) {
     sockets,
     auth: { therapistId, signOut },
     caps,
-    navigate: (hashString) => { globalThis.location.hash = hashString; },
+    navigate,
     toast: toaster.toast,
     store,
   };
 
+  bell.init();
+
   // Therapist display name: GET /patients/{first} -> patient.therapist_name when available, else the id.
-  // Clinic name has no data source yet (server TODO); the sidebar hides the line when it's empty.
+  // Clinic name has no data source yet (server TODO); the sidebar hides the line when it's empty. Also builds
+  // patientsById for the alerts banner's "Fall — <name>" title.
+  let patientsById = {};
   try {
     const list = await endpoints.patients();
     if (!alive) return;
     const items = (list && list.patients) || [];
+    patientsById = Object.fromEntries(items.map((p) => [p.id, p]));
     let name = therapistId;
     if (items.length > 0) {
       try {
@@ -167,6 +210,14 @@ async function bootShell({ token, therapistId }) {
 
   if (!alive) return;
   render();
+
+  refreshProposalsWaiting();
+  try {
+    const alertsJson = await endpoints.alerts();
+    if (!alive) return;
+    alertsState = alertsModel(alertsJson, patientsById);
+    alertBanner.render(alertsState);
+  } catch { /* the open-alerts banner stays empty; a live `alert` event can still populate it */ }
 }
 
 // Clickjacking: frame-ancestors can't be set in a <meta> CSP and the server doesn't send X-Frame-Options for
