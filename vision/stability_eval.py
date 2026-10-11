@@ -16,7 +16,7 @@ import numpy as np
 BODY = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32]  # shoulders ... toes
 ANKLES = [27, 28]
 STILL_PX = 2.5  # median 2D motion of the body below this ...
-STILL_FRAMES = 15  # ... for this many frames in a row: the person is still
+STILL_FRAMES = 15  # ... for this many frame-to-frame motions in a row (16 frames): the person is still
 JUMP_M = 0.08
 FLOAT_M = 0.05
 MAX_LAG = 10  # frames searched either way
@@ -54,11 +54,11 @@ def _knee(J, hip, knee, ankle):
 
 def _lag_frames(a, b) -> float:
     """Frames b is behind a, to LAG_STEP: the shift of b (linearly interpolated between frames) whose
-    correlation with a, over the frames where both are known, is highest."""
+    correlation with a, over the frames where both are known, is highest. NaN when too few frames overlap."""
     a, b = np.asarray(a, float), np.asarray(b, float)
     n = len(a)
     idx = np.arange(n, dtype=float)
-    best, lag = -np.inf, 0.0
+    best, lag = -np.inf, float("nan")
     for k in np.arange(-MAX_LAG, MAX_LAG + 1e-9, LAG_STEP):
         src = idx + k  # b shifted back by k frames lines up with a
         inside = (src >= 0) & (src <= n - 1)
@@ -74,6 +74,11 @@ def _lag_frames(a, b) -> float:
 
 
 def metrics(outs, cam, restarts: int = 0) -> dict:
+    if not outs:  # an empty recording (header only)
+        nan = float("nan")
+        return {"frames": 0, "fitted_pct": nan, "still_frames": 0, "still_med_cm": nan, "still_p90_cm": nan,
+                "moving_p90_cm": nan, "jumps": 0, "ankle_p99_cm": nan, "floating": 0, "reproj_px": nan,
+                "lag_frames": nan, "deepest_knee_deg": nan, "restarts": int(restarts), "fit_ms": nan}
     J = np.array([o.frame.joints for o in outs])
     t = np.array([o.frame.t for o in outs])
     model = np.array([o.tracker == "model" for o in outs])
@@ -131,7 +136,13 @@ def main() -> None:
     args = ap.parse_args()
     cm = args.height_cm if args.height_cm is not None else load_person()
     h = cm / 100 if cm else None
+    from vision.replay import read_header
+
     for path in args.recordings:
+        names = sorted((read_header(path).get("cameras") or {}).keys())
+        if args.cam not in names:
+            print(f"{path.split('/')[-1]}: no camera {args.cam} in this recording (it has {', '.join(names) or 'none'})")
+            continue
         outs, cam, restarts = replay(path, h, args.cam)
         print(format_row(path.split("/")[-1], metrics(outs, cam, restarts)))
 

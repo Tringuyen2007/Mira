@@ -448,3 +448,17 @@ def test_triangulation_is_always_ready():
     out = Pipeline(cams).process(0.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
     assert out.frame.body == "ready" and out.frame.body_progress == 1.0
     assert Pipeline(cams).process(0.0, None, None).frame.body == "ready"
+
+
+def test_one_camera_progress_stays_below_one_until_the_body_is_measured():
+    import vision.tracker as T
+
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    real, T.measure = T.measure, lambda frames: None  # measuring keeps failing (e.g. the face never seen)
+    try:
+        for k in range(60):
+            out = pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30))
+    finally:
+        T.measure = real
+    assert out.frame.body == "measuring" and out.frame.body_progress < 1.0

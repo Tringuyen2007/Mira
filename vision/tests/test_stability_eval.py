@@ -32,3 +32,27 @@ def test_a_steady_synthetic_session_reports_steady(tmp_path):
     assert m["still_p90_cm"] < 1.0 and m["jumps"] == 0 and m["floating"] == 0
     assert m["reproj_px"] < 10.0  # the walk is followed a frame or two behind (smoothing)
     assert m["restarts"] == 0  # (no lag check: the hips never move up or down here)
+
+
+def test_unknown_lag_is_nan_not_zero():
+    assert np.isnan(_lag_frames(np.full(20, np.nan), np.full(20, np.nan)))
+
+
+def test_an_empty_recording_or_missing_camera_is_reported_not_a_crash(tmp_path, capsys):
+    import sys
+
+    from vision import stability_eval
+
+    cam = make_cam("B", (-1.31, 1.0, 4.06), target=(0.0, 0.8, 0.0), K=K)
+    path = tmp_path / "empty.jsonl"
+    with Recorder(path, {"B": cam}, {"length_m": MatConfig().length_m}):
+        pass
+    m = metrics(*replay(str(path), 1.7)[:2])
+    assert m["frames"] == 0 and np.isnan(m["still_p90_cm"]) and np.isnan(m["lag_frames"])
+    argv = sys.argv
+    try:
+        sys.argv = ["stability_eval", str(path), "--height-cm", "170", "--cam", "A"]
+        stability_eval.main()
+    finally:
+        sys.argv = argv
+    assert "no camera A" in capsys.readouterr().out

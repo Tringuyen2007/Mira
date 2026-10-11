@@ -322,7 +322,8 @@ class ModelTracker:
 
     @property
     def progress(self) -> float:
-        return 1.0 if self.shape is not None else min(len(self._samples) / self.frames_needed, 1.0)
+        """Share of the measuring frames collected: 1.0 only once measured (below 1 while measuring fails)."""
+        return 1.0 if self.shape is not None else min(len(self._samples) / self.frames_needed, 0.99)
 
     def _residuals(self, p, obs, prev, anchors, world=None, hold=None):
         X = forward(p, self.shape)
@@ -334,7 +335,9 @@ class ModelTracker:
             rel = X - (X[23] + X[24]) / 2
             parts.append((WORLD_PX_PER_M * (rel - W) * ww[:, None]).ravel())
             parts.append(np.array([CONTACT_PX_PER_M * np.min(X[[29, 30, 31, 32], 1])]))
-        temporal = np.r_[[TEMPORAL_PX] * 3, [SINGLE_TEMPORAL_PX] * (N_PARAMS - 3)] if self.single else TEMPORAL_PX
+        # one camera, a held solve: the angles cost more to move (a fresh start or restart is not held)
+        temporal = (np.r_[[TEMPORAL_PX] * 3, [SINGLE_TEMPORAL_PX] * (N_PARAMS - 3)]
+                    if self.single and hold is not None else TEMPORAL_PX)
         parts.append((p - prev) / SIGMA * temporal * (1.0 if hold is None else hold))
         lim = []
         for s in SIDE:
