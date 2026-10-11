@@ -74,7 +74,7 @@ def test_foot_yaw_is_limited_held_when_unsure_locked_and_rate_capped():
     y = C.foot_yaw(out_60, fwd, None, 1 / 30, None, True)
     assert abs(np.degrees(y) - C.FOOT_YAW_LIMIT_DEG) < 1e-9  # toe-out limited
     held = C.foot_yaw(None, fwd, np.radians(10), 1 / 30, None, False)
-    assert abs(np.degrees(held) - 10) < 1e-9  # unsure: stays where it was
+    assert abs(np.degrees(held) - 10 * (1 - C.FOOT_UNSURE_EASE_PER_S / 30)) < 1e-9  # unsure: eases back slowly
     locked = C.foot_yaw(out_60, fwd, np.radians(5), 1 / 30, np.radians(5), True)
     assert abs(np.degrees(locked) - 5) < 1e-9  # anchored: keeps its yaw
     step = C.foot_yaw(np.array([1.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]), 0.0, 1 / 30, None, True)
@@ -114,3 +114,13 @@ def test_locked_foot_is_dragged_along_when_the_body_turns_past_the_limit():
     for _ in range(300):
         y = C.foot_yaw(_facing(90), _facing(90), y, 1 / 30, 0.0, True)  # anchored at 0°, body turned to 90°
     assert abs(np.degrees(y) - 90) <= C.FOOT_YAW_LIMIT_DEG + 1e-6
+
+
+def test_unsure_foot_eases_back_toward_the_body_facing():
+    start = np.radians(90 + C.FOOT_YAW_LIMIT_DEG)  # toed out at the limit after a turn
+    one = C.foot_yaw(None, _facing(90), start, 1 / 30, None, False)
+    assert abs(np.degrees(one - start)) < 2
+    y = start
+    for _ in range(90):  # 3 s of unsure heel/toe
+        y = C.foot_yaw(None, _facing(90), y, 1 / 30, None, False)
+    assert abs(np.degrees(y) - 90) < 10

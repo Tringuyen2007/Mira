@@ -78,8 +78,9 @@ the 3D view is rigged; FrameResult.joints, recordings and checks stay as measure
 
 On top of the fixed proportions, the 3D person follows simple anatomy (`vision/constraints.py`):
 knees and elbows flex 0–150° (knees bend forward only), thighs don't swing far behind the body,
-elbows and hands are pushed out of the torso (out the front when in front of it), and feet point within 35° of the body's facing, stay put when
-MediaPipe is unsure of the heel/toe, lock while anchored, lie flat near the floor and turn at most
+elbows and hands are pushed out of the torso (out the front when in front of it), and feet point
+within 35° of the body's facing, ease back toward it when MediaPipe is unsure of the heel/toe, lock
+while anchored (dragged along if the body turns past 35°), lie flat near the floor and turn at most
 240°/s. Joints MediaPipe is unsure about lean on the previous frame. Press **c** in the 3D view to
 compare with the rules off. Measure any recording with:
 

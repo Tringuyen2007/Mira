@@ -18,6 +18,7 @@ FOOT_PITCH_DEG = (-30.0, 40.0)  # toe down .. toe up
 FOOT_YAW_RATE_DPS = 240.0  # fastest a foot turns (8° per frame at 30 fps)
 FOOT_YAW_SMOOTH_DEG = 60.0  # a yaw change this big passes at full speed; smaller ones are damped
 FOOT_YAW_MIN_GAIN = 0.1  # fraction of a tiny yaw change applied per frame
+FOOT_UNSURE_EASE_PER_S = 0.5  # unsure heel/toe: fraction of the way back to the body's facing per second
 FLAT_HEIGHT_M = 0.03  # a foot this close to the floor lies flat
 THIGH_BACK_DEG = 30.0  # thighs swing back at most this far behind the body
 BODY_YAW_SMOOTH_DEG = 30.0  # body facing: turns this big pass, smaller wobbles are damped
@@ -119,29 +120,32 @@ def push_out_of_torso(p, torso: Frame, half_width: float, length: float, side: f
 def foot_yaw(tracked_dir, body_fwd, prev_yaw: float | None, dt: float, locked_yaw: float | None,
              confident: bool) -> float:
     """Yaw (radians, atan2(x, z) on the floor) for a foot: the tracked direction limited to
-    FOOT_YAW_LIMIT_DEG from the body's forward; when not confident, the previous yaw (dragged along
-    only if the body turns past the limit); the locked yaw while anchored (also dragged past the limit);
-    changes smoothed and
-    turning no faster than FOOT_YAW_RATE_DPS."""
+    FOOT_YAW_LIMIT_DEG from the body's forward; when not confident, the previous yaw easing back toward
+    the body's facing (FOOT_UNSURE_EASE_PER_S); the locked yaw while anchored. The limit always holds, so
+    a turning body drags the foot along. Changes are smoothed and turn no faster than FOOT_YAW_RATE_DPS."""
     ref = float(np.arctan2(body_fwd[0], body_fwd[2]))
     lim = np.radians(FOOT_YAW_LIMIT_DEG)
 
     def within_limit(yaw: float) -> float:
         return ref + float(np.clip((yaw - ref + np.pi) % (2 * np.pi) - np.pi, -lim, lim))
 
+    easing = False
     if locked_yaw is not None:
         want = within_limit(locked_yaw)  # anchored, but dragged along if the body turns past the limit
     elif confident and tracked_dir is not None and np.hypot(tracked_dir[0], tracked_dir[2]) > 1e-6:
         want = within_limit(float(np.arctan2(tracked_dir[0], tracked_dir[2])))
-    elif prev_yaw is not None:  # unsure: the foot stays put unless the body turns past the limit
-        want = within_limit(prev_yaw)
+    elif prev_yaw is not None:  # unsure: ease back toward the body's facing, dragged along past the limit
+        diff = (ref - prev_yaw + np.pi) % (2 * np.pi) - np.pi
+        want = within_limit(prev_yaw + diff * min(FOOT_UNSURE_EASE_PER_S * max(dt, 0.0), 1.0))
+        easing = True
     else:
         want = ref
     if prev_yaw is None:
         return want
     step = (want - prev_yaw + np.pi) % (2 * np.pi) - np.pi
-    # adaptive smoothing: small (noisy) changes are damped, big (real) turns go through faster
-    gain = float(np.clip(abs(step) / np.radians(FOOT_YAW_SMOOTH_DEG), FOOT_YAW_MIN_GAIN, 1.0))
+    # adaptive smoothing: small (noisy) changes are damped, big (real) turns go through faster;
+    # the unsure ease is already gradual, so it is only rate-capped
+    gain = 1.0 if easing else float(np.clip(abs(step) / np.radians(FOOT_YAW_SMOOTH_DEG), FOOT_YAW_MIN_GAIN, 1.0))
     cap = np.radians(FOOT_YAW_RATE_DPS) * max(dt, 1e-3)
     return prev_yaw + float(np.clip(gain * step, -cap, cap))
 
