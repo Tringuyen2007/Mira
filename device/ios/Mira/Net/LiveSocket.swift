@@ -165,6 +165,11 @@ final class LiveSessionStore {
     private(set) var latestEvent: SocketEvent?
     private(set) var alert: AlertMessage?
     private(set) var fallStatus: FallStatusMessage?
+    /// The most recent coaching haptic (good_rep | fix_form | set_done | check_in),
+    /// relayed to the watch by `WatchBridge`. `hapticSeq` increments on every one, even
+    /// a repeated pattern, since `haptic` itself wouldn't otherwise look "changed".
+    private(set) var haptic: HapticMessage?
+    private(set) var hapticSeq = 0
     /// The session currently in progress, from any /ws/events message's `session_id`.
     private(set) var currentSessionID: String?
     /// The whole-session AI analysis, delivered once at session end.
@@ -239,6 +244,9 @@ final class LiveSessionStore {
                     self?.alert = alert.isOpen ? alert : nil
                     if !alert.isOpen { self?.fallStatus = nil }
                 case .fallStatus(let status): self?.fallStatus = status
+                case .haptic(let haptic):
+                    self?.haptic = haptic
+                    self?.hapticSeq += 1
                 case .command(let command): self?.lastCommand = command
                 default: break
                 }
@@ -283,5 +291,11 @@ final class LiveSessionStore {
 
     func send(_ command: CommandMessage) async throws {
         try await eventSocket.send(.command(command))
+    }
+
+    /// For events the server's client allow-list accepts besides `command` — today
+    /// `hr`/`watch_button`, relayed in from `WatchBridge`.
+    func send(_ event: SocketEvent) async throws {
+        try await eventSocket.send(event)
     }
 }

@@ -98,6 +98,22 @@ struct OnboardingDraft: Codable, Equatable {
     }
 }
 
+#if !canImport(WatchConnectivity)
+/// Stand-in for the macOS `swift test` build (`MiraNetworking` excludes `Mira/Watch`,
+/// and plain macOS has no `WatchConnectivity`), with the same shape `AppState` calls.
+@MainActor
+final class WatchBridge {
+    private(set) var isPaired = false
+    private(set) var isWatchAppInstalled = false
+
+    init(liveSession: LiveSessionStore) {}
+    func activate() {}
+    func push(_ live: LiveMessage?) {}
+    func forward(haptic pattern: String) {}
+    func forward(summary: SessionSummaryMessage) {}
+}
+#endif
+
 @MainActor
 @Observable
 final class AppState {
@@ -135,6 +151,7 @@ final class AppState {
     }
     let liveSession = LiveSessionStore()
     let store = PatientStore()
+    let watch: WatchBridge
     private(set) var serverAddress: String
     private(set) var connectionEnabled: Bool
     private(set) var restStatus: String?
@@ -162,8 +179,10 @@ final class AppState {
 
     var isPaired: Bool { token != nil }
     var isLinked: Bool { patientID != nil && isPaired }
-    /// Placeholder until Plan 4 wires up real Apple Watch pairing.
-    var watchPaired: Bool { false }
+    /// Whether an Apple Watch is paired with this iPhone and has the Mira watch app
+    /// installed (not whether it's currently reachable — the toggle should stay on
+    /// even while the watch is locked or out of Bluetooth range).
+    var watchPaired: Bool { watch.isPaired && watch.isWatchAppInstalled }
 
     static let demoServerAddress = "http://45.76.255.253:8000"
     private static var defaultServerAddress: String {
@@ -191,8 +210,52 @@ final class AppState {
         tokenHint = token.map(PairingToken.masked)
         // Note: patientID's didSet isn't called from init, which is what we want.
         patientID = defaults.string(forKey: "patientID.v1")
+        watch = WatchBridge(liveSession: liveSession)
         liveSession.onMessageEvent = { [store] event in store.appendIncoming(event) }
         liveSession.onSessionSummary = { [weak self] _ in Task { await self?.refreshMe() } }
+        #if canImport(WatchConnectivity)
+        watch.activate()
+        #endif
+        trackLiveForWatch()
+        trackHapticForWatch()
+        trackSummaryForWatch()
+    }
+
+    // MARK: Watch relay (Plan 4)
+
+    /// Re-arming `withObservationTracking` loops: each tracks exactly one
+    /// `liveSession` property, so a `live` update never re-sends the last haptic
+    /// (and vice versa). `AppState` itself stays the single place that knows both
+    /// "what changed" and "the watch cares" — `LiveSessionStore` doesn't know
+    /// `WatchBridge` exists, and `WatchBridge` doesn't know when to look.
+    private func trackLiveForWatch() {
+        withObservationTracking({ _ = liveSession.live }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.watch.push(self.liveSession.live)
+                self.trackLiveForWatch()
+            }
+        })
+    }
+
+    private func trackHapticForWatch() {
+        withObservationTracking({ _ = liveSession.hapticSeq }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let haptic = self.liveSession.haptic { self.watch.forward(haptic: haptic.pattern) }
+                self.trackHapticForWatch()
+            }
+        })
+    }
+
+    private func trackSummaryForWatch() {
+        withObservationTracking({ _ = liveSession.sessionSummary }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let summary = self.liveSession.sessionSummary { self.watch.forward(summary: summary) }
+                self.trackSummaryForWatch()
+            }
+        })
     }
 
     func advanceOnboarding() {
