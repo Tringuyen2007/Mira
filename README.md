@@ -59,12 +59,56 @@ Mira LCD kiosk connect with a least-privilege token instead of the full API one 
 [device/kiosk/README.md](device/kiosk/README.md).
 Use `make ... VENV=/path/to/venv` if your virtual environment lives elsewhere.
 
+## Remote vision agent (Vultr + camera laptop)
+
+For deployment, run the FastAPI server on Vultr and the camera/OpenVINO process on the computer physically
+attached to the camera. Set `MIRA_SOURCE=remote` and give the server a unique `MIRA_VISION_TOKEN` (at least 24
+characters, different from the API and LCD tokens). The agent makes one outbound secure WebSocket connection:
+
+```text
+wss://<your-mira-host>/ws/vision?token=<MIRA_VISION_TOKEN>
+```
+
+It sends the same JSON frames and events that `vision.Engine(emit=...)` emits today (`server/samples/engine_frame.json`)
+and listens on that same socket for the existing reverse-channel messages (`command`, `incident_closed`, and
+`end_set_early`);
+the server publishes them unchanged to `/ws/pose`, `/ws/live` and `/ws/events`. This means the iPhone and therapist
+dashboard receive the live skeleton without a camera, raw video, or an open inbound port on the laptop. Keep the
+laptop awake and connected to the camera during a session. The endpoint deliberately accepts no phone commands;
+session controls remain on the existing authenticated `/ws/events` channel.
+
+For the therapist's side-by-side camera footage and Eric's 3D body mesh, use the companion WebRTC media contract in
+[`docs/vision-media-contract.md`](docs/vision-media-contract.md). Video uses WHIP/WHEP; `/ws/vision` remains pose and
+mesh-control data only. `MIRA_WHEP_URL` is intentionally unset by default, so no raw camera video is exposed until
+the authenticated media relay is deployed.
+
+For recorded clips and patient sharing, follow [`docs/video-storage-design.md`](docs/video-storage-design.md): media
+lives in private object storage; Tiger/Timescale stores its searchable timeline, consent, share state and expiry only.
+
 The tests never read your `.env` (`server/tests/conftest.py` sets `MIRA_SKIP_DOTENV=1` before importing the
 config), never call Gemini, ElevenLabs or Retell, and never touch Tiger Cloud.
 
 ## Database (Tiger Data / TimescaleDB)
 
 The server runs without a database; set `TIGER_DSN` to persist frames, sessions, reps and alerts.
+
+### Rep-counting training data
+
+The MVP is pose-first and **never stores video**.  The curated source registry in
+[`data/training/exercise_datasets.json`](data/training/exercise_datasets.json) covers the squat, lunge and
+straight-leg-raise demo.  It records source licensing and pose/rep-label availability only; its current external
+sources need license approval, so the project neither downloads nor trains on them automatically.  Validate it with
+`./.venv/bin/python -m server.agents.training_data --check`; after a source is approved, register its provenance in
+Tiger with `./.venv/bin/python -m server.agents.training_data --dsn "$TIGER_DSN"`.
+
+`server/agents/rep_counter.py` is the deterministic low → peak → low counter that the vision service can call before
+emitting the existing `rep {index, set, quality}` event.  It ships profiles for `squat`, `lunge`, and
+`straight_leg_raise`; it does not alter the Coach or the LCD contract.
+
+`server/agents/rep_pipeline.py` is the ready-to-wire quality gate.  For every pose frame, the vision service calls
+`CorrectRepPipeline.observe(session_id, set_no, exercise_id, angle, timestamp, confidence, form_quality, flags)`.
+It emits the existing LCD-compatible `rep` event only after a full cycle where form is `good`; a poor or
+low-confidence cycle yields `rep_attempt` for feedback/analytics and does **not** increment the displayed count.
 Every setup step is a script, so a database is rebuilt, never restored from a dump.
 
 ### Local (Docker)
@@ -226,6 +270,9 @@ Example payloads for every WebSocket message and REST response are in `server/sa
 
 ## For the therapist dashboard
 
+See `device/dashboard/README.md` for how to run, sign in and test the dashboard itself (screen → endpoint
+table, Mira Assistant, capability-gated features, security rules). This section covers the server side.
+
 Victoria's dashboard lives in `device/dashboard/` and is served by this server at `/dashboard/` (static files,
 `index.html` as the entry point; nothing is mounted while the folder is empty). It can also run on its own dev
 server (e.g. Vite on `http://localhost:5173`): CORS allows any origin, and the token is still required.
@@ -239,10 +286,16 @@ token (prompt, local config) is the dashboard's choice; never commit it.
 | Patients | `GET /patients`, `GET /patients/{id}` (`rest_get_patients`, `rest_get_patient`) |
 | Progress | `GET /patients/{id}/progress?exercise_id=&days=90` (`rest_get_patient_progress`) |
 | Sessions, replay | `GET /sessions/{id}`; `GET /sessions/{id}/frames?downsample=300` (knee curve) or `downsample=0` (full frames, page with `t0=<next_t0>`) (`rest_get_session`, `rest_get_session_frames_*`) |
+| Progress note | `POST /sessions/{id}/progress-note {therapist_id, text}` — approve the session's AI-drafted progress note, optionally edited first (403 if the patient belongs to another therapist); `GET /sessions/{id}/progress-note` reads the latest approval back, with an `edited` flag (`rest_post_progress_note`, `rest_get_progress_note`) |
 | Alerts | `GET /alerts?open=true`, `POST /alerts/{id}/resolve {resolved_by, note?}` (`rest_get_alerts`, `rest_post_alert_resolve`) |
 | Plan proposals | `GET /proposals?status=pending&patient_id=`, `POST /proposals/{id}/approve {therapist_id}`, `/edit {therapist_id, change}`, `/dismiss {therapist_id, reason?}` (409 if already decided) (`rest_get_proposals`, `rest_post_proposal_approve`, `rest_error_409_proposal`) |
+| Caseload | `GET /caseload?therapist_id=` — triaged caseload (needs_you/watch/on_track, with a one-line reason and evidence) plus today's session count and the live session, if any (`rest_get_caseload`) |
+| Therapist Memory | `GET /patients/{id}/memory?days=21` — unacknowledged and acknowledged `memory_events`, newest first, without Insight's `investigation` (`rest_get_patient_memory`) |
+| Session history | `GET /patients/{id}/session-history?exercise_id=&limit=200` — finished sessions `{id, started_at, exercise_id, reps_done}`, newest first, limit 1..200; 404 unknown patient — Time-lapse date pickers (`rest_get_patient_session_history`) |
 | Prescriptions | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}` (`rest_get_prescriptions`, `rest_put_prescriptions`) |
+| Heart-rate limit | `PATCH /patients/{id}/limits {therapist_id, hr_limit: 40..220}` — Prescribe screen; 404 unknown patient, 403 if the patient belongs to another therapist; records `agent_actions(agent="therapist", action="hr_limit_set", detail={from, to, by})` (`rest_patch_patient_limits`) |
 | Copilot | `POST /copilot/ask {question, patient_id?}` (`rest_post_copilot_ask`) |
+| Mira Assistant | `POST /copilot/ask {question, patient_id?, context?: [{question, answer}] ≤ 3}` for follow-ups; every answer carries `drafts: [{patient_id, text}]` (never sent); `POST /copilot/review/{patient_id}` — one-click patient review, same answer shape, may leave one pending proposal (404 unknown patient, 503 without the database) (`rest_post_copilot_ask`, `rest_post_copilot_review`) |
 | Notifications | `GET /notifications?unread=&limit=&since_id=&therapist_id=`, `GET /notifications/count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `POST /notifications/{id}/ack {therapist_id}` (see "Dashboard notifications") |
 | Health | `GET /health` (public), `GET /health/data`, `GET /stats` (`rest_get_health*`, `rest_get_stats`) |
 
@@ -250,6 +303,23 @@ WebSockets: `/ws/events` (alerts, proposals, session events; `ws_events_*`), `/w
 (replay + live; `ws_notifications_message`), `/ws/live` (`ws_live`), `/ws/pose` (`ws_pose`, 25 Hz). Every channel
 sends `{"type":"ping"}` after 10 s of silence; ignore it. History routes need the database (503 with
 `DB_DISABLED=1`; `rest_error_503`).
+
+### Form-rule thresholds (`rule_overrides`)
+
+Each row of `prescriptions.rule_overrides` (jsonb, set via `PUT /prescriptions/{patient_id}`) can carry
+per-exercise overrides of the thresholds that decide when a rep gets flagged. No server code reads these yet
+(the engine's form rules are still fixed defaults) — this is the contract the vision engine should read
+against once it does, and it's what the Prescribe screen's "When should Mira flag a rep?" card edits today.
+
+| Key | Meaning | Default | Dashboard UI |
+|---|---|---|---|
+| `weight_shift_pct` | How many percentage points below 50% the affected leg's load share can drop before a rep is flagged `weight_shift` (mirrors `device/dashboard/js/screens/patient/model.js`'s `DEFAULT_WEIGHT_SHIFT_THRESHOLD`) | 15 | slider, 0-50%, step 1 |
+| `knee_cave_deg` | How many degrees of inward knee drift (valgus) before a rep is flagged `knee_cave_l`/`knee_cave_r` | 10° | slider, 0-45°, step 1 |
+| `trunk_lean_deg` | How many degrees of trunk lean before a rep is flagged `trunk_lean` | 20° | slider, 0-45°, step 1 |
+
+An absent key means "use the default" everywhere a reader checks it (never `null` meaning "disabled") — see
+`device/dashboard/js/screens/prescribe/model.js`'s `DEFAULT_WEIGHT_SHIFT_PCT`/`DEFAULT_KNEE_CAVE_DEG`/
+`DEFAULT_TRUNK_LEAN_DEG` and `patient/model.js`'s existing read of `weight_shift_pct`.
 
 Desktop pop-ups (browser Notification API) only work in a secure context: open the dashboard at
 `http://localhost:8000/dashboard/` on the server laptop (or over HTTPS). On another machine via
@@ -563,7 +633,11 @@ reps", and the AI `spoken` line (captioned and voiced the same way as every othe
 
 ## Care Copilot (therapist Q&A, plan proposals)
 
-`POST /copilot/ask {question, patient_id?}` → `{answer, charts[], sql[], evidence[], cached, proposals[], fallback}`.
+`POST /copilot/ask {question, patient_id?}` → `{answer, charts[], sql[], evidence[], cached, proposals[], drafts[], fallback}`.
+Follow-ups send `context: [{question ≤ 500, answer ≤ 1200}]` (at most 3 earlier turns, 422 beyond): it reaches the
+model as one labelled, line-prefixed block before the question, and its numbers never count as evidence (the model
+re-queries). `drafts: [{patient_id, text}]` lists the `draft_message` drafts of the run (saved, never sent).
+`POST /copilot/review/{patient_id}` runs the weekly review for one patient and returns the same shape.
 The Copilot (`server/agents/copilot.py`) runs up to 5 Gemini steps (`GEMINI_MODEL_SMART` + fallbacks, 8 s each)
 with five tools: `run_sql` (checked by `server/agents/sql_guard.py`: one SELECT on progress_v, sessions, reps,
 form_events, memory_events, patients or prescriptions, blocked functions, LIMIT ≤ 200, then run as the read-only

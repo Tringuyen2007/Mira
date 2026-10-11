@@ -1,0 +1,31 @@
+[
+  {
+    "id": "rehab24-6-v1",
+    "name": "REHAB24-6: A multi-modal dataset of physical rehabilitation exercises",
+    "source_url": "https://doi.org/10.5281/zenodo.13305826",
+    "license": "Academic or non-profit non-commercial research use only; commercial use requires permission.",
+    "approval": "license_review_required",
+    "raw_media_allowed": false,
+    "pose_format": "30 FPS 3D skeleton joints with repetition start/end frames and binary correctness labels",
+    "exercises": [
+      {"exercise_id": "squat", "source_label": "Ex6", "rep_labels": true},
+      {"exercise_id": "lunge", "source_label": "Ex5 Leg lunge", "rep_labels": true}
+    ],
+    "notes": "Use only 3D joints and segmentation after the license is approved. Do not ingest videos into Mira."
+  },
+  {
+    "id": "flag3d-cvpr-2023",
+    "name": "FLAG3D: A 3D Fitness Activity Dataset with Language Instruction",
+    "source_url": "https://andytang15.github.io/FLAG3D/",
+    "license": "Dataset access requires a signed license agreement from the rights holders.",
+    "approval": "license_review_required",
+    "raw_media_allowed": false,
+    "pose_format": "3D motion-capture skeleton sequences with activity and language labels",
+    "exercises": [
+      {"exercise_id": "straight_leg_raise", "source_label": "Lying Alternate Upper-half Leg Raise", "rep_labels": false},
+      {"exercise_id": "squat", "source_label": "Squat With Alternate Knee Lift", "rep_labels": false},
+      {"exercise_id": "lunge", "source_label": "Left Leg Lunge With Knee Lift", "rep_labels": false}
+    ],
+    "notes": "After approval, annotate rep boundaries on pose-only derivatives; do not ingest FLAG3D video."
+  }
+]

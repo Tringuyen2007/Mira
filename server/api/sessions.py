@@ -82,6 +82,11 @@ async def start_session(body: SessionIn | None = None,
     if registry.current is not None:
         await registry.stop(registry.current.session_id)
     session = await registry.start(body.patient_id, body.exercise_id)
+    # A remote camera may be online for setup, but it is not allowed to start inference until this patient action.
+    # Dashboard/ops starts intentionally do not arm it; the patient-scoped iOS call is the privacy boundary.
+    if cfg.MIRA_SOURCE == "remote" and principal.scope == "patient":
+        state.bridge.send_to_engine({"type": "command", "name": "start", "payload": {"source": "ios"},
+                                     "session_id": session.session_id})
     return {"session_id": session.session_id, "patient_id": session.patient_id,
             "exercise_id": session.exercise_id, "started_at": session.started_at,
             "first_name": session.profile.first_name}

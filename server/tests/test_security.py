@@ -13,6 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from server.config import PLACEHOLDER_TOKEN
 from server.security import MAX_WEBHOOK_BYTES, require_principal, require_token
+from server.state import get_state
 from server.tests.conftest import AUTH, TOKEN
 
 TUNNEL = "mira-test.trycloudflare.com"
@@ -67,6 +68,27 @@ def test_ws_with_token_receives_data(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/pose?token={TOKEN}") as ws:
         msg = ws.receive_json()
     assert set(msg) == {"t", "joints", "confidence", "load_l_pct", "flags"}
+
+
+def test_remote_vision_agent_fans_pose_to_dashboard(make_client: Callable[..., TestClient]) -> None:
+    vision_token = "vision-token-0123456789abcdef"
+    client = make_client(MIRA_SOURCE="remote", MIRA_VISION_TOKEN=vision_token)
+    started = client.post("/sessions", headers=AUTH).json()
+    get_state().bridge.send_to_engine({"type": "command", "name": "start", "session_id": started["session_id"]})
+    frame = {"type": "frame", "seq": 1, "t": time.time(), "joints": [[0, 0, 0]] * 33,
+             "confidence": [1] * 33, "flags": [], "load_l_pct": 50}
+    with client.websocket_connect(f"/ws/pose?token={TOKEN}") as pose, \
+            client.websocket_connect(f"/ws/vision?token={vision_token}") as vision:
+        vision.send_json(frame)
+        assert pose.receive_json()["joints"] == frame["joints"]
+
+
+def test_remote_vision_rejects_api_token(make_client: Callable[..., TestClient]) -> None:
+    client = make_client(MIRA_VISION_TOKEN="vision-token-0123456789abcdef")
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws/vision?token={TOKEN}"):
+            pass
+    assert exc.value.code == 1008
 
 
 def test_tunnel_host_blocked_except_webhook(make_client: Callable[..., TestClient]) -> None:
@@ -245,3 +267,21 @@ def test_cors_allows_separately_hosted_dashboard_but_token_still_required(client
     resp = client.get("/stats", headers={"Origin": origin})
     assert resp.status_code == 401
     assert client.get("/stats", headers={"Origin": origin, **AUTH}).status_code == 200
+
+
+def test_dashboard_served_without_its_tests_dev_or_readme(make_client: Callable[..., TestClient],
+                                                          monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from server import main
+
+    dash = tmp_path / "device" / "dashboard"
+    for rel, body in {"index.html": "<h1>dashboard</h1>", "dev/fixtures.html": "<h1>dev</h1>",
+                      "tests/router.test.mjs": "// test", "README.md": "# notes"}.items():
+        (dash / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dash / rel).write_text(body)
+    monkeypatch.setattr(main, "STATIC_PAGES", {"dashboard": dash, "device": tmp_path / "device" / "kiosk"})
+    client = make_client()
+    resp = client.get("/dashboard/")
+    assert resp.status_code == 200 and "dashboard" in resp.text
+    assert client.get("/dashboard/dev/fixtures.html").status_code == 404
+    assert client.get("/dashboard/tests/router.test.mjs").status_code == 404
+    assert client.get("/dashboard/README.md").status_code == 404

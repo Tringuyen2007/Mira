@@ -563,6 +563,13 @@ class LiveSource:
         Engine(emit=emit, inbox=inbox).run(stop)
 
 
+class RemoteSource:
+    """A remote vision agent delivers frames through ``/ws/vision`` instead of being imported here."""
+
+    def run(self, emit: Emit, inbox: Inbox, stop: StopFlag) -> None:  # noqa: ARG002 - bridge owns ingress
+        stop.wait()
+
+
 def _drain_ignore(inbox: Inbox) -> None:
     while True:
         try:
@@ -581,7 +588,9 @@ def make_source(spec: SourceSpec) -> Source:
         return ReplaySource(Path(name.removeprefix("replay:")), speed=spec.speed)
     if name == "live":
         return LiveSource()
-    raise ValueError(f"unknown MIRA_SOURCE {name!r} (mock | mock:fall | replay:<file> | live)")
+    if name == "remote":
+        return RemoteSource()
+    raise ValueError(f"unknown MIRA_SOURCE {name!r} (mock | mock:fall | replay:<file> | live | remote)")
 
 
 def _process_main(spec: SourceSpec, out_q: Any, in_q: Any, stop: Any) -> None:
@@ -831,6 +840,9 @@ class EngineBridge:
         self._reader: threading.Thread | None = None
         self._fall_injector: asyncio.Task[None] | None = None
         self._fall_injector_closed: asyncio.Event | None = None
+        self._remote_sender: Callable[[Message], Awaitable[None]] | None = None
+        # A connected camera is deliberately inert until the patient's phone starts its session.
+        self._remote_active_session_id: str | None = None
 
         self._last_seq: int | None = None
         self._inject_seq = 0
@@ -950,13 +962,46 @@ class EngineBridge:
             msg["seq"] = self._inject_seq
         self._route(msg)
 
+    def ingest_remote(self, msg: Message) -> None:
+        """Route one authenticated remote-agent message through the normal engine pipeline.
+
+        Remote frames are ignored while idle. This prevents a camera that is merely connected from collecting or
+        displaying movement before the patient starts a session in the iOS app.
+        """
+        if self.source == "remote":
+            active = self._remote_active_session_id
+            current = self.session_provider() if self.session_provider else None
+            if active is None or current != active:
+                return
+            supplied = msg.get("session_id")
+            if supplied is not None and supplied != active:
+                return
+        self._on_engine_msg(dict(msg))
+        if self.source == "remote" and msg.get("type") == "stopped":
+            self._remote_active_session_id = None
+
+    def set_remote_sender(self, sender: Callable[[Message], Awaitable[None]] | None) -> None:
+        """Attach the currently connected remote agent's reverse channel (one agent at a time)."""
+        self._remote_sender = sender
+
+    def clear_remote_sender(self, sender: Callable[[Message], Awaitable[None]]) -> None:
+        """Detach only if this connection is still the active reverse channel."""
+        if self._remote_sender is sender:
+            self._remote_sender = None
+
     def send_to_engine(self, msg: Message) -> None:
         """Reverse channel to the engine, e.g. {"type": "incident_closed"}."""
         if msg.get("type") == INCIDENT_CLOSED:
             self.live.on_event(msg)
             if self._fall_injector_closed is not None:
                 self._fall_injector_closed.set()
-        if self._inbox is not None and self._running:
+        if self.source == "remote" and msg.get("type") == "command" and msg.get("name") == "start":
+            session_id = msg.get("session_id")
+            if isinstance(session_id, str):
+                self._remote_active_session_id = session_id
+        if self._remote_sender is not None:
+            self.loop.create_task(self._remote_sender(dict(msg)), name="remote-vision-command")
+        elif self._inbox is not None and self._running:
             self._inbox.put_nowait(msg)
 
     def notify_session_start(self, patient_id: str) -> None:

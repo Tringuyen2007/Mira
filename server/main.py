@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import secrets
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -32,6 +33,7 @@ from server.api import care as care_api
 from server.api import me as me_api
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
+from server.api import dashboard
 from server.api import insight as insight_api
 from server.api import pair as pair_api
 from server.api import proposals
@@ -86,8 +88,8 @@ class MultiDirStaticFiles(StaticFiles):
 
 
 class KioskStaticFiles(StaticFiles):
-    """The LCD page, minus what only developers need: the kiosk's dev/ preview, its tests/ and READMEs are
-    never served on the origin that holds the device token. Compared case-insensitively (macOS volumes)."""
+    """Static pages minus what only developers need: dev/, tests/ and READMEs are never served.
+    Compared case-insensitively (macOS volumes)."""
 
     HIDDEN_DIRS = frozenset({"dev", "tests"})
 
@@ -112,7 +114,7 @@ def _last_set_enabled(c: Config) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    problem = cfg.token_problem() or cfg.device_token_problem() or cfg.lcd_link_problem()
+    problem = cfg.token_problem() or cfg.device_token_problem() or cfg.vision_token_problem() or cfg.lcd_link_problem()
     if problem:
         raise RuntimeError(f"{problem}; refusing to start. Generate one with: "
                            "python -c \"import secrets;print(secrets.token_urlsafe(32))\"")
@@ -379,6 +381,40 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
             devices.disconnected()
 
 
+async def _serve_vision_ws(ws: WebSocket) -> None:
+    """Authenticated ingress for an outbound remote vision-agent connection.
+
+    The laptop dials Vultr, so it needs no public address or router port-forwarding.  Messages are the existing
+    vision.Engine frame/event contract and therefore reach persistence, safety and every UI stream unchanged.
+    """
+    from starlette.websockets import WebSocketDisconnect
+
+    token = ws.query_params.get("token", "")
+    if not cfg.MIRA_VISION_TOKEN or not secrets.compare_digest(token, cfg.MIRA_VISION_TOKEN):
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    limiter = RateLimiter(60.0)
+    bridge = get_state().bridge
+
+    async def send_command(msg: dict[str, Any]) -> None:
+        await ws.send_json(msg)
+
+    bridge.set_remote_sender(send_command)
+    try:
+        while True:
+            msg = await ws.receive_json()
+            if (not limiter.allow() or not isinstance(msg, dict) or len(msg) > MAX_CLIENT_MSG_KEYS
+                    or not isinstance(msg.get("type"), str) or len(msg["type"]) > 64):
+                continue
+            bridge.ingest_remote(msg)
+    except WebSocketDisconnect:
+        return
+    finally:
+        # Do not clear a newer reconnect that replaced this socket while this handler was unwinding.
+        bridge.clear_remote_sender(send_command)
+
+
 def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
     """Per-client hub filter: a phone sees frames and events for its own patient, even after the session that
     produced them has ended (e.g. the analyst's `session_summary`, emitted ~2s after `stop()` already cleared
@@ -449,7 +485,7 @@ def _mount_static(app: FastAPI) -> None:
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
     for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
-            static_cls = KioskStaticFiles if name == "device" else StaticFiles
+            static_cls = KioskStaticFiles if name in ("device", "dashboard") else StaticFiles
             app.mount(f"/{name}", static_cls(directory=directory, html=True), name=name)
 
 
@@ -465,7 +501,7 @@ def create_app() -> FastAPI:
         app.include_router(module.router, dependencies=[Depends(require_principal)])
     for module in (calibration, alerts, notifications_api, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
-    for module in (copilot_api, proposals):
+    for module in (copilot_api, proposals, dashboard):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token
@@ -498,6 +534,10 @@ def create_app() -> FastAPI:
             await ws.close(code=1011)
             return
         await service.serve(ws, since_id=since_id, therapist_id=therapist_id)
+
+    @app.websocket("/ws/vision")
+    async def ws_vision(ws: WebSocket) -> None:
+        await _serve_vision_ws(ws)
 
     _mount_static(app)
     return app

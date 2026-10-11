@@ -1,0 +1,56 @@
+/* Sign-in card (Figma sign-in frame): centered on the aurora canvas, matches .card look. */
+
+.signin__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 360px;
+  background: var(--color-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-8) var(--space-6);
+}
+
+.signin__title {
+  font-size: var(--text-card-title);
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+
+.signin__label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--color-ink-soft);
+}
+
+.signin__form input {
+  height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-line);
+  font-size: var(--text-body);
+  font-family: var(--font);
+  color: var(--color-ink);
+  background: var(--color-card);
+}
+
+.signin__form input:focus-visible {
+  border-color: var(--color-accent);
+}
+
+.signin__error {
+  min-height: 1.2em;
+  color: var(--color-alert-text);
+  font-size: var(--text-meta);
+}
+
+.signin__form button[type="submit"] {
+  margin-top: var(--space-2);
+}
+
+.signin__hint {
+  margin-top: var(--space-2);
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  text-align: center;
+}
