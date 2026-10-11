@@ -39,6 +39,8 @@ if ! grep -q '^MIRA_DEVICE_TOKEN=.\+' $APP/.env; then
   echo "MIRA_DEVICE_TOKEN=\$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> $APP/.env
   echo "generated MIRA_DEVICE_TOKEN in $APP/.env"
 fi
+# Idempotent schema migrations (server/db/migrations) against the box's TIGER_DSN (read from its .env).
+(cd $APP && sudo -u mira $APP/.venv/bin/python -m server.db.migrate) || echo "WARNING: migrations failed; the server will retry at start"
 systemctl restart mira
 for i in \$(seq 1 20); do curl -fsS http://127.0.0.1:8000/health >/dev/null && break; sleep 1; done
 curl -fsS http://127.0.0.1:8000/health; echo

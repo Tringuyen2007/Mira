@@ -7,23 +7,29 @@ CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;
 CREATE TABLE therapists (
   id    text PRIMARY KEY,
   name  text NOT NULL,
-  phone text                                  -- E.164, e.g. +17135550100
+  phone text,                                 -- E.164, e.g. +17135550100
+  clinic text
 );
 
 CREATE TABLE patients (
-  id                       text PRIMARY KEY,
-  name                     text NOT NULL,
-  age                      int,
-  height_cm                real,
-  mass_kg                  real,
-  affected_side            text CHECK (affected_side IN ('left','right','none')),
-  condition                text,
-  therapist_id             text REFERENCES therapists(id),
-  emergency_contact_name   text,
-  emergency_contact_phone  text,
-  hr_limit                 int DEFAULT 130,
-  simulated                boolean NOT NULL DEFAULT false,
-  created_at               timestamptz NOT NULL DEFAULT now()
+  id                               text PRIMARY KEY,
+  name                             text NOT NULL,
+  age                              int,
+  height_cm                        real,
+  mass_kg                          real,
+  affected_side                    text CHECK (affected_side IN ('left','right','none')),
+  condition                        text,
+  therapist_id                     text REFERENCES therapists(id),
+  emergency_contact_name           text,
+  emergency_contact_phone          text,
+  emergency_contact_relationship   text,
+  alert_therapist                  boolean NOT NULL DEFAULT true,
+  next_visit_at                    timestamptz,
+  share_by_default                 boolean NOT NULL DEFAULT false,
+  device_prefs                     jsonb NOT NULL DEFAULT '{}',
+  hr_limit                         int DEFAULT 130,
+  simulated                        boolean NOT NULL DEFAULT false,
+  created_at                       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE prescriptions (               -- versioned: never UPDATE a row, insert a new version
@@ -173,3 +179,29 @@ ALTER TABLE pose_frames SET (
   timescaledb.segmentby = 'patient_id, session_id',
   timescaledb.orderby   = 'time'
 );
+
+-- Plan 1 (2026-10-11): patient identity. Mirrors db/migrations/001_patient_identity.sql.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  name        text PRIMARY KEY,
+  applied_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pairing_codes (
+  code          text PRIMARY KEY,                       -- 6 chars A-Z0-9 (no 0/O/1/I), upper case
+  patient_id    text NOT NULL REFERENCES patients(id),
+  therapist_id  text REFERENCES therapists(id),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  expires_at    timestamptz,                            -- NULL = never (demo code)
+  used_at       timestamptz,
+  reusable      boolean NOT NULL DEFAULT false          -- the demo code can pair many phones
+);
+
+CREATE TABLE IF NOT EXISTS patient_devices (
+  token_hash    text PRIMARY KEY,                       -- sha256 hex of the bearer token (never the token)
+  patient_id    text NOT NULL REFERENCES patients(id),
+  device_name   text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  last_seen     timestamptz,
+  revoked_at    timestamptz
+);
+CREATE INDEX IF NOT EXISTS patient_devices_patient_idx ON patient_devices (patient_id);

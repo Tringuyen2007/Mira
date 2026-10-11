@@ -54,6 +54,7 @@ class Config:
     TIGER_DSN: str | None = None
     COPILOT_DSN: str | None = None
     DB_DISABLED: bool = False
+    DB_AUTO_MIGRATE: bool = True  # apply server/db/migrations/*.sql (idempotent) at server start
 
     GEMINI_API_KEY: str | None = None
     GEMINI_API_KEYS: str = ""  # extra keys, comma-separated: used in turn when one hits its daily quota

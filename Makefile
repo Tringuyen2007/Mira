@@ -10,7 +10,7 @@ DB_LOCAL_DSN ?= postgresql://postgres:mira@localhost:$(DB_LOCAL_PORT)/mira
 # (server/tests/dbutil.py), so a local COPILOT_DSN with it keeps working after `make test`. Never the Tiger one.
 LOCAL_RO_PASSWORD ?= mira-local-ro
 
-.PHONY: run test db-local db-setup evals demo-data
+.PHONY: run test db-local db-setup db-migrate evals demo-data
 
 # Exactly one server process: the hub, Guardian timers and ring buffer live in memory (TRI.md §3.1).
 run:
@@ -29,6 +29,11 @@ db-local:
 db-setup:
 	@test -n "$(DSN)" || (echo 'usage: make db-setup DSN="postgres://..."'; exit 2)
 	@$(PY) -m server.db.setup --dsn "$(DSN)"
+
+# Apply idempotent migrations (server/db/migrations) to any DSN. The server also does this at start (DB_AUTO_MIGRATE=1).
+db-migrate:
+	@test -n "$(DSN)" || (echo 'usage: make db-migrate DSN="postgres://..."'; exit 2)
+	@$(PY) -m server.db.migrate --dsn "$(DSN)"
 
 # Care Copilot evals (not part of `make test`): MIRA_EVAL_DSN / MIRA_EVAL_RO_DSN, GEMINI_MODE=fake|live.
 evals:

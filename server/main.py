@@ -33,7 +33,7 @@ from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
 from server.config import REPO_ROOT, cfg
-from server.db import queries
+from server.db import migrate, queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
@@ -103,6 +103,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if cfg.TIGER_DSN and not cfg.DB_DISABLED:
         db = Database(cfg.TIGER_DSN, cfg.COPILOT_DSN)
         await db.open()
+        if cfg.DB_AUTO_MIGRATE and db.available:
+            try:
+                applied = await asyncio.to_thread(migrate.apply_migrations, cfg.TIGER_DSN)
+                log.info("migrations checked", extra={"count": len(applied)})
+            except Exception as exc:  # noqa: BLE001 - a schema hiccup must never block the live demo
+                log.warning("migrations failed; continuing", extra={"error": str(exc)})
         await _warn_on_stale_grants(db)
         persistence = SessionPersistence(db)
     sessions = SessionRegistry(store=persistence)
