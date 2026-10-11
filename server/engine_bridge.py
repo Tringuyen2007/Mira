@@ -45,6 +45,7 @@ LAG_INTERVAL_S = 0.1
 LAG_WINDOW = 600  # samples: 60 s at one sample per 0.1 s
 LAG_WARN_P95_MS = 50.0
 FALL_STATUS_EVERY_S = 2.0
+STREAMING_WINDOW_S = 2.0  # LiveState.streaming: frames seen this recently mean the camera is live
 MOCK_FALL_AT_S = 20.0
 MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
 MOCK_GREETING_HOLD_S = 3.0  # simulated seconds between arrived and awaiting_gesture (the LCD greeting shows)
@@ -765,6 +766,13 @@ class LiveState:
     exercise_name: str | None = None
     incident: bool = False
     device_prefs: dict[str, Any] = field(default_factory=dict)  # captions/volume/slower_speech (Plan 3 §6.5)
+    last_frame_at: float | None = None  # monotonic; a remote camera is "streaming" while frames keep arriving
+
+    @property
+    def streaming(self) -> bool:
+        """Frames arrived in the last STREAMING_WINDOW_S: the camera is live even before the engine says `arrived`
+        (one-camera body still measuring), so the dashboard can show the room and the video."""
+        return self.last_frame_at is not None and time.monotonic() - self.last_frame_at < STREAMING_WINDOW_S
 
     def on_session_start(self, first_name: str, exercise_id: str, device_prefs: dict[str, Any] | None = None) -> None:
         self.first_name = first_name
@@ -807,6 +815,7 @@ class LiveState:
                 self.incident = False
 
     def on_frame(self, frame: Message) -> None:
+        self.last_frame_at = time.monotonic()
         self.exercise_id = frame.get("exercise_id", self.exercise_id)
         if not exercises.is_watch_exercise(self.exercise_id):  # rotation exercises: the watch's turn is the angle
             angles = frame.get("angles") or {}
@@ -858,7 +867,7 @@ class LiveState:
                 "load_conf": self.load_conf, "hr": self.hr, "flags": self.flags, "cue_id": self.cue_id,
                 "paused": self.paused, "caption": self.caption, "first_name": self.first_name,
                 "exercise_name": self.exercise_name, "incident": self.incident,
-                "device_prefs": self.device_prefs}
+                "device_prefs": self.device_prefs, "streaming": self.streaming}
 
 
 @dataclass(eq=False)

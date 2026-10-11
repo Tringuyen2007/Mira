@@ -58,7 +58,7 @@ export const screen = {
       if (unsubWatch) return;
       const wantFirst = waitingFor ? firstName(waitingFor.name) : null;
       unsubWatch = ctx.sockets.subscribe("live", (msg) => {
-        if (!alive || !msg || IDLE_PHASES.has(msg.phase)) return;
+        if (!alive || !msg || (IDLE_PHASES.has(msg.phase) && !msg.streaming)) return;
         if (wantFirst && msg.first_name && msg.first_name !== wantFirst) return;
         if (Date.now() - lastRecheckAt < RECHECK_MIN_MS) return;
         lastRecheckAt = Date.now();
