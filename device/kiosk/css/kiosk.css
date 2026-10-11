@@ -1,0 +1,618 @@
+/* Mira LCD: a fixed 1024×600 stage. Every position/size below is taken from the Figma "LCD Hi-Fi" frames
+   (Greeting 24:232, Awaiting Gesture 35:163, Countdown 35:232, Cue 36:163, Rep 36:227, Paused 36:296,
+   Set Done 37:242, Fall Alert 37:321). Runtime rules for the Pi 4: no filter/blur, animate only
+   transform and opacity, soft glows are gradients or plain box-shadows that never animate. */
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--color-canvas);
+  overflow: hidden;
+  cursor: none;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  /* Inter 4 has an optical-size axis; Figma renders every size with the text cut, so pin it there */
+  font-optical-sizing: none;
+  font-variation-settings: "opsz" 14;
+  text-rendering: optimizeLegibility;
+}
+
+[hidden] { display: none !important; }
+
+p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
+
+/* ---------- Stage ---------- */
+
+#stage {
+  position: absolute;
+  width: 1024px;
+  height: 600px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(var(--stage-scale, 1));
+  transform-origin: center;
+  overflow: hidden;
+  /* "Aurora": the frames' radial gradient (in the "Halos & orbit" group), ellipse 512×300 at the centre */
+  background: radial-gradient(ellipse 512px 300px at 512px 300px,
+    var(--color-sky) 0%, var(--color-canvas) 50%, var(--color-mist) 100%);
+}
+
+#stage > * { position: absolute; }
+
+/* ---------- Halos, orbit, bloom ---------- */
+
+.halos { left: 0; top: 0; width: 1024px; height: 600px; pointer-events: none; }
+.halos circle { stroke-width: 1; }
+.halos-center, .orbit-center { display: none; }
+
+.orbit { border-radius: 50%; pointer-events: none; }
+.orbit::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-surface);
+}
+/* Mira's orbit dot: centre (9,320) on a circle around (205,238), r = 212.46 */
+.orbit-mira { left: -7.46px; top: 25.54px; width: 424.92px; height: 424.92px; }
+.orbit-mira::after { left: 10.46px; top: 288.46px; }
+/* Countdown orbit dot: centre (830,232) around (512,292), r = 323.61 */
+.orbit-center { left: 188.39px; top: -31.61px; width: 647.22px; height: 647.22px; }
+.orbit-center::after { left: 635.61px; top: 257.61px; }
+
+.bloom {
+  display: none;
+  left: -25px;
+  top: 10px;
+  width: 460px;
+  height: 460px;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, rgba(255, 255, 255, 0.9) 0%,
+    rgba(255, 247, 242, 0.45) 50%, rgba(255, 255, 255, 0) 100%);
+}
+
+/* ---------- Mira ---------- */
+
+.mascot { left: 25px; top: 40px; width: 360px; height: 400px; }
+#mira { display: block; width: 360px; height: 400px; will-change: transform; }
+
+/* ---------- Sparkles ---------- */
+
+.sparkles { left: 0; top: 0; width: 1024px; height: 600px; pointer-events: none; }
+.sparkle {
+  display: none;
+  position: absolute;
+  box-sizing: content-box;
+  /* Figma: drop-shadow(0 0 6px rgba(143,186,204,.7)); baked as a radial glow behind the star */
+  padding: 6px;
+  margin: -6px 0 0 -6px;
+  background: radial-gradient(circle closest-side, rgba(143, 186, 204, 0.42), rgba(143, 186, 204, 0) 100%);
+}
+.s1 { left: 312px; top: 65px; width: 30px; height: 30px; }
+.s2 { left: 342px; top: 104px; width: 16px; height: 16px; opacity: 0.85; }
+.s3 { left: 96px; top: 330px; width: 12px; height: 12px; opacity: 0.7; }
+.r1 { left: 60px; top: 70px; width: 22px; height: 22px; }
+.r2 { left: 372px; top: 250px; width: 14px; height: 14px; }
+.d1 { left: 64px; top: 60px; width: 26px; height: 26px; }
+.d2 { left: 380px; top: 250px; width: 16px; height: 16px; opacity: 0.9; }
+.d3 { left: 400px; top: 60px; width: 20px; height: 20px; opacity: 0.9; }
+.d4 { left: 40px; top: 300px; width: 12px; height: 12px; opacity: 0.8; }
+.d5 { left: 240px; top: 24px; width: 14px; height: 14px; opacity: 0.8; }
+.c1 { left: 770px; top: 120px; width: 28px; height: 28px; }
+.c2 { left: 808px; top: 170px; width: 16px; height: 16px; }
+.c3 { left: 232px; top: 430px; width: 14px; height: 14px; }
+
+/* ---------- Which layers each screen shows ---------- */
+
+#stage[data-mood="none"] .mascot,
+#stage[data-mood="none"] .halos-mira,
+#stage[data-mood="none"] .orbit-mira { display: none; }
+#stage:not([data-mood="none"]) .s-base { display: block; }
+#stage[data-screen="rep"] .s-rep,
+#stage[data-screen="setDone"] .s-done,
+#stage[data-screen="countdown"] .s-count { display: block; }
+#stage[data-screen="setDone"] .bloom { display: block; }
+#stage[data-screen="countdown"] .halos-center,
+#stage[data-screen="countdown"] .orbit-center,
+#stage[data-screen="unpaired"] .halos-center { display: block; }
+
+.screen { display: none; left: 0; top: 0; width: 1024px; height: 600px; }
+.screen > * { position: absolute; }
+#stage[data-screen="greeting"] .screen[data-screen="greeting"],
+#stage[data-screen="idle"] .screen[data-screen="idle"],
+#stage[data-screen="gesture"] .screen[data-screen="gesture"],
+#stage[data-screen="countdown"] .screen[data-screen="countdown"],
+#stage[data-screen="cue"] .screen[data-screen="cue-rep"],
+#stage[data-screen="rep"] .screen[data-screen="cue-rep"],
+#stage[data-screen="paused"] .screen[data-screen="paused"],
+#stage[data-screen="setDone"] .screen[data-screen="setDone"],
+#stage[data-screen="fall"] .screen[data-screen="fall"],
+#stage[data-screen="unpaired"] .screen[data-screen="unpaired"] { display: block; }
+
+.top-row { display: none; }
+#stage[data-screen="greeting"] .top-row,
+#stage[data-screen="cue"] .top-row,
+#stage[data-screen="rep"] .top-row,
+#stage[data-screen="paused"] .top-row,
+#stage[data-screen="setDone"] .top-row { display: flex; }
+
+/* ---------- Shared type ---------- */
+
+.eyebrow {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: normal;
+  letter-spacing: 4.4px;
+  color: var(--color-accent-text-small);
+  white-space: pre;
+}
+
+.hero {
+  font-weight: 300;
+  white-space: nowrap;
+  background: var(--hero-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- Top row: pill + heart rate chip (24:267) ---------- */
+
+.top-row {
+  left: 450px;
+  top: 36px;
+  width: 534px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  padding: 14px 26px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: normal;
+  letter-spacing: 3.52px;
+  white-space: nowrap;
+}
+
+.hr-chip {
+  margin-left: auto;
+  gap: 10px;
+  padding: 14px 26px 14px 22px;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+.hr-heart { display: block; width: 26px; height: 26px; }
+
+/* ---------- 1 Greeting (24:274 "Plan" at x450 y124) ---------- */
+
+.plan {
+  left: 450px;
+  top: 124px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.hero-greet {
+  margin-top: 14px;
+  font-size: 108px;
+  line-height: 1.1;
+  letter-spacing: -3.24px;
+}
+.exercise {
+  margin-top: 10px;
+  font-size: 48px;
+  font-weight: 500;
+  line-height: normal;
+  letter-spacing: -0.48px;
+  white-space: nowrap;
+}
+.dose {
+  font-size: 32px;
+  font-weight: 400;
+  line-height: normal;
+  color: var(--color-dose);
+  white-space: pre;
+}
+
+.idle-line { margin-top: 10px; }
+
+/* ---------- 2 Awaiting Gesture (35:210 "Prompt" at x450 y52, w534) ---------- */
+
+.prompt {
+  left: 450px;
+  top: 52px;
+  width: 534px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.hero-prompt {
+  margin-top: 10px;
+  font-size: 72px;
+  line-height: 1.1;
+  letter-spacing: -1.44px;
+}
+.prompt .gestures { margin-top: 30px; }
+.hint {
+  margin-top: 26px;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: normal;
+  color: var(--color-ink-soft);
+  white-space: nowrap;
+}
+
+.gestures { display: flex; gap: 56px; align-items: flex-start; }
+.gesture { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.gesture-halo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 136px;
+  height: 136px;
+  border-radius: 68px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-gesture);
+}
+.gesture-halo img { display: block; width: 60px; height: 60px; }
+.gesture-label {
+  font-size: 26px;
+  font-weight: 500;
+  line-height: normal;
+  white-space: nowrap;
+}
+
+/* ---------- 3 Countdown (35:232) ---------- */
+
+.count-glow {
+  left: 302px;
+  top: 82px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, #fff 0%, rgba(255, 252, 250, 0.7) 55%, rgba(255, 255, 255, 0) 100%);
+}
+.count-ring { left: 0; top: 0; width: 1024px; height: 600px; }
+.count-ring-track { stroke: #fff; stroke-opacity: 0.9; stroke-width: 6; }
+.count-ring-arc {
+  stroke: var(--color-accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+  /* (4 − n) / 3 of the circle from 12 o'clock, set by view.js */
+  stroke-dasharray: var(--countdown-progress, 0) 1;
+}
+.count-eyebrow {
+  left: 0;
+  top: 40px;
+  width: 1024px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: normal;
+  letter-spacing: 4.84px;
+  color: var(--color-accent-text-small);
+  white-space: pre;
+}
+.count-n {
+  left: 0;
+  top: 166px;
+  width: 1024px;
+  text-align: center;
+  font-size: 240px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ---------- 4 Cue / 5 Rep (36:214 "Rep count" at x450 y104; Balance Bar at x450 y344) ---------- */
+
+.rep-count {
+  left: 450px;
+  top: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.count {
+  font-size: 180px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -5.4px;
+  white-space: pre;
+}
+.count-target { font-weight: 300; color: var(--color-ink-soft); }
+.rep-label { margin-top: 10px; }
+
+.balance {
+  left: 450px;
+  top: 344px;
+  width: 534px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.balance-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 534px;
+}
+.balance-side {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: normal;
+}
+.balance-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: normal;
+  letter-spacing: 3.24px;
+  color: var(--color-ink-soft);
+  white-space: nowrap;
+}
+.balance-icon { display: block; }
+.balance-icon.icon-ok { width: 22px; height: 22px; }
+.balance-icon.icon-warn { display: none; width: 28px; height: 26px; }
+.balance-track {
+  position: relative;
+  width: 534px;
+  height: 22px;
+  border-radius: var(--radius-track);
+  background: var(--color-surface);
+}
+.balance-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 22px;
+  width: var(--balance-left, 50%);
+  border-radius: var(--radius-track);
+  background: var(--color-accent);
+}
+.balance-mid {
+  position: absolute;
+  left: 265.5px;
+  top: -7px;
+  width: 3px;
+  height: 36px;
+  border-radius: 1.5px;
+  background: var(--color-ink);
+}
+/* Off balance (35:153): track first, then a red warning row with icon + words; no L/R labels */
+.balance[data-ok="false"] .balance-labels { order: 2; justify-content: flex-start; }
+.balance[data-ok="false"] .balance-side,
+.balance[data-ok="false"] .icon-ok { display: none; }
+.balance[data-ok="false"] .icon-warn { display: block; }
+.balance[data-ok="false"] .balance-status {
+  gap: 10px;
+  font-size: 24px;
+  letter-spacing: 0;
+  color: var(--color-alert-text);
+}
+.balance[data-ok="false"] .balance-fill { background: var(--color-alert); }
+
+/* ---------- 6 Paused (36:347 at x450 y112) ---------- */
+
+.paused {
+  left: 450px;
+  top: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.pause-halo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 44px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-pause);
+}
+.pause-halo img { display: block; width: 32px; height: 34px; }
+.hero-paused {
+  margin-top: 22px;
+  font-size: 100px;
+  line-height: 1.05;
+  letter-spacing: -2px;
+}
+.paused-body {
+  margin-top: 8px;
+  font-size: 34px;
+  font-weight: 400;
+  line-height: normal;
+  white-space: nowrap;
+}
+.paused-progress { margin-top: 16px; }
+
+/* ---------- 7 Set Done (37:293 at x450 y112) ---------- */
+
+.summary {
+  left: 450px;
+  top: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.count-done {
+  margin-top: 4px;
+  font-size: 156px;
+  letter-spacing: -4.68px;
+}
+.done-pill { margin-top: 36px; }
+
+/* ---------- 8 Fall Alert (37:321): 20px red border, no decoration ---------- */
+
+.fall-border {
+  left: 0;
+  top: 0;
+  width: 1024px;
+  height: 600px;
+  box-sizing: border-box;
+  border: 20px solid var(--color-alert);
+}
+.alert {
+  left: 62px;
+  top: 42px;
+  width: 900px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.alert-title {
+  font-size: 76px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.76px;
+  white-space: nowrap;
+}
+.alert-instruction {
+  margin-top: 6px;
+  font-size: 32px;
+  font-weight: 400;
+  line-height: normal;
+  white-space: nowrap;
+}
+.alert .gestures { margin-top: 22px; }
+.bystander {
+  margin-top: 22px;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: normal;
+  white-space: nowrap;
+}
+.call {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 72px;
+  border-radius: var(--radius-pill);
+  background: var(--color-alert);
+  box-shadow: var(--shadow-call);
+}
+.call img { display: block; width: 56px; height: 56px; }
+.call-text {
+  font-size: 76px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 1.52px;
+  color: var(--color-surface);
+  white-space: nowrap;
+}
+
+/* ---------- Not paired ---------- */
+
+.unpaired {
+  left: 62px;
+  top: 190px;
+  width: 900px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.unpaired .hint { margin-top: 18px; }
+
+/* ---------- Caption bar (24:127 at x0 y468, 1024×132) ---------- */
+
+.caption-bar {
+  left: 0;
+  top: 468px;
+  width: 1024px;
+  height: 132px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 24px 56px 24px 40px;
+  border-radius: var(--radius-caption) var(--radius-caption) 0 0;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-caption);
+}
+.voice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
+  background: var(--color-voice);
+}
+.voice img { display: block; width: 28px; height: 28px; }
+.caption-text {
+  flex: 1 0 0;
+  min-width: 1px;
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: break-word;
+}
+
+/* ---------- Offline pill ---------- */
+
+.offline-pill {
+  display: none;
+  left: 24px;
+  top: 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: normal;
+  color: var(--color-ink);
+  box-shadow: var(--shadow-pause);
+}
+.offline-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--color-ink-soft); }
+#stage[data-offline="true"] .offline-pill { display: flex; }
+
+/* ---------- Motion (transform/opacity only) ---------- */
+
+@keyframes float     { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes bounce    { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+@keyframes droop     { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(5px) rotate(-1.5deg); } }
+@keyframes breathe   { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+@keyframes celebrate { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-12px) scale(1.02); } }
+@keyframes twinkle   { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@keyframes orbit     { to { transform: rotate(360deg); } }
+@keyframes pulse     { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+#stage[data-mood="idle"] #mira        { animation: float 4s ease-in-out infinite; }
+#stage[data-mood="cheering"] #mira    { animation: bounce 0.6s ease-in-out infinite; }
+#stage[data-mood="worried"] #mira     { animation: droop 3s ease-in-out infinite; transform-origin: 50% 90%; }
+#stage[data-mood="sleeping"] #mira    { animation: breathe 5s ease-in-out infinite; transform-origin: 50% 85%; }
+#stage[data-mood="celebrating"] #mira { animation: celebrate 0.9s ease-in-out infinite; }
+#stage[data-screen="setDone"] .s-done { animation: twinkle 1.8s ease-in-out infinite; }
+#stage[data-screen="setDone"] .d2 { animation-delay: -0.4s; }
+#stage[data-screen="setDone"] .d3 { animation-delay: -0.8s; }
+#stage[data-screen="setDone"] .d4 { animation-delay: -1.2s; }
+#stage[data-screen="setDone"] .d5 { animation-delay: -1.5s; }
+.orbit { animation: orbit 60s linear infinite; }
+.fall-border { animation: pulse 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  #stage *, #stage *::after { animation: none !important; }
+}

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Mira</title>
+<link rel="preload" href="assets/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/kiosk.css">
+<script type="module" src="js/main.js"></script>
+</head>
+<body>
+<!-- One 1024×600 stage, laid out with the absolute values of the Figma "LCD Hi-Fi" frames. -->
+<div id="stage" data-screen="idle" data-mood="idle" data-offline="false">
+
+  <!-- Set Done "Completion bloom" (37:305) -->
+  <div class="bloom" aria-hidden="true"></div>
+
+  <!-- "Halos & orbit" rings: around Mira (27:136) and around the countdown number (35:242) -->
+  <svg class="halos halos-mira" viewBox="0 0 1024 600" width="1024" height="600" aria-hidden="true" focusable="false">
+    <circle cx="205" cy="238" r="190" stroke="#fff" stroke-opacity="0.8" fill="none"/>
+    <circle cx="205" cy="238" r="262" stroke="#fff" stroke-opacity="0.5" fill="none"/>
+    <circle cx="205" cy="238" r="380" stroke="#90bbcc" stroke-opacity="0.32" fill="none"/>
+    <circle cx="205" cy="238" r="540" stroke="#90bbcc" stroke-opacity="0.24" fill="none"/>
+  </svg>
+  <svg class="halos halos-center" viewBox="0 0 1024 600" width="1024" height="600" aria-hidden="true" focusable="false">
+    <circle cx="512" cy="292" r="230" stroke="#fff" stroke-opacity="0.7" fill="none"/>
+    <circle cx="512" cy="292" r="310" stroke="#fff" stroke-opacity="0.45" fill="none"/>
+    <circle cx="512" cy="292" r="420" stroke="#90bbcc" stroke-opacity="0.35" fill="none"/>
+    <circle cx="512" cy="292" r="560" stroke="#90bbcc" stroke-opacity="0.25" fill="none"/>
+  </svg>
+  <div class="orbit orbit-mira" aria-hidden="true"></div>
+  <div class="orbit orbit-center" aria-hidden="true"></div>
+
+  <!-- Mira (LCD Hi-Fi / Mira at x25 y40, 360×400; halo and inner ring are in the PNG) -->
+  <div class="mascot">
+    <img id="mira" src="assets/mira/idle.png" alt="Mira" width="360" height="400">
+  </div>
+
+  <!-- Sparkles (24:135) -->
+  <div class="sparkles" aria-hidden="true">
+    <img class="sparkle s-base s1" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-base s2" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-base s3" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-rep r1" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-rep r2" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-done d1" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-done d2" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-done d3" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-done d4" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-done d5" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-count c1" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-count c2" src="assets/icons/sparkle.svg" alt="">
+    <img class="sparkle s-count c3" src="assets/icons/sparkle.svg" alt="">
+  </div>
+
+  <!-- Top row (x450 y36 w534): set pill + heart-rate chip -->
+  <div class="top-row">
+    <div id="set-pill" class="pill"><span id="set-label">SET 1 OF 3</span></div>
+    <div id="hr-chip" class="pill hr-chip">
+      <img class="hr-heart" src="assets/icons/heart.svg" alt="" width="26" height="26">
+      <span id="hr-value"></span>
+    </div>
+  </div>
+
+  <!-- 1 Greeting (24:232) -->
+  <section class="screen" data-screen="greeting" aria-label="Greeting">
+    <div class="plan">
+      <p class="eyebrow">TODAY'S PRACTICE</p>
+      <h1 id="greet-name" class="hero hero-greet">Hi there</h1>
+      <p id="exercise-name" class="exercise"></p>
+      <p id="dose" class="dose"></p>
+    </div>
+  </section>
+
+  <!-- Before a session: same layout as the greeting -->
+  <section class="screen" data-screen="idle" aria-label="Waiting">
+    <div class="plan">
+      <p class="eyebrow">MIRA</p>
+      <h1 class="hero hero-greet">Hello</h1>
+      <p class="dose idle-line">I'm here when you're ready.</p>
+    </div>
+  </section>
+
+  <!-- 2 Awaiting Gesture (35:163) -->
+  <section class="screen" data-screen="gesture" aria-label="Ready to start">
+    <div class="prompt">
+      <p class="eyebrow">WHENEVER YOU’RE READY</p>
+      <h1 class="hero hero-prompt">Ready to start?</h1>
+      <div class="gestures">
+        <div class="gesture">
+          <div class="gesture-halo"><img src="assets/icons/thumbs-up.svg" alt="" width="60" height="60"></div>
+          <p class="gesture-label">Thumbs up</p>
+        </div>
+        <div class="gesture">
+          <div class="gesture-halo"><img src="assets/icons/raise-hand.svg" alt="" width="60" height="60"></div>
+          <p class="gesture-label">Raise hand</p>
+        </div>
+      </div>
+      <p class="hint">Either one works. Take your time.</p>
+    </div>
+  </section>
+
+  <!-- 3 Countdown (35:232) -->
+  <section class="screen" data-screen="countdown" aria-label="Countdown">
+    <div class="count-glow" aria-hidden="true"></div>
+    <svg class="count-ring" viewBox="0 0 1024 600" width="1024" height="600" aria-hidden="true" focusable="false">
+      <circle class="count-ring-track" cx="512" cy="292" r="178" fill="none"/>
+      <circle class="count-ring-arc" cx="512" cy="292" r="178" fill="none" pathLength="1"
+              transform="rotate(-90 512 292)"/>
+    </svg>
+    <p id="countdown-eyebrow" class="count-eyebrow">GET READY</p>
+    <p id="countdown-n" class="count-n" aria-live="assertive"></p>
+  </section>
+
+  <!-- 4 Cue (36:163) and 5 Rep (36:227) -->
+  <section class="screen" data-screen="cue-rep" aria-label="Reps">
+    <div class="rep-count">
+      <p class="count"><span id="rep-now" class="count-now">0</span><span id="rep-target" class="count-target"></span></p>
+      <p id="rep-label" class="eyebrow rep-label">REPS</p>
+    </div>
+    <div id="balance" class="balance" data-ok="true">
+      <div class="balance-labels">
+        <span class="balance-side">L</span>
+        <span class="balance-status">
+          <img class="balance-icon icon-ok" src="assets/icons/check.svg" alt="" width="22" height="22">
+          <img class="balance-icon icon-warn" src="assets/icons/warning.svg" alt="" width="28" height="26">
+          <span id="balance-status">EVEN WEIGHT</span>
+        </span>
+        <span class="balance-side">R</span>
+      </div>
+      <div class="balance-track">
+        <div class="balance-fill"></div>
+        <div class="balance-mid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 Paused (36:296) -->
+  <section class="screen" data-screen="paused" aria-label="Paused">
+    <div class="paused">
+      <div class="pause-halo"><img src="assets/icons/pause.svg" alt="" width="32" height="34"></div>
+      <h1 class="hero hero-paused">Paused</h1>
+      <p class="paused-body">Take a breath. I'll be right here.</p>
+      <p id="paused-progress" class="eyebrow paused-progress"></p>
+    </div>
+  </section>
+
+  <!-- 7 Set Done (37:242) -->
+  <section class="screen" data-screen="setDone" aria-label="Set complete">
+    <div class="summary">
+      <p class="eyebrow">SET COMPLETE</p>
+      <p class="count count-done"><span id="done-now" class="count-now">0</span><span id="done-target" class="count-target"></span></p>
+      <div id="done-pill" class="pill done-pill"><span id="done-balance"></span></div>
+    </div>
+  </section>
+
+  <!-- 8 Fall Alert (37:321) -->
+  <section class="screen" data-screen="fall" role="alert" aria-label="Are you okay?">
+    <div class="fall-border" aria-hidden="true"></div>
+    <div class="alert">
+      <h1 class="alert-title">Are you okay?</h1>
+      <p class="alert-instruction">Give a thumbs up or raise your hand</p>
+      <div class="gestures">
+        <div class="gesture">
+          <div class="gesture-halo"><img src="assets/icons/thumbs-up.svg" alt="" width="60" height="60"></div>
+          <p class="gesture-label">Thumbs up</p>
+        </div>
+        <div class="gesture">
+          <div class="gesture-halo"><img src="assets/icons/raise-hand.svg" alt="" width="60" height="60"></div>
+          <p class="gesture-label">Raise hand</p>
+        </div>
+      </div>
+      <p class="bystander">If <span id="fall-name">the patient</span> doesn't respond, anyone nearby:</p>
+      <div class="call">
+        <img src="assets/icons/phone.svg" alt="" width="56" height="56">
+        <span class="call-text">CALL 911</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Not paired: no device token -->
+  <section class="screen" data-screen="unpaired" aria-label="Not paired">
+    <div class="unpaired">
+      <p class="eyebrow">SETUP NEEDED</p>
+      <h1 class="hero hero-prompt">This screen isn't paired</h1>
+      <p class="hint">Open the pairing link from the Mira server to connect it.</p>
+    </div>
+  </section>
+
+  <!-- Caption bar (24:127): what Mira is saying -->
+  <div id="caption-bar" class="caption-bar">
+    <div class="voice" aria-hidden="true"><img src="assets/icons/voice.svg" alt="" width="28" height="28"></div>
+    <p id="caption-text" class="caption-text" aria-live="polite"></p>
+  </div>
+
+  <div class="offline-pill" role="status"><span class="offline-dot" aria-hidden="true"></span>Reconnecting…</div>
+</div>
+</body>
+</html>
