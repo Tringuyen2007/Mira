@@ -386,3 +386,25 @@ def test_one_camera_body_crouching_at_first_is_measured_at_the_right_scale_once_
     assert abs(pipe._model.world_scale - 1.0) < 0.02  # the synthetic world shape is already metric
     J = out.frame.joints
     assert abs(stature(J - (J[23] + J[24]) / 2) / h - 1) < 0.02
+
+
+def test_one_camera_planted_feet_never_pull_the_fit_but_still_show_as_locked():
+    import vision.tracker as T
+
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    seen = []
+    real = pipe._model.update
+
+    def spy(t, joints, tracking, views, anchors=None):
+        seen.append(anchors)
+        return real(t, joints, tracking, views, anchors)
+
+    pipe._model.update = spy
+    rng = np.random.default_rng(1)
+    for k in range(90):
+        out = pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30, noise_px=0.3, rng=rng))
+    assert all(not a for a in seen)  # no anchor ever reaches the one-camera fit
+    assert out.tracker == "model" and out.feet_locked == {"l": True, "r": True}
+    J = out.frame.joints
+    assert abs(np.linalg.norm(J[25] - J[27]) - pipe._model.shape.lengths["shin"]) < 1e-6  # nothing moved

@@ -31,7 +31,7 @@ class PipelineOutput:
     people: dict[str, list[PoseResult]] | None = None  # everyone found per camera (multi-person input)
     ignored: dict[str, list[PoseResult]] | None = None  # people not tracked, per camera
     dropped: str | None = None  # camera ignored this frame because it disagreed with the other
-    feet_locked: dict[str, bool] | None = None  # "l"/"r" -> foot held by the FootAnchor this frame
+    feet_locked: dict[str, bool] | None = None  # "l"/"r" -> foot planted (held by the FootAnchor; one camera: shown only)
     tracker: str = "triangulate"  # which tracker produced frame.joints ("model" or "triangulate")
     fit_ms: float | None = None  # model fit time this frame
 
@@ -152,8 +152,11 @@ class Pipeline:
         else:
             usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
             joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
+        # one camera with the model: the floor-placed joints are too rough to pin feet to, and the fit has its
+        # own floor contact, so the anchor only reports planted feet on the output (below) and moves nothing
+        single_model = self._single is not None and self._model is not None
         feet_locked = None
-        if self._anchor is not None:
+        if self._anchor is not None and not single_model:
             if tracking == "lost":
                 self._anchor.reset()
             else:
@@ -167,6 +170,11 @@ class Pipeline:
         if fitted is not None:
             joints, used = fitted, "model"
             conf = np.maximum(conf, _evidence({"A": a, "B": b}))
+        if single_model and self._anchor is not None:
+            if tracking == "lost":
+                self._anchor.reset()
+            else:
+                _, feet_locked = self._anchor.update(t, joints)  # report only: joints are not moved
         if used != "model" and self._filter is not None:  # the model smooths its own pose numbers
             joints = self._filter(joints, t)
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
