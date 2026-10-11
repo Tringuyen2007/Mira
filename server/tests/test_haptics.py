@@ -74,3 +74,24 @@ async def test_nothing_when_state_not_initialised(coach: HapticCoach, hub: FakeH
     set_state(None)
     await coach.on_event({"type": "set_done", "session_id": "sess-1", "t": 1.0})
     assert hub.events == []
+
+
+async def test_countdown_emits_countdown_tick(coach: HapticCoach, hub: FakeHub, live_session: LiveSession) -> None:
+    await coach.on_event({"type": "countdown", "n": 3, "session_id": live_session.session_id, "t": 4.0})
+    assert hub.events == [{"type": "haptic", "pattern": "countdown_tick", "session_id": live_session.session_id,
+                           "t": 4.0}]
+
+
+async def test_a_short_watch_counted_turn_has_no_haptic(coach: HapticCoach, hub: FakeHub,
+                                                        live_session: LiveSession) -> None:
+    sid = live_session.session_id
+    await coach.on_event({"type": "rep", "quality": "partial", "source": "watch", "session_id": sid, "t": 5.0})
+    assert hub.events == []
+    await coach.on_event({"type": "rep", "quality": "good", "source": "watch", "session_id": sid, "t": 6.0})
+    assert hub.events[0]["pattern"] == "good_rep"
+
+
+def test_haptic_patterns_include_the_watch_ones() -> None:
+    from server.agents.haptics import HAPTIC_PATTERNS
+
+    assert HAPTIC_PATTERNS == ("good_rep", "fix_form", "set_done", "check_in", "countdown_tick", "breather")

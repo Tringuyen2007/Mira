@@ -8,8 +8,10 @@ from server.hub import POSE_FIELDS
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdown", "cue", "rep", "set_done",
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
-                 "proposal_created", "coach_adapt", "device_health", "device_status", "session_summary", "message"}
-CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health"}
+                 "proposal_created", "coach_adapt", "device_health", "device_status", "session_summary", "message",
+                 "breather", "hr_recovery", "rotation_rep", "rotation_set", "sync_progress", "limits_changed",
+                 "watch_features_changed"}
+CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health", "watch_sync"}
 REST_SAMPLES_REQUIRED_KEYS = {
     "rest_get_me.json": {"patient", "therapist", "prescriptions", "lcd", "calibration"},
     "rest_post_pair.json": {"patient_id", "token", "me"},
@@ -64,3 +66,18 @@ def test_pose_and_frame_samples_match_contract() -> None:
     assert set(_load("ws_live")) >= {"phase", "exercise_id", "rep", "reps_target", "set", "sets_target", "countdown",
                                      "main_angle", "load_l_pct", "load_conf", "hr", "flags", "cue_id", "paused",
                                      "caption", "first_name", "exercise_name", "incident"}
+
+
+def test_watch_samples_match_the_contract() -> None:
+    assert _load("ws_events_client_watch_button_resume") == {"type": "watch_button", "name": "resume"}
+    assert "rotation_deg" in _load("ws_events_client_wrist")
+    assert _load("ws_events_haptic")["pattern"] == "countdown_tick"
+    assert _load("ws_events_breather")["state"] == "start"
+    assert set(_load("ws_events_rotation_rep")) >= {"exercise_id", "set_index", "rep", "reps_target", "angle_deg",
+                                                    "goal_deg", "reached"}
+    assert set(_load("ws_events_rotation_set")) >= {"exercise_id", "set_index", "angles", "best_deg", "avg_deg",
+                                                    "goal_deg"}
+    assert set(_load("ws_events_hr_recovery")) >= {"set_index", "peak_bpm", "bpm_60s", "drop_bpm"}
+    assert set(_load("ws_events_sync_progress")) >= {"progress", "locked"}
+    assert set(_load("ws_events_limits_changed")) >= {"patient_id", "hr_limit", "set_by_name"}
+    assert set(_load("ws_events_watch_features_changed")) >= {"patient_id", "tremor_monitoring"}

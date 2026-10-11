@@ -45,7 +45,8 @@ from server.config import Config, REPO_ROOT, cfg
 from server.db import migrate, queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
-from server.db.writer import FrameWriter
+from server.db.wrist import WristRecorder
+from server.db.writer import WRIST_COPY_SQL, WRIST_MAX_QUEUE, FrameWriter, wrist_row
 from server.devices import DEVICE_EVENT_TYPES, DEVICE_HEALTH_KEYS, DeviceRegistry
 from server.engine_bridge import EngineBridge
 from server.hub import Hub, RateLimiter
@@ -58,15 +59,16 @@ from server.security import (Principal, TokenCheckUnavailable, TunnelFilterMiddl
                              require_token, ws_scope, ws_token_ok)
 from server.session_end import MockAutoRestart, SessionEnder
 from server.state import AppState, SessionRegistry, get_state, set_state
+from server import watch_wire
 
 log = get_logger("main")
 
 # Client → server message types accepted on /ws/events (§4.3); anything else is dropped. Engine events
 # (fall, fall_status, gesture, …) can never come from a client.
-CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health"})
+CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health", "watch_sync"})
 
 # A patient's phone may steer the session and relay its watch; it is never the LCD.
-PATIENT_CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button"})
+PATIENT_CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "watch_sync"})
 # `command` names that control the session itself (as opposed to pain/im_ok, which the Guardian/Coach
 # handle off the broadcast event). These are forwarded to the engine over the reverse channel.
 SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
@@ -155,12 +157,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     state.stat_providers["devices"] = devices.status
     devices.start()
     writer: FrameWriter | None = None
+    wrist_writer: FrameWriter | None = None
+    wrist_recorder: WristRecorder | None = None
     if db is not None and persistence is not None and cfg.TIGER_DSN:  # narrowed for the type checker
         writer = FrameWriter(cfg.TIGER_DSN, patient_provider=current_patient_id)
         writer.start()
         bridge.subscribe_frames(writer.submit)
         bridge.subscribe_events(persistence.on_event)
         state.stat_providers["db"] = DbStats(db, writer, cfg.MOCK_PATIENT_ID)
+
+        wrist_writer = FrameWriter(cfg.TIGER_DSN, patient_provider=current_patient_id, copy_sql=WRIST_COPY_SQL,
+                                   row_fn=wrist_row, max_queue=WRIST_MAX_QUEUE, thread_name="wrist-writer")
+        wrist_writer.start()
+
+        def patient_of(session_id: str) -> str | None:
+            found = sessions.get(session_id)
+            return found.patient_id if found is not None else None
+
+        wrist_recorder = WristRecorder(wrist_writer, patient_of)
+        bridge.subscribe_events(wrist_recorder.on_event)
     else:
         state.stat_providers["db"] = lambda: {"available": False, "status": "disabled"}
     notifier = RetellNotifier()
@@ -234,6 +249,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await analyst.close()
         if writer is not None:
             await asyncio.to_thread(writer.stop)
+        if wrist_writer is not None:
+            await asyncio.to_thread(wrist_writer.stop)
         if db is not None:
             await db.close()
         set_state(None)
@@ -269,22 +286,43 @@ def _client_event_handler() -> Callable[[dict[str, Any]], None]:
     return handle
 
 
-#: watch_button name → the session command it maps to (unknown names are ignored).
-WATCH_BUTTON_COMMANDS = {"ready": "start", "stop": "stop"}
+#: watch_button name → the session command it maps to (unknown names are ignored). `resume` (the watch's Stopped
+#: screen) is a `start`: the engine resumes a paused session on `start`.
+WATCH_BUTTON_COMMANDS = {"ready": "start", "stop": "stop", "resume": "start"}
 
 
 def _on_client_event(msg: dict[str, Any]) -> None:
-    if msg.get("type") not in CLIENT_EVENT_TYPES or len(msg) > MAX_CLIENT_MSG_KEYS:
-        log.debug("dropping client event", extra={"event_type": str(msg.get("type"))[:40]})
+    kind = msg.get("type")
+    if kind not in CLIENT_EVENT_TYPES or len(msg) > MAX_CLIENT_MSG_KEYS:
+        log.debug("dropping client event", extra={"event_type": str(kind)[:40]})
         return
     state = get_state()
+    if kind == "watch_sync":
+        _on_watch_sync(state, msg)
+        return
+    if kind == "wrist":
+        clean = watch_wire.sanitize_wrist(msg)
+        if clean is None:
+            return
+        msg = clean
     state.bridge.inject(msg)
-    if msg.get("type") == "command" and msg.get("name") in SESSION_COMMANDS:
+    if kind == "command" and msg.get("name") in SESSION_COMMANDS:
         _forward_session_command(state, msg)
-    elif msg.get("type") == "watch_button":
+    elif kind == "watch_button":
         name = WATCH_BUTTON_COMMANDS.get(msg.get("name"))
         if name:
             _forward_session_command(state, {"type": "command", "name": name, "payload": {"source": "watch"}})
+
+
+def _on_watch_sync(state: AppState, msg: dict[str, Any]) -> None:
+    """A sync-wave window goes straight to ClockSync (never broadcast: ~50 numbers a second nobody else needs).
+    Without a current session there is nothing to store the offset on, so the window is dropped."""
+    clean = watch_wire.sanitize_watch_sync(msg)
+    sync = state.clock_sync
+    current = state.sessions.current
+    if clean is None or sync is None or current is None:
+        return
+    sync.on_window(clean, current.session_id)
 
 
 def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:
