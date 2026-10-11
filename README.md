@@ -179,7 +179,7 @@ Then configure the Retell agent from code (free, never places a call):
 ```
 
 It must end with `N/N fields verified` and prints `RETELL_AGENT_ID` and `RETELL_AGENT_VERSION` for `.env`.
-Real calls are on when `CALLS_DISABLED=0` (the committed `.env`; see "Retell live calls: ON" below).
+Real calls are on when `CALLS_DISABLED=0` (the `.env.example` default; see "Retell live calls: ON" below).
 
 ## Kill switches
 
@@ -894,8 +894,8 @@ when the socket is down: poll `GET /notifications?since_id=` every 10 s.
 ## Retell live calls: ON
 
 **Normal state (since 2026-10-11):** a confirmed fall with no response within `CHECKIN_TIMEOUT_S` (15 s in
-`.env`) places a real Retell call to the patient's emergency contact, on every server that runs with the committed
-`.env` (`CALLS_DISABLED=0`, `ALLOW_TEST_CALLS=1`). The code default is still off, so the test suite and a bare
+`.env`) places a real Retell call to the patient's emergency contact, on every server whose `.env` follows
+`.env.example` (`CALLS_DISABLED=0`, `ALLOW_TEST_CALLS=1`). The code default is still off, so the test suite and a bare
 checkout never dial. Every real call spends Retell credit (about $0.07–0.15 per minute); set `CALLS_DISABLED=1`
 to develop against the log-only simulator. `GET /health` reports `"calls": "live"` or `"log_only"`, and
 `tools/deploy_vultr.sh` refuses a deploy whose box comes up `log_only` (pass `ALLOW_LOG_ONLY=1` to override).
