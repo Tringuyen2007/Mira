@@ -42,6 +42,13 @@
   width: 200px;
 }
 
+/* The input's own outline is suppressed above (it sits flush inside the pill); the pill itself shows focus
+   instead, since this specificity otherwise beats the global :focus-visible rule (review I8). */
+.search-field:focus-within {
+  outline: 3px solid var(--color-ring-focus);
+  outline-offset: 2px;
+}
+
 .pill-tabs {
   margin: var(--space-4) 0 var(--space-6);
 }
@@ -107,6 +114,12 @@
   background: var(--color-card-sunk);
 }
 
+/* .table-card clips overflow for its rounded corners; a positive outline would be clipped at the left/right
+   edges, so pull it inward instead (review I8). */
+.row:focus-visible {
+  outline-offset: -3px;
+}
+
 .row__cell--patient {
   display: flex;
   align-items: center;
@@ -132,6 +145,11 @@
 
 .row__reason {
   font-weight: 500;
+  /* Reasons are short, deterministic one-liners now, but clamp as a safety net against anything long. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .row__cell--evidence-alert {
@@ -140,6 +158,10 @@
 }
 
 .row__cell--evidence-plain {
+  color: var(--color-ink-soft);
+}
+
+.row__cell--evidence-empty {
   color: var(--color-ink-soft);
 }
 
@@ -158,6 +180,15 @@
 
 .table__empty {
   padding: var(--space-6);
+}
+
+/* A compact single row for an empty bucket inside a mixed (e.g. "All") view — bug 2: the full-height empty
+   state is only for a filtered view with zero rows across the board (see tableCard in view.js). */
+.table__empty-compact {
+  display: block;
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-line);
+  color: var(--color-ink-soft);
 }
 
 .status-icon {
@@ -216,6 +247,17 @@
   font-size: var(--text-meta);
 }
 
+/* Quiet variant of a card's call-to-action: bug 4 (zero proposals shouldn't invite a primary-styled click). */
+.link-quiet {
+  color: var(--color-accent-text-small);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link-quiet:hover {
+  text-decoration: underline;
+}
+
 .live-dot {
   display: inline-block;
   width: 8px;
@@ -224,26 +266,28 @@
   background: var(--color-flag);
 }
 
-/* ---------- Add patient dialog ---------- */
-
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(28, 26, 34, 0.4);
-  z-index: 20;
-}
+/* ---------- Add patient dialog ----------
+   A native <dialog> (review Minor 11): showModal() gives a built-in focus trap, Escape handling and an inert
+   background for free, via the ::backdrop pseudo-element instead of a hand-rolled overlay div. */
 
 .dialog {
   width: 320px;
   background: var(--color-card);
+  border: none;
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   padding: var(--space-6);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.dialog::backdrop {
+  background: rgba(28, 26, 34, 0.4);
+}
+
+.dialog__expiry {
+  text-align: center;
 }
 
 .dialog__label {

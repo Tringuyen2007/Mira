@@ -59,8 +59,9 @@ def dash_dsn() -> Iterator[str]:
 
 
 def _seed_extra(dsn: str) -> None:
-    """Beyond `seed.seed` (just Okafor + Maya): a second okafor patient with an open fall alert (George) and a
-    patient of a different therapist (Priya, to prove the therapist filter)."""
+    """Beyond `seed.seed` (just Okafor + Maya): a second okafor patient with an open fall alert (George), a
+    patient of a different therapist (Priya, to prove the therapist filter), plus one patient per I1-I10
+    regression case below."""
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
                      "VALUES ('george', 'George Alvarez', 71, 'left', 'left hip replacement', 'okafor', true)")
@@ -77,6 +78,66 @@ def _seed_extra(dsn: str) -> None:
                      "VALUES ('maya', 'depth_gain', 'Reached the 110 knee bend goal', %s, "
                      "now() - interval '40 days')", (json.dumps({"gain_deg": 6}),))
 
+        # I2: a resolved alert must not count as open (and old alerts must not show up at all).
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('resolved_pat', 'Rosa Diaz', 60, 'right', 'right knee', 'okafor', true)")
+        resolved_alert = str(uuid.uuid4())
+        conn.execute("INSERT INTO alerts (time, alert_id, patient_id, kind, step, channel, payload) "
+                     "VALUES (now() - interval '2 hours', %s, 'resolved_pat', 'fall', 'detected', 'device', '{}')",
+                     (resolved_alert,))
+        conn.execute("INSERT INTO alerts (time, alert_id, patient_id, kind, step, channel, payload) "
+                     "VALUES (now() - interval '1 hour', %s, 'resolved_pat', 'fall', 'resolved_by_therapist', "
+                     "'device', '{}')", (resolved_alert,))
+
+        # I10: acknowledged memory must be ignored.
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('acked_pat', 'Ana Cruz', 50, 'left', 'left knee', 'okafor', true)")
+        conn.execute("INSERT INTO memory_events (patient_id, kind, message, evidence, acknowledged) "
+                     "VALUES ('acked_pat', 'compensation', 'ai text', %s, true)",
+                     (json.dumps({"load_from": 50.0, "load_to": 40.0, "side": "left"}),))
+
+        # I10: flagged reps in the last session -> watch, with a deterministic top flag.
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('flags_pat', 'Fay Lopez', 45, 'right', 'right knee', 'okafor', true)")
+        flags_session = str(uuid.uuid4())
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                     "VALUES (%s, 'flags_pat', 'squat', now() - interval '1 day', now() - interval '1 day' "
+                     "+ interval '10 minutes')", (flags_session,))
+        for rep, flags in ((1, ["knee_cave_r"]), (2, ["knee_cave_r"]), (3, ["knee_cave_r"]), (4, None)):
+            conn.execute("INSERT INTO reps (session_id, rep, flags) VALUES (%s, %s, %s)",
+                         (flags_session, rep, flags))
+
+        # I10: pain_post >= 7 in the last finished session -> needs_you.
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('pain_pat', 'Pia Nunez', 55, 'right', 'right knee', 'okafor', true)")
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at, pain_post) "
+                     "VALUES (gen_random_uuid(), 'pain_pat', 'squat', now() - interval '2 days', "
+                     "now() - interval '2 days' + interval '10 minutes', 3)")
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at, pain_post) "
+                     "VALUES (gen_random_uuid(), 'pain_pat', 'squat', now() - interval '1 day', "
+                     "now() - interval '1 day' + interval '10 minutes', 8)")
+
+        # I3: no finished session yet, prescribed today at >= 5/week -> missed must be 0, not 7.
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('new_pat', 'Nia Park', 40, 'left', 'left knee', 'okafor', true)")
+        conn.execute("INSERT INTO prescriptions (patient_id, exercise_id, version, sets, reps, targets, "
+                     "created_by) VALUES ('new_pat', 'squat', 1, 3, 10, %s, 'okafor')",
+                     (json.dumps({"sessions_per_week": 5}),))
+
+        # I3: last finished session 3 days ago, prescribed at >= 5/week -> missed == 3.
+        conn.execute("INSERT INTO patients (id, name, age, affected_side, condition, therapist_id, simulated) "
+                     "VALUES ('missed3_pat', 'Mira Osei', 42, 'left', 'left knee', 'okafor', true)")
+        conn.execute("INSERT INTO prescriptions (patient_id, exercise_id, version, sets, reps, targets, "
+                     "created_by) VALUES ('missed3_pat', 'squat', 1, 3, 10, %s, 'okafor')",
+                     (json.dumps({"sessions_per_week": 5}),))
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                     "VALUES (gen_random_uuid(), 'missed3_pat', 'squat', now() - interval '3 days', "
+                     "now() - interval '3 days' + interval '10 minutes')")
+        # an unfinished session today must not reset the missed count.
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                     "VALUES (gen_random_uuid(), 'missed3_pat', 'squat', now(), NULL)")
+
+
 
 @pytest.fixture
 def dash_client(make_client: Callable[..., TestClient], dash_dsn: str) -> TestClient:
@@ -86,15 +147,15 @@ def dash_client(make_client: Callable[..., TestClient], dash_dsn: str) -> TestCl
 def test_caseload_filters_by_therapist_and_sorts_by_severity(dash_client: TestClient, dash_dsn: str) -> None:
     body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
     ids = {p["id"] for p in body["patients"]}
-    assert ids == {"maya", "george"}
+    assert {"maya", "george"} <= ids
     assert "priya" not in ids
     for p in body["patients"]:
         assert "bucket" in p and p["bucket"] in ("needs_you", "watch", "on_track")
     assert [p["severity"] for p in body["patients"]] == sorted((p["severity"] for p in body["patients"]),
                                                                 reverse=True)
     george = next(p for p in body["patients"] if p["id"] == "george")
-    assert george is body["patients"][0]
     assert george["bucket"] == "needs_you"
+    assert george["severity"] == body["patients"][0]["severity"]  # alert severity is the top tier
 
 
 def test_caseload_requires_patient_id_pattern(dash_client: TestClient) -> None:
@@ -113,3 +174,96 @@ def test_patient_memory_newest_first_and_days_bounds(dash_client: TestClient) ->
     assert dash_client.get("/patients/maya/memory?days=0", headers=AUTH).status_code == 422
     assert dash_client.get("/patients/maya/memory?days=91", headers=AUTH).status_code == 422
     assert dash_client.get("/patients/nobody/memory", headers=AUTH).status_code == 404
+
+
+def _patient(body: dict, patient_id: str) -> dict:
+    return next(p for p in body["patients"] if p["id"] == patient_id)
+
+
+def test_resolved_alert_is_not_counted_as_open(dash_client: TestClient) -> None:
+    """I2: an alert with a `resolved_by_therapist` step must not put the patient in needs_you."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "resolved_pat")
+    assert p["bucket"] != "needs_you"
+    assert p["kind"] != "alert"
+
+
+def test_acknowledged_memory_is_ignored(dash_client: TestClient) -> None:
+    """I10: an acknowledged compensation memory event must not drive triage."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "acked_pat")
+    assert p["kind"] != "compensation"
+    assert p["bucket"] == "on_track"
+
+
+def test_flagged_reps_in_last_session_go_to_watch(dash_client: TestClient) -> None:
+    """I10: 3 of 4 reps flagged `knee_cave_r` in the last session -> watch, with the deterministic top flag."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "flags_pat")
+    assert p["bucket"] == "watch" and p["kind"] == "flags"
+    assert p["reason"] == "Knee drifting inward on 3 of 4 reps"
+
+
+def test_pain_eight_in_last_session_is_needs_you(dash_client: TestClient) -> None:
+    """I10: pain_post >= 7 in the (chronologically) last finished session -> needs_you."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "pain_pat")
+    assert p["bucket"] == "needs_you" and p["kind"] == "pain"
+    assert p["reason"] == "Reported pain 8 out of 10 after the last session"
+
+
+def test_missed_is_zero_with_no_finished_session_yet(dash_client: TestClient) -> None:
+    """I3: a patient prescribed today at >= 5/week with no finished session yet must show missed == 0, not 7."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "new_pat")
+    assert p["kind"] != "missed"
+    assert p["bucket"] == "on_track"
+
+
+def test_missed_counts_only_finished_sessions(dash_client: TestClient) -> None:
+    """I3: the last FINISHED session was 3 days ago -> missed == 3 (needs_you); an unfinished session
+    started today must not reset the count back toward 0."""
+    body = dash_client.get("/caseload?therapist_id=okafor", headers=AUTH).json()
+    p = _patient(body, "missed3_pat")
+    assert p["bucket"] == "needs_you" and p["kind"] == "missed"
+    assert p["reason"] == "Missed 3 sessions in a row"
+
+
+async def test_sessions_done_today_counts_only_finished_sessions() -> None:
+    """Minor 8: a session started today but not yet ended must not count as "done". Uses its own fresh,
+    isolated database (not `dash_dsn`, which is shared and polluted by other tests' mock live sessions)
+    and calls the query function directly, with no app/client lifecycle involved."""
+    from server.db import dashboard_queries
+    from server.db.pool import Database
+
+    with fresh_database() as url:
+        prepare(url)
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                         "VALUES (gen_random_uuid(), 'maya', 'squat', now(), now() + interval '10 minutes')")
+            conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                         "VALUES (gen_random_uuid(), 'maya', 'squat', now(), NULL)")  # unfinished
+        db = Database(url)
+        await db.open()
+        try:
+            assert await dashboard_queries.sessions_done_today(db, ["maya"]) == 1
+        finally:
+            await db.close()
+
+
+def test_live_now_scoped_to_therapist_caseload(make_client: Callable[..., TestClient]) -> None:
+    """I1: `_live_now` must only return the current session when its patient is among the queried
+    therapist's caseload `rows`; otherwise it must be None, never another therapist's patient. Drives the
+    mock engine's phase directly (set by app startup for MOCK_PATIENT_ID "maya") instead of waiting on
+    mock-frame timing, and needs no database."""
+    from server.api.dashboard import _live_now
+    from server.state import get_state
+
+    make_client()  # starts the app lifespan: a mock session for "maya" is now state.sessions.current
+    state = get_state()
+    state.bridge.live.phase = "active"
+    assert state.sessions.current is not None and state.sessions.current.patient_id == "maya"
+
+    assert _live_now([{"id": "maya", "name": "Maya Ellis"}]) is not None
+    assert _live_now([{"id": "george", "name": "George Alvarez"}]) is None
+    assert _live_now([]) is None

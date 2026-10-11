@@ -50,13 +50,36 @@ test("tabs carry role=tab and aria-selected, exactly one active", () => {
   assert.match(selected[0].textContent, /Watch/);
 });
 
-test("the table has role=table and column headers", () => {
+// I7: role="table" claimed data rows (plain <a class="row">, no role="row"/"cell") and group headers that
+// declared a mid-table columnheader — invalid ARIA table children. Each status group is now a plain
+// <section aria-labelledby> with a <ul> of <li><a>, so there's no table role to validate; the three-column
+// header row is a decorative, aria-hidden visual aid, and every row link carries one accessible name.
+test("each bucket is a labelled section of list rows, not an ARIA table", () => {
   const model = caseloadModel(figma, { proposals: [] }, { now });
   const root = render(model, handlers());
-  const table = root.querySelector('[role="table"]');
-  assert.ok(table);
-  const headers = table.querySelectorAll('[role="columnheader"]').map((e) => e.textContent);
-  assert.deepEqual(headers.slice(0, 3), ["Patient", "Why now", "Evidence"]);
+  assert.equal(root.querySelector('[role="table"]'), null);
+  const sections = root.querySelectorAll(".table__group");
+  assert.ok(sections.length > 0);
+  for (const section of sections) {
+    const headingId = section.getAttribute("aria-labelledby");
+    assert.ok(headingId);
+    assert.ok(section.querySelector(`#${headingId}`));
+    for (const li of section.querySelectorAll("li")) {
+      assert.equal(li.getAttribute("role"), null);
+    }
+  }
+  const headerRow = root.querySelector(".table__head");
+  assert.equal(headerRow.getAttribute("aria-hidden"), "true");
+  assert.deepEqual([...headerRow.children].map((e) => e.textContent), ["Patient", "Why now", "Evidence"]);
+});
+
+test("each row link carries one accessible name built from its visible text", () => {
+  const model = caseloadModel(figma, { proposals: [] }, { now });
+  const root = render(model, handlers());
+  const maya = root.querySelectorAll(".row").find((r) => r.getAttribute("data-row-id") === "maya");
+  const name = maya.getAttribute("aria-label");
+  assert.match(name, /^Maya Ruiz, 67\. Needs you\./);
+  assert.match(name, /Bending deeper/);
 });
 
 test("server text (names) lands verbatim as element text, not as markup", () => {

@@ -25,13 +25,22 @@ def test_pain_seven_or_more_needs_you_with_change_as_evidence() -> None:
     assert t.reason == "Reported pain 7 out of 10 after the last session"
 
 
-def test_compensation_memory_needs_you() -> None:
-    mem = [{"kind": "compensation", "message": "Bending deeper, but taking weight off her right leg",
+def test_compensation_memory_needs_you_is_deterministic_not_ai_message() -> None:
+    """The reason/evidence come from `evidence` numbers and `affected_side`, never the AI `message` (I9)."""
+    mem = [{"kind": "compensation", "message": "Bending deeper, but taking weight off her right leg (AI note).",
             "evidence": {"load_from": 47.0, "load_to": 36.0, "side": "right"}, "time": "2026-10-11T09:00:00Z"}]
     t = triage(sig(memory=mem))
     assert (t.bucket, t.kind) == ("needs_you", "compensation")
-    assert t.reason == "Bending deeper, but taking weight off her right leg"
+    assert t.reason == "Bending deeper, but taking weight off the right leg"
     assert t.evidence == "Right leg 47% → 36%"
+
+
+def test_compensation_unknown_side_falls_back_to_affected_leg() -> None:
+    mem = [{"kind": "compensation", "message": "ai text", "evidence": {"load_from": 47.0, "load_to": 36.0},
+            "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=mem))
+    assert t.reason == "Bending deeper, but taking weight off the affected leg"
+    assert t.evidence == "Affected leg 47% → 36%"
 
 
 def test_missed_three_needs_you() -> None:
@@ -46,14 +55,43 @@ def test_flags_and_effort_watch() -> None:
     e = triage(sig(last_effort=[8, 8, 9]))
     assert (e.bucket, e.kind) == ("watch", "effort")
     assert e.reason == "Rated effort “hard” 3 sessions running"
+    assert e.evidence == "Effort 9 → 8"
+
+
+def test_pain_memory_watch_is_deterministic_using_real_insight_evidence_keys() -> None:
+    """server/agents/insight.py `_pain` evidence carries `max_pain_recent`, not `pain_post` alone."""
+    mem = [{"kind": "pain", "message": "Pain after exercise reached 5/10 in the last 7 days (AI note).",
+            "evidence": {"days": 21, "exercises": ["squat"], "pain_post": [2, 5], "max_pain_recent": 5,
+                        "high_pain_sessions": 1, "threshold": 7, "recent_days": 7},
+            "time": "2026-10-11T07:00:00Z"}]
+    t = triage(sig(memory=mem))
+    assert (t.bucket, t.kind) == ("watch", "pain")
+    assert t.reason == "Pain after exercise reached 5/10 this week"
+
+
+def test_pain_memory_watch_falls_back_without_evidence_numbers() -> None:
+    mem = [{"kind": "pain", "message": "ai text", "evidence": {}, "time": "2026-10-11T07:00:00Z"}]
+    t = triage(sig(memory=mem))
+    assert t.reason == "Pain reported after exercise this week"
+    assert t.evidence == ""
 
 
 def test_on_track_uses_progress_memory_else_steady() -> None:
-    mem = [{"kind": "depth_gain", "message": "Reached the 110° knee bend goal", "evidence": {"gain_deg": 6},
+    mem = [{"kind": "depth_gain", "message": "Reached the 110° knee bend goal (AI note)",
+            "evidence": {"exercise_id": "squat", "gain_deg": 6, "weeks": 3},
             "time": "2026-10-11T07:45:00Z"}]
     t = triage(sig(memory=mem))
-    assert (t.bucket, t.kind, t.evidence) == ("on_track", "progress", "Depth +6° this week")
+    assert (t.bucket, t.kind) == ("on_track", "progress")
+    assert t.reason == "Squat depth up 6° over 3 weeks"
+    assert t.evidence == "Depth +6°"
     assert triage(sig()).kind == "steady"
+
+
+def test_steady_reason_uses_houston_local_date_not_utc() -> None:
+    """Review I4: 2026-10-11T01:53Z is Oct 10 evening in Houston (America/Chicago), not Oct 11."""
+    t = triage(sig(memory=[], last_session_at=datetime(2026, 10, 11, 1, 53, tzinfo=UTC)))
+    assert t.kind == "steady"
+    assert t.reason == "Last session on Oct 10"
 
 
 def test_severity_orders_buckets() -> None:
@@ -71,6 +109,7 @@ def test_compensation_real_insight_evidence_uses_affected_side() -> None:
             "time": "2026-10-11T09:00:00Z"}]
     t = triage(sig(memory=mem, affected_side="right"))
     assert (t.bucket, t.kind) == ("needs_you", "compensation")
+    assert t.reason == "Bending deeper, but taking weight off the right leg"
     assert t.evidence == "Right leg 47% → 36%"
 
 
@@ -82,4 +121,5 @@ def test_asymmetry_real_insight_evidence_uses_affected_side() -> None:
             "time": "2026-10-11T09:00:00Z"}]
     t = triage(sig(memory=mem, affected_side="left"))
     assert (t.bucket, t.kind) == ("needs_you", "asymmetry")
-    assert t.evidence == "Left leg asymmetry 3% → 7%"
+    assert t.reason == "Leaning more onto one side"
+    assert t.evidence == "Asymmetry 3% → 7%"

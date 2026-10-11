@@ -202,7 +202,7 @@ test("model runs against the real server sample and keeps the response shape", (
       assert.equal(typeof r.reason, "string");
       assert.equal(typeof r.when, "string");
       assert.equal(typeof r.evidence, "string");
-      assert.ok(["alert", "plain"].includes(r.evidenceTone));
+      assert.ok(["alert", "plain", "empty"].includes(r.evidenceTone));
       assert.match(r.href, /^#\/patients\//);
     }
   }

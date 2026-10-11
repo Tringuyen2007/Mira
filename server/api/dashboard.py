@@ -45,25 +45,41 @@ def _week(row: dict[str, Any]) -> int:
     if first_at is None:
         return 1
     days = (datetime.now(UTC) - first_at).days
-    return max(1, days // 7)
+    return days // 7 + 1
 
 
-async def _live_now(db: Database) -> dict[str, Any] | None:
-    """The current `/ws/live` session, if any, past idle/done. Not limited to one therapist's caseload: a
-    therapist may have another therapist's patient live on the shared device."""
+def _live_now(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The current `/ws/live` session, if any, past idle/done, and only when that patient is in `rows`
+    (this therapist's caseload) — otherwise None (I1). The name comes from the matching row, which also
+    avoids an extra `queries.get_patient` round trip."""
     state = get_state()
     session = state.sessions.current
     live = state.bridge.live
     if session is None or live.phase in IDLE_PHASES:
         return None
-    patient = await queries.get_patient(db, session.patient_id)
-    name = patient["name"] if patient else session.profile.first_name
-    return {"patient_id": session.patient_id, "name": name, "exercise_name": live.exercise_name,
+    row = next((r for r in rows if r["id"] == session.patient_id), None)
+    if row is None:
+        return None
+    return {"patient_id": row["id"], "name": row["name"], "exercise_name": live.exercise_name,
             "set": live.set, "sets_target": live.sets_target, "rep": live.rep}
 
 
+def _last_signal_at(row: dict[str, Any]) -> datetime | None:
+    """The most recent of the last session time and any memory event time (Minor 10: the secondary sort
+    key should be "last signal time", not just the last session). Memory event times come back from jsonb
+    as ISO strings, not datetimes."""
+    times = [row["last_session_at"]] if row["last_session_at"] else []
+    for event in row["memory"] or []:
+        raw = event.get("time")
+        if isinstance(raw, datetime):
+            times.append(raw)
+        elif isinstance(raw, str):
+            times.append(datetime.fromisoformat(raw))
+    return max(times) if times else None
+
+
 def _sort_key(patient: dict[str, Any]) -> tuple[int, float]:
-    last_at = patient["last_session_at"]
+    last_at = patient["last_signal_at"]
     return (patient["severity"], last_at.timestamp() if last_at else 0.0)
 
 
@@ -71,7 +87,7 @@ def _sort_key(patient: dict[str, Any]) -> tuple[int, float]:
 async def caseload(therapist_id: str = Query(pattern=ID_RE, max_length=64),
                    db: Database = Depends(require_db)) -> dict[str, Any]:
     rows = await dashboard_queries.caseload_signals(db, therapist_id)
-    live = await _live_now(db)
+    live = _live_now(rows)
     live_patient_id = live["patient_id"] if live else None
 
     patients: list[dict[str, Any]] = []
@@ -84,9 +100,11 @@ async def caseload(therapist_id: str = Query(pattern=ID_RE, max_length=64),
             "bucket": t.bucket, "severity": t.severity, "kind": t.kind, "reason": t.reason,
             "evidence": t.evidence, "last_session_at": row["last_session_at"],
             "last_session_id": str(row["last_session_id"]) if row["last_session_id"] else None,
-            "live_now": is_live,
+            "live_now": is_live, "last_signal_at": _last_signal_at(row),
         })
     patients.sort(key=_sort_key, reverse=True)
+    for p in patients:
+        del p["last_signal_at"]
 
     counts = {"all": len(patients), "needs_you": 0, "watch": 0, "on_track": 0}
     for p in patients:

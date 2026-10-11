@@ -15,6 +15,7 @@ CASELOAD_LIMIT = 500
 CASELOAD_TIMEOUT_S = 3.0
 MEMORY_DAYS_FOR_SIGNALS = 21  # the needs_you/watch memory rules only look at unacknowledged events this recent
 MEMORY_EVENTS_LIMIT = 100
+ALERT_DAYS = 30  # matches server/db/queries.alert_steps's window, so "open" means the same thing everywhere
 
 # One statement: patients of a therapist + the signals `dashboard_triage.triage()` needs for each one.
 #   pts        patients of the given therapist
@@ -30,7 +31,7 @@ MEMORY_EVENTS_LIMIT = 100
 #   mem        unacknowledged memory_events from the last 21 days, newest first, as a jsonb array
 #   missed     days since the last session, capped at 7, but only counted (else 0) when an active prescription
 #              targets >= 5 sessions/week (otherwise "missed" doesn't mean much for a 1x/week plan)
-CASELOAD_SQL = f"""
+CASELOAD_SQL = """
 WITH pts AS (
   SELECT id, name, age, condition, affected_side, simulated, created_at
   FROM patients WHERE therapist_id = %(therapist_id)s
@@ -75,29 +76,44 @@ WITH pts AS (
   GROUP BY patient_id, flag
 ), top_flag AS (
   SELECT DISTINCT ON (patient_id) patient_id, flag AS top_flag_last
-  FROM flag_votes ORDER BY patient_id, n DESC
+  FROM flag_votes ORDER BY patient_id, n DESC, flag
 ), al AS (
   SELECT DISTINCT ON (a.patient_id) a.patient_id, a.kind AS open_alert_kind
   FROM alerts a JOIN pts p ON p.id = a.patient_id
-  WHERE a.alert_id NOT IN (SELECT alert_id FROM alerts WHERE step = ANY(%(closed_steps)s))
+  WHERE a.time >= now() - make_interval(days => %(alert_days)s)
+    AND NOT EXISTS (
+      SELECT 1 FROM alerts c WHERE c.alert_id = a.alert_id AND c.step = ANY(%(closed_steps)s)
+    )
   ORDER BY a.patient_id, a.time DESC
 ), mem AS (
   SELECT m.patient_id,
-         jsonb_agg(jsonb_build_object('kind', m.kind, 'message', m.message, 'evidence', m.evidence,
-                                       'time', m.time) ORDER BY m.time DESC) AS memory
+         jsonb_agg(jsonb_build_object('kind', m.kind, 'message', m.message,
+                                       'evidence', m.evidence - 'investigation', 'time', m.time)
+                    ORDER BY m.time DESC) AS memory
   FROM memory_events m JOIN pts p ON p.id = m.patient_id
   WHERE NOT m.acknowledged AND m.time >= now() - make_interval(days => %(mem_days)s)
   GROUP BY m.patient_id
+), fin_sess AS (
+  -- Only finished sessions of this therapist's patients count toward "missed" (I3).
+  SELECT s.patient_id, max(s.started_at) AS last_finished_session_at
+  FROM sessions s JOIN pts p ON p.id = s.patient_id
+  WHERE s.ended_at IS NOT NULL
+  GROUP BY s.patient_id
+), active_rx AS (
+  SELECT pr.patient_id, min(pr.created_at) AS first_active_created_at
+  FROM prescriptions pr JOIN pts p ON p.id = pr.patient_id
+  WHERE pr.active AND (pr.targets->>'sessions_per_week')::numeric >= 5
+  GROUP BY pr.patient_id
 ), missed AS (
   SELECT p.id AS patient_id,
-         CASE WHEN EXISTS (
-                SELECT 1 FROM prescriptions pr WHERE pr.patient_id = p.id AND pr.active
-                  AND (pr.targets->>'sessions_per_week')::numeric >= 5)
-              THEN LEAST(7, COALESCE(extract(day FROM now() - fs.last_session_at)::int, 7))
-              ELSE 0 END AS missed_sessions
+         CASE WHEN rx.patient_id IS NULL THEN 0
+              ELSE LEAST(7, extract(day FROM now() - COALESCE(
+                     fs.last_finished_session_at, GREATEST(p.created_at, rx.first_active_created_at)
+                   ))::int)
+         END AS missed_sessions
   FROM pts p
-  LEFT JOIN (SELECT patient_id, max(started_at) AS last_session_at FROM sessions GROUP BY patient_id) fs
-    ON fs.patient_id = p.id
+  LEFT JOIN active_rx rx ON rx.patient_id = p.id
+  LEFT JOIN fin_sess fs ON fs.patient_id = p.id
 )
 SELECT p.id, p.name, p.age, p.condition, p.affected_side, p.simulated, p.created_at,
        coalesce(fsess.first_session_at, p.created_at) AS first_session_at,
@@ -120,13 +136,14 @@ LEFT JOIN al ON al.patient_id = p.id
 LEFT JOIN mem ON mem.patient_id = p.id
 LEFT JOIN missed ms ON ms.patient_id = p.id
 ORDER BY p.name
-LIMIT {CASELOAD_LIMIT}
+LIMIT %(limit)s
 """
 
-SESSIONS_TODAY_SQL = f"""
+SESSIONS_TODAY_SQL = """
 SELECT count(*) AS n FROM sessions
 WHERE patient_id = ANY(%(patient_ids)s)
-  AND started_at >= time_bucket(INTERVAL '1 day', now(), '{TZ}')
+  AND ended_at IS NOT NULL
+  AND started_at >= time_bucket(INTERVAL '1 day', now(), %(tz)s)
 """
 
 MEMORY_EVENTS_SQL = """
@@ -142,15 +159,16 @@ async def caseload_signals(db: Database, therapist_id: str) -> list[dict[str, An
     """One row per patient of `therapist_id`, with everything `dashboard_triage.Signals` needs. Bounded to
     CASELOAD_LIMIT patients; CASELOAD_TIMEOUT_S for the whole statement."""
     return await db.fetch(CASELOAD_SQL, {"therapist_id": therapist_id, "closed_steps": list(CLOSED_ALERT_STEPS),
-                                         "mem_days": MEMORY_DAYS_FOR_SIGNALS},
+                                         "mem_days": MEMORY_DAYS_FOR_SIGNALS, "alert_days": ALERT_DAYS,
+                                         "limit": CASELOAD_LIMIT},
                          timeout_s=CASELOAD_TIMEOUT_S)
 
 
 async def sessions_done_today(db: Database, patient_ids: list[str]) -> int:
-    """Sessions those patients started since local midnight (server.db.queries.TZ)."""
+    """Finished sessions those patients started since local midnight (server.db.queries.TZ)."""
     if not patient_ids:
         return 0
-    row = await db.fetchrow(SESSIONS_TODAY_SQL, {"patient_ids": patient_ids})
+    row = await db.fetchrow(SESSIONS_TODAY_SQL, {"patient_ids": patient_ids, "tz": TZ})
     return int(row["n"]) if row else 0
 
 

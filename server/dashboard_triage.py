@@ -22,6 +22,12 @@ later task may enrich evidence with the patient's affected side before calling `
 
 `Signals.affected_side` (Task 8) is that enrichment: it is used as the leg label whenever the memory event's
 `evidence` dict has no `side` key of its own (real Insight evidence never does), e.g. "Right leg 47% → 36%".
+
+Review I9: a memory event's `message` is Insight's AI-written note (Gemini, or a SQL-only fallback) and is
+never shown here. Every reason/evidence pair this module returns for a memory-backed rule is built only from
+the `evidence` dict's numbers (plus `Signals.affected_side`), by `_compensation_text` / `_asymmetry_text` /
+`_pain_watch_text` / `_progress_text` below. The AI `message` stays available from `GET /patients/{id}/memory`
+("Therapist Memory"), labelled as an AI draft there.
 """
 
 from __future__ import annotations
@@ -29,6 +35,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
+
+from server.db.queries import TZ
 
 Bucket = Literal["needs_you", "watch", "on_track"]
 
@@ -92,6 +101,11 @@ def _fmt_num(value: Any) -> str:
     return str(int(f)) if f.is_integer() else f"{f:g}"
 
 
+def _fmt_round(value: Any) -> str:
+    """Whole-number formatting for percentages/degrees, matching the Figma one-liners (Minor 3)."""
+    return str(round(float(value)))
+
+
 def _first_last(values: Any) -> tuple[Any, Any] | tuple[None, None]:
     if not isinstance(values, (list, tuple)):
         return None, None
@@ -99,33 +113,56 @@ def _first_last(values: Any) -> tuple[Any, Any] | tuple[None, None]:
     return (present[0], present[-1]) if len(present) >= 2 else (None, None)
 
 
-def _compensation_evidence(ev: dict[str, Any], affected_side: str | None = None) -> str:
+def _exercise_name(exercise_id: Any) -> str:
+    return str(exercise_id or "exercise").replace("_", " ")
+
+
+def _compensation_text(ev: dict[str, Any], affected_side: str | None) -> tuple[str, str]:
+    """Deterministic (reason, evidence) for a compensation memory event, built only from `evidence`
+    numbers and the patient's affected side — never Insight's AI-written `message` (I9)."""
     load_from, load_to, side = ev.get("load_from"), ev.get("load_to"), ev.get("side") or affected_side
     if load_from is None or load_to is None:
         load_from, load_to = _first_last(ev.get("affected_load_pct"))
+    if isinstance(side, str) and side:
+        reason = f"Bending deeper, but taking weight off the {side.lower()} leg"
+        label = side.capitalize()
+    else:
+        reason = "Bending deeper, but taking weight off the affected leg"
+        label = "Affected"
     if load_from is None or load_to is None:
-        return ""
-    label = f"{side.capitalize()} leg" if isinstance(side, str) and side else "Affected leg"
-    return f"{label} {_fmt_num(load_from)}% → {_fmt_num(load_to)}%"
+        return reason, ""
+    return reason, f"{label} leg {_fmt_round(load_from)}% → {_fmt_round(load_to)}%"
 
 
-def _asymmetry_evidence(ev: dict[str, Any], affected_side: str | None = None) -> str:
+def _asymmetry_text(ev: dict[str, Any], affected_side: str | None) -> tuple[str, str]:
+    """Deterministic (reason, evidence) for an asymmetry_worse memory event (I9)."""
+    reason = "Leaning more onto one side"
     frm, to = ev.get("from"), ev.get("to")
     if frm is None or to is None:
         frm, to = _first_last(ev.get("avg_asymmetry"))
     if frm is None or to is None:
-        return ""
-    side = ev.get("side") or affected_side
-    label = f"{side.capitalize()} leg a" if isinstance(side, str) and side else "A"
-    return f"{label}symmetry {_fmt_num(frm)}% → {_fmt_num(to)}%"
+        return reason, ""
+    return reason, f"Asymmetry {_fmt_round(frm)}% → {_fmt_round(to)}%"
 
 
-def _progress_evidence(ev: dict[str, Any]) -> str:
+def _pain_watch_text(ev: dict[str, Any]) -> tuple[str, str]:
+    """Deterministic (reason, evidence) for a watch-level pain memory event (< 7), reading the real
+    `_pain` evidence keys from server/agents/insight.py (I9)."""
+    max_pain = ev.get("max_pain_recent")
+    if max_pain is None:
+        return "Pain reported after exercise this week", ""
+    return f"Pain after exercise reached {_fmt_num(max_pain)}/10 this week", ""
+
+
+def _progress_text(ev: dict[str, Any]) -> tuple[str, str]:
+    """Deterministic (reason, evidence) for a depth_gain memory event (I9; also fixes the "this week"
+    vs. "3 weeks" mismatch, Minor 3)."""
     gain = ev.get("gain_deg")
+    exercise = _exercise_name(ev.get("exercise_id")).capitalize()
     if gain is None:
-        return ""
-    sign = "+" if float(gain) >= 0 else ""
-    return f"Depth {sign}{_fmt_num(gain)}° this week"
+        return f"{exercise} depth improving", ""
+    gain_s = _fmt_round(gain)
+    return f"{exercise} depth up {gain_s}° over 3 weeks", f"Depth +{gain_s}°"
 
 
 def _find_memory(memory: list[dict[str, Any]], kinds: frozenset[str]) -> dict[str, Any] | None:
@@ -157,9 +194,9 @@ def triage(s: Signals) -> Triage:
     worsening = _find_memory(s.memory, NEEDS_YOU_MEMORY_KINDS)
     if worsening is not None:
         kind = "compensation" if worsening.get("kind") == "compensation" else "asymmetry"
-        evidence_fn = _compensation_evidence if kind == "compensation" else _asymmetry_evidence
-        evidence = evidence_fn(worsening.get("evidence") or {}, s.affected_side)
-        return _result("needs_you", worsening.get("message", ""), evidence, kind)
+        text_fn = _compensation_text if kind == "compensation" else _asymmetry_text
+        reason, evidence = text_fn(worsening.get("evidence") or {}, s.affected_side)
+        return _result("needs_you", reason, evidence, kind)
 
     if s.missed_sessions >= MISSED_NEEDS_YOU_MIN:
         reason = f"Missed {s.missed_sessions} sessions in a row"
@@ -169,7 +206,8 @@ def triage(s: Signals) -> Triage:
     # ---- watch --------------------------------------------------------------------------------------------
     low_pain = _find_memory(s.memory, frozenset({PAIN_MEMORY_KIND}))
     if low_pain is not None:
-        return _result("watch", low_pain.get("message", ""), "", "pain")
+        reason, evidence = _pain_watch_text(low_pain.get("evidence") or {})
+        return _result("watch", reason, evidence, "pain")
 
     if s.flagged_reps_last >= FLAGGED_REPS_WATCH_MIN:
         reason = f"{_flag_phrase(s.top_flag_last)} on {s.flagged_reps_last} of {s.reps_last} reps"
@@ -178,16 +216,18 @@ def triage(s: Signals) -> Triage:
 
     if len(s.last_effort) >= EFFORT_STREAK and all(e >= EFFORT_HARD_MIN for e in s.last_effort[:EFFORT_STREAK]):
         reason = f"Rated effort “hard” {EFFORT_STREAK} sessions running"
-        return _result("watch", reason, "", "effort")
+        evidence = f"Effort {s.last_effort[EFFORT_STREAK - 1]} → {s.last_effort[0]}"
+        return _result("watch", reason, evidence, "effort")
 
     # ---- on_track -------------------------------------------------------------------------------------------
     progress = _find_memory(s.memory, PROGRESS_MEMORY_KINDS)
     if progress is not None:
-        evidence = _progress_evidence(progress.get("evidence") or {})
-        return _result("on_track", progress.get("message", ""), evidence, "progress")
+        reason, evidence = _progress_text(progress.get("evidence") or {})
+        return _result("on_track", reason, evidence, "progress")
 
     if s.last_session_at is not None:
-        reason = f"Last session on {s.last_session_at.strftime('%b %-d')}"
+        local = s.last_session_at.astimezone(ZoneInfo(TZ))
+        reason = f"Last session on {local.strftime('%b %-d')}"
     else:
         reason = "No sessions yet"
     return _result("on_track", reason, "", "steady")

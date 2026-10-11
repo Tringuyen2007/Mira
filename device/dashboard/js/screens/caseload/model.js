@@ -27,16 +27,17 @@ function capitalize(s) {
 }
 
 function toRow(p, now) {
+  const sub = [capitalize(p.condition), p.week != null ? `wk ${p.week}` : null].filter(Boolean).join(" · ");
   return {
     id: p.id,
     name: p.name,
     age: p.age,
-    sub: `${capitalize(p.condition)} · wk ${p.week}`,
+    sub,
     statusIcon: STATUS_FOR_BUCKET[p.bucket] || "ok",
     reason: p.reason,
     when: p.live_now ? "Live now" : `Last session ${fmtWhen(p.last_session_at, now)}`,
     evidence: p.evidence,
-    evidenceTone: p.bucket === "needs_you" ? "alert" : "plain",
+    evidenceTone: !p.evidence ? "empty" : p.bucket === "needs_you" ? "alert" : "plain",
     href: href("patient", { pid: p.id }),
   };
 }
@@ -62,13 +63,15 @@ function buildCopilot(proposalsJson) {
 
 export function caseloadModel(caseloadJson, proposalsJson, { filter = "all", search = "", showAllOnTrack = false,
                                                               now = new Date() } = {}) {
+  // Minor 14: an unknown `?filter=` used to leave no tab active; fall back to "all" like the default.
+  const activeKey = TABS.some((t) => t.key === filter) ? filter : "all";
   const counts = (caseloadJson && caseloadJson.counts) || { all: 0, needs_you: 0, watch: 0, on_track: 0 };
   const tabs = TABS.map((t) => ({
     key: t.key, label: t.label, count: t.key === "all" ? counts.all : counts[t.bucket],
-    active: (filter || "all") === t.key,
+    active: activeKey === t.key,
   }));
 
-  const activeTab = TABS.find((t) => t.key === (filter || "all")) || TABS[0];
+  const activeTab = TABS.find((t) => t.key === activeKey) || TABS[0];
   const needle = search.trim().toLowerCase();
   const allPatients = (caseloadJson && caseloadJson.patients) || [];
 
