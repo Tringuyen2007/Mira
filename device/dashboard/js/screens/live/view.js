@@ -25,17 +25,23 @@ export function renderRoomCard() {
   const liveBadgeEl = h("span", { class: "chip live__badge" },
     h("span", { class: "live__badge-dot", "aria-hidden": "true" }), "LIVE");
   const latencyEl = h("span", { class: "meta live__latency" });
+  const poseStatusEl = h("p", { class: "meta", role: "status" }, "Waiting for Mira's private pose stream…");
   const avatarHost = h("div", { class: "live__avatar-host" });
+  const videoEl = h("video", { class: "live__camera", autoplay: "", playsinline: "", muted: "",
+    "aria-label": "Live camera video" });
+  const videoStatusEl = h("p", { class: "meta live__video-status", role: "status" }, "Connecting camera video…");
+  const mediaHost = h("div", { class: "live__media-host" }, videoEl, videoStatusEl);
   const repCardEl = h("div", { class: "card live__rep-card", hidden: true },
     h("p", { class: "live__rep-big" }), h("p", { class: "meta live__rep-line" }));
   const hrChipEl = h("span", { class: "chip live__hr-chip", hidden: true });
   const pausedEl = h("div", { class: "live__paused-banner", role: "status", hidden: true }, "Paused");
   const el = h("section", { class: "card live__room", "aria-label": "Live 3D twin" },
-    h("div", { class: "live__room-head" }, liveBadgeEl, latencyEl),
-    h("div", { class: "live__room-body" }, avatarHost, repCardEl, hrChipEl, pausedEl));
+    h("div", { class: "live__room-head" }, liveBadgeEl, latencyEl), poseStatusEl,
+    h("div", { class: "live__room-body" },
+      h("div", { class: "live__views" }, mediaHost, avatarHost), repCardEl, hrChipEl, pausedEl));
   const repBigEl = repCardEl.querySelector(".live__rep-big");
   const repLineEl = repCardEl.querySelector(".live__rep-line");
-  return { el, avatarHost, liveBadgeEl, latencyEl, repCardEl, repBigEl, repLineEl, hrChipEl, pausedEl };
+  return { el, avatarHost, videoEl, videoStatusEl, liveBadgeEl, latencyEl, poseStatusEl, repCardEl, repBigEl, repLineEl, hrChipEl, pausedEl };
 }
 
 // "Send a cue" panel when the device-bridge endpoint is live (caps.has("/live/say")).

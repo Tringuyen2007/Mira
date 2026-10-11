@@ -93,16 +93,17 @@ struct LiveView: View {
                     }
                     .overlay(alignment: .bottomTrailing) { Text("Mirror view").font(MiraUI.font(13)).foregroundStyle(MiraUI.soft) }
             } else {
-                // Stationary placeholder, fixed height: the 3D skeleton view goes here once the camera engine
-                // is connected. No animation — the live stream re-renders this screen ~10×/s and an implicit
-                // repeating animation made the card jitter.
                 MiraCard {
-                    VStack(spacing: 12) {
-                        Image(systemName: "camera.metering.unknown").font(.system(size: 34)).foregroundStyle(MiraUI.soft)
-                        Text("3D movement view").font(MiraUI.font(20, "SemiBold"))
-                        Text("Mira will show your skeleton here once the cameras are set up.")
-                            .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft).multilineTextAlignment(.center)
-                    }.frame(maxWidth: .infinity, minHeight: 200)
+                    if let pose = state.liveSession.pose, pose.hasValidDimensions {
+                        PoseSkeletonView(joints: pose.joints, flags: pose.flags)
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "figure.stand").font(.system(size: 34)).foregroundStyle(MiraUI.soft)
+                            Text("Waiting for Mira’s movement view").font(MiraUI.font(20, "SemiBold"))
+                            Text("Your connected camera sends a private skeleton here. Video stays on the camera computer.")
+                                .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft).multilineTextAlignment(.center)
+                        }.frame(maxWidth: .infinity, minHeight: 200)
+                    }
                 }
                 .overlay { RoundedRectangle(cornerRadius: 28).stroke(MiraUI.alert, lineWidth: hasFlags ? 2.5 : 0) }
                 .accessibilityElement(children: .combine)
@@ -261,6 +262,42 @@ struct RatingCard: View {
                 Slider(value: $value, in: 0...10, step: 1).tint(MiraUI.charcoal).accessibilityLabel(title)
                 HStack { Text("0 · \(minimum)"); Spacer(); Text("10 · \(maximum)") }.font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
             }
+        }
+    }
+}
+
+/// Local rendering of the existing 33-joint `/ws/pose` stream.  It never needs a video URL, so a remote
+/// OpenVINO agent can make this view live without granting the phone access to Eric's camera.
+private struct PoseSkeletonView: View {
+    let joints: [[Double]]
+    let flags: [String]
+    private let bones = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24),
+                         (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)]
+    private let keyJoints = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+
+    var body: some View {
+        Canvas { context, size in
+            let xs = joints.map { $0[0] }, ys = joints.map { $0[1] }
+            let minX = xs.min() ?? 0, maxX = xs.max() ?? 1
+            let minY = ys.min() ?? 0, maxY = ys.max() ?? 1
+            let xSpan = max(maxX - minX, 0.01), ySpan = max(maxY - minY, 0.01)
+            func point(_ index: Int) -> CGPoint {
+                let joint = joints[index]
+                return CGPoint(x: size.width * (0.16 + 0.68 * (joint[0] - minX) / xSpan),
+                               y: size.height * (0.08 + 0.84 * (1 - (joint[1] - minY) / ySpan)))
+            }
+            var path = Path()
+            for (from, to) in bones { path.move(to: point(from)); path.addLine(to: point(to)) }
+            context.stroke(path, with: .color(flags.isEmpty ? MiraUI.accent : MiraUI.alert), lineWidth: 4)
+            for index in keyJoints {
+                let p = point(index)
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(.white))
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .background(MiraUI.mist, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(alignment: .topLeading) {
+            Text("Live skeleton · video stays private").font(MiraUI.font(13, "Medium")).foregroundStyle(MiraUI.soft).padding(14)
         }
     }
 }

@@ -21,6 +21,7 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 BASELINE_ENV = {
     "MIRA_API_TOKEN": TOKEN,
     "MIRA_DEVICE_TOKEN": "",
+    "MIRA_VISION_TOKEN": "",
     "MIRA_SOURCE": "mock",
     "ENGINE_MODE": "thread",
     "MOCK_PATIENT_ID": "maya",

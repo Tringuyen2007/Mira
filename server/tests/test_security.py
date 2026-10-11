@@ -13,6 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from server.config import PLACEHOLDER_TOKEN
 from server.security import MAX_WEBHOOK_BYTES, require_principal, require_token
+from server.state import get_state
 from server.tests.conftest import AUTH, TOKEN
 
 TUNNEL = "mira-test.trycloudflare.com"
@@ -67,6 +68,27 @@ def test_ws_with_token_receives_data(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/pose?token={TOKEN}") as ws:
         msg = ws.receive_json()
     assert set(msg) == {"t", "joints", "confidence", "load_l_pct", "flags"}
+
+
+def test_remote_vision_agent_fans_pose_to_dashboard(make_client: Callable[..., TestClient]) -> None:
+    vision_token = "vision-token-0123456789abcdef"
+    client = make_client(MIRA_SOURCE="remote", MIRA_VISION_TOKEN=vision_token)
+    started = client.post("/sessions", headers=AUTH).json()
+    get_state().bridge.send_to_engine({"type": "command", "name": "start", "session_id": started["session_id"]})
+    frame = {"type": "frame", "seq": 1, "t": time.time(), "joints": [[0, 0, 0]] * 33,
+             "confidence": [1] * 33, "flags": [], "load_l_pct": 50}
+    with client.websocket_connect(f"/ws/pose?token={TOKEN}") as pose, \
+            client.websocket_connect(f"/ws/vision?token={vision_token}") as vision:
+        vision.send_json(frame)
+        assert pose.receive_json()["joints"] == frame["joints"]
+
+
+def test_remote_vision_rejects_api_token(make_client: Callable[..., TestClient]) -> None:
+    client = make_client(MIRA_VISION_TOKEN="vision-token-0123456789abcdef")
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws/vision?token={TOKEN}"):
+            pass
+    assert exc.value.code == 1008
 
 
 def test_tunnel_host_blocked_except_webhook(make_client: Callable[..., TestClient]) -> None:

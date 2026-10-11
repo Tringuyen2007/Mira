@@ -209,7 +209,7 @@ async function bootShell({ token, therapistId }) {
   const ctx = {
     api: endpoints,
     sockets,
-    auth: { therapistId, signOut },
+    auth: { therapistId, token, signOut },
     caps,
     navigate,
     toast: toaster.toast,

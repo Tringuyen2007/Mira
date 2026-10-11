@@ -24,6 +24,7 @@ _FALSE = {"0", "false", "no", "off", ""}
 SECRET_FIELDS = (
     "MIRA_API_TOKEN",
     "MIRA_DEVICE_TOKEN",
+    "MIRA_VISION_TOKEN",
     "LCD_LINK_KEY",
     "TIGER_DSN",
     "COPILOT_DSN",
@@ -44,6 +45,12 @@ MIN_TOKEN_LEN = 24
 class Config:
     MIRA_API_TOKEN: str = ""
     MIRA_DEVICE_TOKEN: str = ""  # optional, least-privilege token for the LCD kiosk (/ws/live + /ws/events only)
+    # Optional credential for the remote vision agent (for example Eric's laptop).  When set, it unlocks
+    # /ws/vision; it is deliberately separate from the dashboard and patient credentials.
+    MIRA_VISION_TOKEN: str = ""
+    # Therapist-only WebRTC playback URL template.  Include {session_id}, e.g.
+    # https://media.example.com/mira/{session_id}/whep. Empty keeps camera video disabled.
+    MIRA_WHEP_URL: str = ""
     LCD_LINK_KEY: str = ""  # optional secret for GET /lcd/<key>, a link that opens the kiosk already paired
     MIRA_SOURCE: str = "mock"
     ENGINE_MODE: str = "thread"
@@ -191,6 +198,19 @@ class Config:
             return f"LCD_LINK_KEY is shorter than {MIN_TOKEN_LEN} characters"
         if key in (self.MIRA_API_TOKEN, self.MIRA_DEVICE_TOKEN):
             return "LCD_LINK_KEY must differ from MIRA_API_TOKEN and MIRA_DEVICE_TOKEN"
+        return None
+
+    def vision_token_problem(self) -> str | None:
+        """Why MIRA_VISION_TOKEN can't be used (None if unset or fine)."""
+        token = self.MIRA_VISION_TOKEN
+        if not token:
+            return None
+        if token == PLACEHOLDER_TOKEN:
+            return "MIRA_VISION_TOKEN is still the .env.example placeholder"
+        if len(token) < MIN_TOKEN_LEN:
+            return f"MIRA_VISION_TOKEN is shorter than {MIN_TOKEN_LEN} characters"
+        if token in (self.MIRA_API_TOKEN, self.MIRA_DEVICE_TOKEN):
+            return "MIRA_VISION_TOKEN must differ from the API and device tokens"
         return None
 
 

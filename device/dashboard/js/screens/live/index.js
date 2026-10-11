@@ -8,6 +8,7 @@ import { href } from "../../core/router.js";
 import { firstName, patientMeta } from "../../core/format.js";
 import { errorState } from "../../ui/states.js";
 import { createAvatarView } from "../../avatar/avatarView.js";
+import { attachWhep } from "../../media/whep.js";
 import { lerpJoints, isValidJoints } from "../../three/joints.js";
 import { liveModel, cueHistoryModel } from "./model.js";
 import {
@@ -32,6 +33,7 @@ export const screen = {
     let lastReceivedAt = null;
     let lastJoints = null;
     let unsubWatch = null; // while nobody is live: re-check on the first live snapshot
+    let stopVideo = null;
     let lastRecheckAt = 0;
 
     const requestedPid = /^[A-Za-z0-9_-]{1,64}$/.test(route.params.pid || "") ? route.params.pid : null;
@@ -95,6 +97,18 @@ export const screen = {
       });
       renderCueHistoryList(cueHistoryRefs.listHost, cueHistoryModel(cueEvents));
       applySnapshot(lastSnapshot, lastReceivedAt);
+      startVideo();
+    }
+
+    async function startVideo() {
+      try {
+        const media = await ctx.api.liveMedia();
+        if (!alive || !roomRefs || !media?.whep_url) return;
+        stopVideo = await attachWhep(roomRefs.videoEl, media.whep_url, ctx.auth.token);
+        if (roomRefs) roomRefs.videoStatusEl.textContent = "Live camera · synchronized with the 3D body view";
+      } catch {
+        if (roomRefs) roomRefs.videoStatusEl.textContent = "Camera video is not connected yet.";
+      }
     }
 
     // `receivedAt`: when this snapshot arrived, so the latency is server time vs receive time.
@@ -125,6 +139,7 @@ export const screen = {
         const eased = lerpJoints(lastJoints, msg.joints || null, POSE_LERP_T);
         lastJoints = isValidJoints(eased) ? eased : (msg.joints || null);
         avatar?.setFrame({ joints: lastJoints, load_l_pct: msg.load_l_pct, flags: msg.flags || [], t: msg.t });
+        if (roomRefs && isValidJoints(lastJoints)) roomRefs.poseStatusEl.textContent = "Private pose stream connected · no camera video is shared.";
       });
       unsubEvents = ctx.sockets.subscribe("events", (msg) => {
         if (!alive || !msg || msg.type !== "cue") return;
@@ -175,6 +190,7 @@ export const screen = {
       alive = false;
       unsubWatch?.(); unsubWatch = null;
       stopSockets();
+      stopVideo?.(); stopVideo = null;
       avatar?.dispose();
     };
   },

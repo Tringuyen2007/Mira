@@ -28,6 +28,7 @@ export function createEndpoints(api, therapistId) {
     // Planned route (decisions): the Live session screen's "Send a cue" panel only calls this (and only
     // renders at all) when caps.has("/live/say") — the device-bridge endpoint that says a cue through Mira.
     sayLive: (pid, text) => api.post("/live/say", { patient_id: pid, therapist_id: therapistId, text }),
+    liveMedia: () => api.get("/live/media"),
 
     alerts: () => api.get("/alerts"),
     resolveAlert: (alertId, note) =>
