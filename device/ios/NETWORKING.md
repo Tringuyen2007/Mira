@@ -7,7 +7,9 @@ The current Live screen is a small integration surface; the full planned Live
 experience (avatar, safety sheet, haptics, pain entry) is separate work.
 
 Server entry, connection checks, stream status, message counts, and decoding
-diagnostics are compiled into **Debug builds only** under Settings. They are
+diagnostics are compiled into **Debug builds only** and require the explicit
+launch argument `--network-debug`. With that argument, open Settings → Developer
+connection tools. Without it, the app shows the user design. Diagnostics are
 absent from Release builds. Home and Live show only a plain-language availability
 message when needed, without server addresses or protocol details. A final
 customer-facing pairing/provisioning flow is still needed to configure a server
@@ -33,8 +35,9 @@ calibration, notifications and Copilot (fake mode) work.
 ## Quick manual test (Simulator)
 
 1. Open `device/ios/Mira.xcodeproj` in Xcode, select an iPhone simulator, and Run
-   with the **Debug** build configuration.
-2. Complete the welcome screen. Open **Settings**.
+   with the **Debug** build configuration. In Product → Scheme → Edit Scheme →
+   Run → Arguments, add `--network-debug`. Remove design-preview arguments.
+2. Complete onboarding. Open **Settings → Developer connection tools**.
 3. Enter `http://localhost:8000` and the **pairing token** (the server's
    `MIRA_API_TOKEN`), then tap **Save & connect**. The token is stored in the
    Keychain and shown only as `••••` plus its last four characters.
@@ -43,8 +46,9 @@ calibration, notifications and Copilot (fake mode) work.
 5. Tap **Test REST connection**. Expect **REST OK · server online, token accepted**
    (it calls the public `GET /health`, then the authenticated `GET /calibration/status`).
 6. Open **Home → Live session**. Expect changing angle/rep values and spoken-cue text.
-7. Tap **Pause**: the server accepts it (it is echoed on `/ws/events`). The mock
-   engine does not act on commands yet (see "Open items").
+7. Tap **Pause**: the server echoes it on `/ws/events`, the mock engine freezes the
+   program (`/ws/live` reports `paused: true`, event `paused {reason: "user"}`) and the
+   app shows its Paused screen. **Resume** sends `start`; the server answers `resumed`.
 8. `curl -X POST -H "Authorization: Bearer <token>" http://localhost:8000/demo/trigger_fall`
    → **Mira alert** appears with the server's message; **I'm OK** closes it.
 9. Stop the server (Ctrl-C). Expect **Mira is unavailable right now.**; restart it
@@ -155,13 +159,14 @@ History routes need the database and return 503 with `DB_DISABLED=1`.
 
 ## Open items
 
-- Session commands (`start/pause/skip/stop`) reach the server and are echoed, but no
-  engine acts on them yet (the mock engine ignores them; Eric's vision engine and
-  the server's engine reverse channel need to define it).
+- Session commands (`start/pause/skip/stop`) are forwarded to the engine over the
+  server's reverse channel (README "Engine reverse channel"); the mock engine applies
+  them. Eric's vision engine must implement the same four commands.
 - There is no `POST /sessions/{id}/cue` on the server; the provisional `sendCue`
   call was removed.
 - A customer-facing pairing flow (QR code or similar) is still needed; the token is
-  entered in Debug Settings only.
+  entered in Debug Settings only. The onboarding "Connect Mira" step saves a local
+  draft and does not pair the server (see ONBOARDING.md).
 
 ## Behavior and limits
 

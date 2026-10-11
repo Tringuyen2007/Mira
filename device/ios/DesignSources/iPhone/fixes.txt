@@ -1,0 +1,199 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/2f017da9-df7f-4cef-8ed2-ec8b8b5bef14";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgFootprint1 = `${assetPathPrefix}/3b945.png`;
+const imgFloor = `${assetPathPrefix}/ca6a1.svg`;
+const imgVignetteGlow = `${assetPathPrefix}/17172.svg`;
+const imgMatOutline = `${assetPathPrefix}/05b61.svg`;
+const imgFootprint = `${assetPathPrefix}/d0220.svg`;
+const imgPole = `${assetPathPrefix}/cc935.svg`;
+const imgIconCheckCircle = `${assetPathPrefix}/4817e.svg`;
+const imgPole1 = `${assetPathPrefix}/1da93.svg`;
+const imgMoveArrow = `${assetPathPrefix}/5fc3e.svg`;
+const imgIconArrowLeftCircle = `${assetPathPrefix}/f3849.svg`;
+const imgIconCheckCircle1 = `${assetPathPrefix}/2ac66.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonSecondaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonSecondary({ className, label = "Waiting for Camera B" }: IPhoneHiFiButtonSecondaryProps) {
+  return (
+    <div className={className || "bg-[var(--color\\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="111:227" data-name="iPhone Hi-Fi / Button Secondary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="111:228">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function ArSetup3LiveCameraFixes() {
+  return (
+    <div className="relative size-full" data-node-id="112:261" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="AR Setup / 3 Live Camera Fixes">
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute h-[64px] left-0 top-[54px] w-[430px]" step="Step 3 of 5" />
+      <div className="absolute bg-gradient-to-b from-[#3d3b42] h-[360px] left-[16px] overflow-clip rounded-[32px] shadow-[0px_14px_40px_0px_rgba(31,31,33,0.22)] to-[#1f1f21] top-[126px] w-[398px]" data-node-id="112:280" data-name="AR View (phone camera)">
+        <div className="absolute h-[170px] left-0 top-[190px] w-[398px]" data-node-id="112:281" data-name="Floor">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgFloor} />
+        </div>
+        <div className="absolute h-[200px] left-[39px] top-[40px] w-[320px]" data-node-id="112:282" data-name="Vignette glow">
+          <div className="absolute inset-[-30%_-18.75%]">
+            <img alt="" className="block max-w-none size-full" src={imgVignetteGlow} />
+          </div>
+        </div>
+        <div className="absolute h-[150px] left-[68px] top-[150px] w-[262px]" data-node-id="112:283" data-name="Mat outline">
+          <div className="absolute inset-[-0.5%_-0.29%]">
+            <img alt="" className="block max-w-none size-full" src={imgMatOutline} />
+          </div>
+        </div>
+        <div className="absolute h-[170px] left-[22px] top-[84px] w-[80px]" data-node-id="112:284" data-name="Camera A">
+          <div className="absolute h-[22px] left-[8px] top-[142px] w-[64px]" data-node-id="112:285" data-name="Footprint">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgFootprint} />
+          </div>
+          <div className="absolute h-[120px] left-[40px] top-[32px] w-0" data-node-id="112:286" data-name="Pole">
+            <div className="absolute inset-[-1.04%_-1.25px]">
+              <img alt="" className="block max-w-none size-full" src={imgPole} />
+            </div>
+          </div>
+          <div className="absolute bg-white border-2 border-solid border-white h-[22px] left-[25px] rounded-[7px] top-[12px] w-[30px]" data-node-id="112:287" data-name="Camera" />
+          <div className="absolute bg-white content-stretch flex items-center justify-center left-[-2px] overflow-clip rounded-[10px] size-[34px] top-[-26px]" data-node-id="112:288" data-name="Badge A">
+            <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[18px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="112:289">
+              A
+            </p>
+          </div>
+          <div className="absolute left-[52px] size-[26px] top-[-22px]" data-node-id="112:290" data-name="icon/check-circle">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCheckCircle} />
+          </div>
+        </div>
+        <div className="absolute h-[170px] left-[278px] top-[84px] w-[80px]" data-node-id="112:292" data-name="Camera B · target outline">
+          <div className="absolute h-[22px] left-[8px] top-[142px] w-[64px]" data-node-id="112:293" data-name="Footprint">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" height="22" src={imgFootprint1} width="64" />
+          </div>
+          <div className="absolute h-[120px] left-[40px] top-[32px] w-0" data-node-id="112:294" data-name="Pole">
+            <div className="absolute inset-[-1.04%_-1.25px]">
+              <img alt="" className="block max-w-none size-full" src={imgPole1} />
+            </div>
+          </div>
+          <div className="absolute border-2 border-[rgba(255,255,255,0.85)] border-dashed h-[22px] left-[25px] rounded-[7px] top-[12px] w-[30px]" data-node-id="112:295" data-name="Camera" />
+        </div>
+        <div className="absolute h-[170px] left-[320px] top-[84px] w-[80px]" data-node-id="112:296" data-name="Camera B">
+          <div className="absolute h-[22px] left-[8px] top-[142px] w-[64px]" data-node-id="112:297" data-name="Footprint">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgFootprint} />
+          </div>
+          <div className="absolute h-[120px] left-[40px] top-[32px] w-0" data-node-id="112:298" data-name="Pole">
+            <div className="absolute inset-[-1.04%_-1.25px]">
+              <img alt="" className="block max-w-none size-full" src={imgPole} />
+            </div>
+          </div>
+          <div className="absolute bg-white border-2 border-solid border-white h-[22px] left-[25px] rounded-[7px] top-[12px] w-[30px]" data-node-id="112:299" data-name="Camera" />
+          <div className="absolute bg-white content-stretch flex items-center justify-center left-[-2px] overflow-clip rounded-[10px] size-[34px] top-[-26px]" data-node-id="112:300" data-name="Badge B">
+            <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[18px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="112:301">
+              B
+            </p>
+          </div>
+        </div>
+        <div className="absolute h-[16px] left-[325px] top-[152px] w-[30px]" data-node-id="112:302" data-name="Move arrow">
+          <div className="absolute inset-[-6.63%_0_-6.63%_-7.07%]">
+            <img alt="" className="block max-w-none size-full" src={imgMoveArrow} />
+          </div>
+        </div>
+        <div className="absolute backdrop-blur-[10px] bg-[var(--color\/surface,white)] content-stretch flex gap-[10px] items-center left-[16px] overflow-clip pl-[14px] pr-[18px] py-[12px] rounded-[22px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[268px] w-[366px]" data-node-id="112:305" data-name="Caption">
+          <div className="relative shrink-0 size-[28px]" data-node-id="112:303" data-name="icon/arrow-left-circle">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconArrowLeftCircle} />
+          </div>
+          <p className="[word-break:break-word] flex-[1_0_0] font-['Inter:Medium'] font-medium leading-[26px] min-w-px not-italic relative text-[19px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="112:306">
+            Camera B: move it a hand’s width to the left
+          </p>
+        </div>
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[8px] items-start left-[32px] not-italic overflow-clip top-[514px] whitespace-nowrap" data-node-id="112:307" data-name="Intro">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px]" data-node-id="112:308">
+          CAMERAS
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[44px] relative shrink-0 text-[36px] text-[transparent] to-[#391323]" data-node-id="112:309">
+          Adjust your cameras
+        </p>
+      </div>
+      <div className="absolute content-stretch flex flex-col gap-[12px] items-start left-[32px] overflow-clip top-[604px]" data-node-id="112:310" data-name="Camera status">
+        <div className="bg-[var(--color\/surface,white)] border border-solid border-white content-stretch flex gap-[14px] h-[64px] items-center overflow-clip pl-[18px] pr-[20px] relative rounded-[20px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] shrink-0 w-[366px]" data-node-id="112:311" data-name="Camera / Camera A">
+          <div className="relative shrink-0 size-[28px]" data-node-id="112:312" data-name="icon/check-circle">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCheckCircle1} />
+          </div>
+          <p className="[word-break:break-word] flex-[1_0_0] font-['Inter:Semi_Bold'] font-semibold leading-[normal] min-w-px not-italic relative text-[20px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="112:314">
+            Camera A
+          </p>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] whitespace-nowrap" data-node-id="112:315">
+            Ready
+          </p>
+        </div>
+        <div className="bg-[var(--color\/surface,white)] border-2 border-[#1e1e1e] border-solid content-stretch flex gap-[14px] h-[64px] items-center overflow-clip pl-[18px] pr-[20px] relative rounded-[20px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] shrink-0 w-[366px]" data-node-id="112:316" data-name="Camera / Camera B">
+          <div className="relative shrink-0 size-[28px]" data-node-id="112:317" data-name="icon/arrow-left-circle">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconArrowLeftCircle} />
+          </div>
+          <p className="[word-break:break-word] flex-[1_0_0] font-['Inter:Semi_Bold'] font-semibold leading-[normal] min-w-px not-italic relative text-[20px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="112:319">
+            Camera B
+          </p>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="112:320">
+            Move left
+          </p>
+        </div>
+      </div>
+      <IPhoneHiFiButtonSecondary className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[800px] w-[366px]" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

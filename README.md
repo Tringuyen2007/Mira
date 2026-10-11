@@ -5,7 +5,15 @@ the engine bridge (mock / replay / live vision), the safety path (fall check-in,
 and the REST API. This README is everything a new developer needs; the team plan (TRI.md, kept by Tri) has the
 design background, but no setup step depends on it.
 
+Open `device/Mira.xcworkspace` in Xcode to see the iPhone and Watch projects
+together. Choose **Mira** for the patient app, **MiraWatchPreview** for the
+interactive Watch mockup on iPhone, or **MiraWatchMock** for watchOS.
+
 iOS networking setup and tests: [Networking guide](device/ios/NETWORKING.md).
+
+Onboarding flow, remaining integrations, and checks: [Onboarding guide](device/ios/ONBOARDING.md).
+
+Interactive Watch concept and preview instructions: [Watch mockup](device/watch/README.md).
 
 ## Repo layout
 

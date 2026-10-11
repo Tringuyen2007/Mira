@@ -1,0 +1,175 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/b7a79f43-3361-4589-899b-64be8b8e5650";
+const imgLcdHiFiSparkle = `${assetPathPrefix}/fbd90.svg`;
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgColor = `${assetPathPrefix}/0bb9b.png`;
+const imgColor1 = `${assetPathPrefix}/8f08b.png`;
+const imgGlow = `${assetPathPrefix}/13b9b.svg`;
+const imgRing200 = `${assetPathPrefix}/92dd8.svg`;
+const imgRing280 = `${assetPathPrefix}/f3d55.svg`;
+const imgRing400 = `${assetPathPrefix}/6b95f.svg`;
+const imgHalo = `${assetPathPrefix}/fbbaf.svg`;
+const imgInnerRing = `${assetPathPrefix}/ebf09.svg`;
+const imgLcdHiFiSparkle1 = `${assetPathPrefix}/fd3f6.svg`;
+const imgLcdHiFiSparkle2 = `${assetPathPrefix}/9e75c.svg`;
+const imgLcdHiFiSparkle3 = `${assetPathPrefix}/6fcae.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiTextFieldProps = {
+  className?: string;
+  action?: string;
+  label?: string;
+  value?: string;
+};
+
+function IPhoneHiFiTextField({ className, action = "Edit", label = "Height", value = "5 ft 4 in" }: IPhoneHiFiTextFieldProps) {
+  return (
+    <div className={className || "[word-break:break-word] content-stretch flex flex-col gap-[10px] items-start leading-[normal] not-italic relative w-[366px]"} data-node-id="98:139" data-name="iPhone Hi-Fi / Text Field">
+      <p className="font-['Inter:Semi_Bold'] font-semibold relative shrink-0 text-[19px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:140">
+        {label}
+      </p>
+      <div className="bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex h-[64px] items-center overflow-clip pl-[22px] pr-[20px] relative rounded-[20px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] shrink-0 w-full" data-node-id="98:141" data-name="Input">
+        <p className="flex-[1_0_0] font-['Inter:Regular'] font-normal min-w-px relative text-[22px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="98:142">
+          {value}
+        </p>
+        <p className="font-['Inter:Medium'] font-medium relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] whitespace-nowrap" data-node-id="164:915">
+          {action}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LcdHiFiSparkle({ className }: { className?: string }) {
+  return (
+    <div className={className || "drop-shadow-[0px_0px_6px_rgba(143,186,204,0.7)] relative size-[24px]"} data-node-id="24:135" data-name="LCD Hi-Fi / Sparkle">
+      <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle} />
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function ArSetup5Save() {
+  return (
+    <div className="relative size-full" data-node-id="112:393" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="AR Setup / 5 Save">
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute h-[64px] left-0 top-[54px] w-[430px]" step="Step 5 of 5" />
+      <div className="absolute left-[65px] size-[300px] top-[112px]" data-node-id="112:412" data-name="Glow">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgGlow} />
+      </div>
+      <div className="absolute left-[115px] size-[200px] top-[162px]" data-node-id="112:413" data-name="Ring 200">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing200} />
+      </div>
+      <div className="absolute left-[75px] size-[280px] top-[122px]" data-node-id="112:414" data-name="Ring 280">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing280} />
+      </div>
+      <div className="absolute left-[15px] size-[400px] top-[62px]" data-node-id="112:415" data-name="Ring 400">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing400} />
+      </div>
+      <div className="absolute h-[240px] left-[107px] top-[142px] w-[216px]" data-node-id="112:416" data-name="Mira · Celebrating">
+        <div className="absolute left-[-6px] size-[228px] top-0" data-node-id="I112:416;38:295" data-name="Halo">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHalo} />
+        </div>
+        <div className="absolute left-[9px] size-[198px] top-[15px]" data-node-id="I112:416;38:296" data-name="Inner ring">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgInnerRing} />
+        </div>
+        <div className="absolute contents left-[12.6px] top-[13.2px]" data-node-id="I112:416;78:383" data-name="Mascot · celebrating">
+          <div className="absolute h-[215.4px] left-[7.56px] mask-alpha mask-intersect mask-no-clip mask-no-repeat mask-size-[318px_359px] top-[7.92px] w-[190.8px]" data-node-id="I112:416;78:381" style={{ maskImage: `url("${imgColor}")` }} data-name="Color">
+            <img alt="" className="absolute inset-0 max-w-none object-contain pointer-events-none size-full" src={imgColor1} />
+          </div>
+        </div>
+      </div>
+      <LcdHiFiSparkle className="absolute drop-shadow-[0px_0px_6px_rgba(143,186,204,0.7)] left-[300px] size-[24px] top-[150px]" />
+      <div className="absolute drop-shadow-[0px_0px_3.5px_rgba(143,186,204,0.7)] left-[322px] size-[14px] top-[186px]" data-node-id="112:425" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle1} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_3px_rgba(143,186,204,0.7)] left-[104px] size-[12px] top-[330px]" data-node-id="112:428" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle2} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_2.5px_rgba(143,186,204,0.7)] left-[96px] size-[10px] top-[170px]" data-node-id="112:431" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle3} />
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[8px] items-center left-[51.5px] not-italic overflow-clip top-[430px] whitespace-nowrap" data-node-id="112:434" data-name="Intro">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px]" data-node-id="112:435">
+          ALL DONE
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[48px] relative shrink-0 text-[40px] text-[transparent] to-[#391323]" data-node-id="112:436">
+          You’re all set up
+        </p>
+        <div className="font-['Inter:Regular'] font-normal leading-[0] relative shrink-0 text-[20px] text-[color:var(--color\/ink-soft,#5e5a63)] text-center" data-node-id="112:437">
+          <p className="leading-[28px] mb-0">Mira will remember your mat and</p>
+          <p className="leading-[28px]">cameras, so you only do this once.</p>
+        </div>
+      </div>
+      <IPhoneHiFiTextField className="[word-break:break-word] absolute content-stretch flex flex-col gap-[10px] items-start leading-[normal] left-[32px] not-italic top-[620px] w-[366px]" label="Name this spot" value="Living room" />
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[800px] w-[366px]" label="Save setup" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

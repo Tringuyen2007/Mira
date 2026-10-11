@@ -1,0 +1,346 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/65440144-860f-4fbd-855c-b2ad995358ae";
+const imgIconHome = `${assetPathPrefix}/a307e.svg`;
+const imgIconProgress = `${assetPathPrefix}/38fd5.svg`;
+const imgIconCare = `${assetPathPrefix}/a9d75.svg`;
+const imgIconSettings = `${assetPathPrefix}/8c9e1.svg`;
+const imgOrbitRing = `${assetPathPrefix}/7103f.svg`;
+const imgIconPrevMonth = `${assetPathPrefix}/a6cfd.svg`;
+const imgIconNextMonth = `${assetPathPrefix}/8db26.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiTabBarProps = {
+  className?: string;
+  active?: "Progress";
+};
+
+function IPhoneHiFiTabBar({ className, active = "Progress" }: IPhoneHiFiTabBarProps) {
+  return (
+    <div className={className || "backdrop-blur-[12px] bg-[var(--color\\/surface,white)] border border-solid border-white drop-shadow-[0px_-6px_15px_rgba(143,186,204,0.16)] h-[100px] relative rounded-tl-[28px] rounded-tr-[28px] w-[430px]"} data-node-id="114:359">
+      <div className="absolute content-stretch flex gap-[4px] items-start left-[11px] overflow-clip top-[7px]" data-node-id="114:360" data-name="Tabs">
+        <div className="content-stretch flex flex-col gap-[4px] h-[66px] items-center justify-center overflow-clip relative shrink-0 w-[98px]" data-node-id="114:361" data-name="Tab / Home">
+          <div className="content-stretch flex h-[34px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[60px]" data-node-id="114:362" data-name="Icon pill">
+            <div className="relative shrink-0 size-[24px]" data-node-id="114:363" data-name="icon/home">
+              <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconHome} />
+            </div>
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="114:365">
+            Home
+          </p>
+        </div>
+        <div className="content-stretch flex flex-col gap-[4px] h-[66px] items-center justify-center overflow-clip relative shrink-0 w-[98px]" data-node-id="114:366" data-name="Tab / Progress (selected)">
+          <div className="bg-[#1e1e1e] content-stretch flex h-[34px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[60px]" data-node-id="114:367" data-name="Icon pill">
+            <div className="relative shrink-0 size-[24px]" data-node-id="114:368" data-name="icon/progress">
+              <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconProgress} />
+            </div>
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="114:370">
+            Progress
+          </p>
+        </div>
+        <div className="content-stretch flex flex-col gap-[4px] h-[66px] items-center justify-center overflow-clip relative shrink-0 w-[98px]" data-node-id="114:371" data-name="Tab / Care">
+          <div className="content-stretch flex h-[34px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[60px]" data-node-id="114:372" data-name="Icon pill">
+            <div className="relative shrink-0 size-[24px]" data-node-id="114:373" data-name="icon/care">
+              <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCare} />
+            </div>
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="114:375">
+            Care
+          </p>
+        </div>
+        <div className="content-stretch flex flex-col gap-[4px] h-[66px] items-center justify-center overflow-clip relative shrink-0 w-[98px]" data-node-id="114:376" data-name="Tab / Settings">
+          <div className="content-stretch flex h-[34px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[60px]" data-node-id="114:377" data-name="Icon pill">
+            <div className="relative shrink-0 size-[24px]" data-node-id="114:378" data-name="icon/settings">
+              <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconSettings} />
+            </div>
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="114:380">
+            Settings
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function Progress4Calendar() {
+  return (
+    <div className="relative size-full" data-node-id="136:732" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Progress / 4 Calendar">
+      <div className="absolute left-[230px] size-[420px] top-[-190px]" data-node-id="136:733" data-name="Orbit ring">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <p className="[word-break:break-word] absolute bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[42px] left-[24px] not-italic text-[34px] text-[transparent] to-[#391323] top-[66px] whitespace-nowrap" data-node-id="136:735">
+        Your progress
+      </p>
+      <div className="absolute bg-[var(--color\/surface,white)] border border-[#857f8a] border-solid content-stretch flex items-start left-[24px] overflow-clip p-[4px] rounded-[999px] top-[124px]" data-node-id="136:736" data-name="Section Picker">
+        <div className="content-stretch flex h-[48px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[93.5px]" data-node-id="136:737" data-name="Segment / Exercises">
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:738">
+            Exercises
+          </p>
+        </div>
+        <div className="content-stretch flex h-[48px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[93.5px]" data-node-id="136:739" data-name="Segment / Balance">
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:740">
+            Balance
+          </p>
+        </div>
+        <div className="content-stretch flex h-[48px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[93.5px]" data-node-id="136:741" data-name="Segment / Goals">
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:742">
+            Goals
+          </p>
+        </div>
+        <div className="bg-[#1e1e1e] content-stretch flex h-[48px] items-center justify-center overflow-clip relative rounded-[999px] shrink-0 w-[93.5px]" data-node-id="136:743" data-name="Segment / Calendar (selected)">
+          <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="136:744">
+            Calendar
+          </p>
+        </div>
+      </div>
+      <div className="absolute h-[48px] left-[24px] overflow-clip top-[194px] w-[382px]" data-node-id="136:833" data-name="Month header">
+        <div className="absolute left-0 size-[48px] top-0" data-node-id="136:834" data-name="icon/prev-month">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconPrevMonth} />
+        </div>
+        <div className="absolute left-[334px] size-[48px] top-0" data-node-id="136:836" data-name="icon/next-month">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconNextMonth} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[116.5px] not-italic text-[22px] text-[color:var(--color\/ink,#1c1a22)] top-[10.5px] whitespace-nowrap" data-node-id="136:838">
+          October 2026
+        </p>
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex gap-[10px] items-baseline left-[24px] not-italic overflow-clip top-[256px] whitespace-nowrap" data-node-id="136:839" data-name="Summary">
+        <p className="font-['Inter:Light'] font-light leading-[52px] relative shrink-0 text-[44px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="136:840">
+          8 of 9
+        </p>
+        <p className="font-['Inter:Regular'] font-normal leading-[normal] relative shrink-0 text-[19px] text-[color:var(--color\/ink-soft,#5e5a63)]" data-node-id="136:841">
+          days done so far
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white h-[312px] left-[24px] overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[324px] w-[382px]" data-node-id="136:842" data-name="Calendar Grid">
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[26.86px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:843">
+          M
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[80.57px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:844">
+          T
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[129.79px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:845">
+          W
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[184px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:846">
+          T
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[236.71px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:847">
+          F
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[287.93px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:848">
+          S
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[339.64px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[13px] whitespace-nowrap" data-node-id="136:849">
+          S
+        </p>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[168px] overflow-clip rounded-[22px] size-[44px] top-[41px]" data-node-id="136:850" data-name="Day 1">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[17.5px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:851">
+            1
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[219.71px] overflow-clip rounded-[22px] size-[44px] top-[41px]" data-node-id="136:852" data-name="Day 2">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:853">
+            2
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[271.43px] overflow-clip rounded-[22px] size-[44px] top-[41px]" data-node-id="136:854" data-name="Day 3">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:855">
+            3
+          </p>
+        </div>
+        <div className="absolute border-[#857f8a] border-[1.5px] border-dashed left-[323.14px] overflow-clip rounded-[22px] size-[44px] top-[41px]" data-node-id="136:856" data-name="Day 4">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[14.5px] not-italic text-[18px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[9.5px] whitespace-nowrap" data-node-id="136:857">
+            4
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[12.86px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:858" data-name="Day 5">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:859">
+            5
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[64.57px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:860" data-name="Day 6">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:861">
+            6
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[116.29px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:862" data-name="Day 7">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16.5px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:863">
+            7
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[168px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:864" data-name="Day 8">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:865">
+            8
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/accent,#0f6e56)] left-[219.71px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:866" data-name="Day 9">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[16px] not-italic text-[18px] text-[color:var(--color\/surface,white)] top-[11px] whitespace-nowrap" data-node-id="136:867">
+            9
+          </p>
+        </div>
+        <div className="absolute bg-[var(--color\/surface,white)] border-[#1e1e1e] border-[2.5px] border-solid left-[271.43px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:868" data-name="Day 10">
+          <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[9px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[8.5px] whitespace-nowrap" data-node-id="136:869">
+            10
+          </p>
+        </div>
+        <div className="absolute left-[323.14px] overflow-clip rounded-[22px] size-[44px] top-[93px]" data-node-id="136:870" data-name="Day 11">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[13.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:871">
+            11
+          </p>
+        </div>
+        <div className="absolute left-[12.86px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:872" data-name="Day 12">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:873">
+            12
+          </p>
+        </div>
+        <div className="absolute left-[64.57px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:874" data-name="Day 13">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:875">
+            13
+          </p>
+        </div>
+        <div className="absolute left-[116.29px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:876" data-name="Day 14">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:877">
+            14
+          </p>
+        </div>
+        <div className="absolute left-[168px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:878" data-name="Day 15">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:879">
+            15
+          </p>
+        </div>
+        <div className="absolute left-[219.71px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:880" data-name="Day 16">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:881">
+            16
+          </p>
+        </div>
+        <div className="absolute left-[271.43px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:882" data-name="Day 17">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:883">
+            17
+          </p>
+        </div>
+        <div className="absolute left-[323.14px] overflow-clip rounded-[22px] size-[44px] top-[145px]" data-node-id="136:884" data-name="Day 18">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:885">
+            18
+          </p>
+        </div>
+        <div className="absolute left-[12.86px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:886" data-name="Day 19">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:887">
+            19
+          </p>
+        </div>
+        <div className="absolute left-[64.57px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:888" data-name="Day 20">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:889">
+            20
+          </p>
+        </div>
+        <div className="absolute left-[116.29px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:890" data-name="Day 21">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:891">
+            21
+          </p>
+        </div>
+        <div className="absolute left-[168px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:892" data-name="Day 22">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[11px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:893">
+            22
+          </p>
+        </div>
+        <div className="absolute left-[219.71px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:894" data-name="Day 23">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:895">
+            23
+          </p>
+        </div>
+        <div className="absolute left-[271.43px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:896" data-name="Day 24">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:897">
+            24
+          </p>
+        </div>
+        <div className="absolute left-[323.14px] overflow-clip rounded-[22px] size-[44px] top-[197px]" data-node-id="136:898" data-name="Day 25">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[11px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:899">
+            25
+          </p>
+        </div>
+        <div className="absolute left-[12.86px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:900" data-name="Day 26">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:901">
+            26
+          </p>
+        </div>
+        <div className="absolute left-[64.57px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:902" data-name="Day 27">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[11px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:903">
+            27
+          </p>
+        </div>
+        <div className="absolute left-[116.29px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:904" data-name="Day 28">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[11px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:905">
+            28
+          </p>
+        </div>
+        <div className="absolute left-[168px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:906" data-name="Day 29">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:907">
+            29
+          </p>
+        </div>
+        <div className="absolute left-[219.71px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:908" data-name="Day 30">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[10.5px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:909">
+            30
+          </p>
+        </div>
+        <div className="absolute left-[271.43px] overflow-clip rounded-[22px] size-[44px] top-[249px]" data-node-id="136:910" data-name="Day 31">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[12px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[11px] whitespace-nowrap" data-node-id="136:911">
+            31
+          </p>
+        </div>
+      </div>
+      <div className="absolute content-stretch flex gap-[22px] items-start left-[24px] overflow-clip top-[658px]" data-node-id="136:912" data-name="Legend">
+        <div className="content-stretch flex gap-[8px] items-center overflow-clip relative shrink-0" data-node-id="136:913" data-name="Key / Done">
+          <div className="bg-[var(--color\/accent,#0f6e56)] relative rounded-[11px] shrink-0 size-[22px]" data-node-id="136:914" data-name="Frame" />
+          <p className="[word-break:break-word] font-['Inter:Regular'] font-normal leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:915">
+            Done
+          </p>
+        </div>
+        <div className="content-stretch flex gap-[8px] items-center overflow-clip relative shrink-0" data-node-id="136:916" data-name="Key / Today">
+          <div className="bg-[var(--color\/surface,white)] border-[#1e1e1e] border-[2.5px] border-solid relative rounded-[11px] shrink-0 size-[22px]" data-node-id="136:917" data-name="Frame" />
+          <p className="[word-break:break-word] font-['Inter:Regular'] font-normal leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:918">
+            Today
+          </p>
+        </div>
+        <div className="content-stretch flex gap-[8px] items-center overflow-clip relative shrink-0" data-node-id="136:919" data-name="Key / Missed">
+          <div className="border-[#857f8a] border-[1.5px] border-dashed relative rounded-[11px] shrink-0 size-[22px]" data-node-id="136:920" data-name="Frame" />
+          <p className="[word-break:break-word] font-['Inter:Regular'] font-normal leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="136:921">
+            Missed
+          </p>
+        </div>
+      </div>
+      <IPhoneHiFiTabBar className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_-6px_15px_rgba(143,186,204,0.16)] h-[100px] left-0 rounded-tl-[28px] rounded-tr-[28px] top-[832px] w-[430px]" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

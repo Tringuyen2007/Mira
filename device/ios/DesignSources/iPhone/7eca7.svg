@@ -1,0 +1,11 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="icon" clip-path="url(#clip0_0_31)">
+<path id="Arc" d="M1 5.09475C2.5 2.09475 5.5 0.59475 8.5 1.09475C12.5 1.69475 15 5.09475 15 9.09475C15 13.0948 12 16.0948 8 16.0948C4.5 16.0948 1.5 13.5948 1 10.0948" stroke="white" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Head" d="M3 2V7H8" stroke="white" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<defs>
+<clipPath id="clip0_0_31">
+<rect width="22" height="22" fill="white"/>
+</clipPath>
+</defs>
+</svg>

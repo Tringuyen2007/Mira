@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="159.6" height="159.6" viewBox="0 0 159.6 159.6" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle id="Halo" cx="79.8" cy="79.8" r="79.8" fill="url(#paint0_radial_0_43)"/>
+<defs>
+<radialGradient id="paint0_radial_0_43" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(79.8 79.8) scale(79.8)">
+<stop stop-color="#FFFCF7" stop-opacity="0.95"/>
+<stop offset="0.5" stop-color="#FFF7F2" stop-opacity="0.55"/>
+<stop offset="1" stop-color="#FFF7F2" stop-opacity="0"/>
+</radialGradient>
+</defs>
+</svg>

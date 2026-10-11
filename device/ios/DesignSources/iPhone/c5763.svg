@@ -1,0 +1,28 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="398" height="360" viewBox="0 0 398 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Skeleton">
+<path id="Bone neck-pel" d="M199 134V232" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone ls-rs" d="M166 150H232" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone ls-le" d="M166 150L156 200" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone le-lw" d="M156 200L150 246" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone rs-re" d="M232 150L242 200" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone re-rw" d="M242 200L248 246" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone lh-rh" d="M180 236H218" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone lh-lk" d="M180 236L178 290" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone lk-la" d="M178 290L176 336" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone rh-rk" d="M218 236L220 290" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Bone rk-ra" d="M220 290L222 336" stroke="#0F6E56" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+<circle id="Head" cx="199" cy="108" r="17.5" fill="white" stroke="#0F6E56" stroke-width="5"/>
+<circle id="Joint ls" cx="166" cy="150" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint rs" cx="232" cy="150" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint le" cx="156" cy="200" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint re" cx="242" cy="200" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint lw" cx="150" cy="246" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint rw" cx="248" cy="246" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint lh" cx="180" cy="236" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint rh" cx="218" cy="236" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint lk" cx="178" cy="290" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint rk" cx="220" cy="290" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint la" cx="176" cy="336" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+<circle id="Joint ra" cx="222" cy="336" r="5" fill="white" stroke="#0F6E56" stroke-width="3"/>
+</g>
+</svg>
