@@ -162,14 +162,33 @@ def test_nominal_K():
     assert abs(np.degrees(2 * np.arctan(np.hypot(640, 360) / K[0, 0])) - 55) < 1e-9
 
 
-def test_solve_with_zoom_measures_then_falls_back():
+def test_solve_with_zoom_measures_then_keeps_the_best():
     cam, obs = _webcam_obs(noise=0.1)
-    sol, good = solve_with_zoom(obs, MAT, (1280, 720))
-    assert not sol.guessed and "zoom 48" in sol.zoom_msg and good is not None
+    sol, best = solve_with_zoom(obs, MAT, (1280, 720))
+    assert sol.quality == "measured" and "measured" in sol.zoom_msg and best is not None
     assert np.linalg.norm(cam_center(sol.R, sol.t) - FAR_A) < 0.10
     near = {i: obs[i] for i in (0, 1)}
-    sol2, good2 = solve_with_zoom(near, MAT, (1280, 720), last_good=good)
-    assert sol2.guessed and good2 is good and np.allclose(sol2.K, good.K)
-    sol3, good3 = solve_with_zoom(near, MAT, (1280, 720))
-    assert sol3.guessed and good3 is None and "guessed" in sol3.zoom_msg
+    sol2, best2 = solve_with_zoom(near, MAT, (1280, 720), best=best)
+    assert sol2.quality == "measured" and best2 is best and np.allclose(sol2.K, best.K)
+    _, noisy = _webcam_obs(noise=2.0, seed=3)
+    _, best3 = solve_with_zoom(noisy, MAT, (1280, 720), best=best)
+    assert best3 is best  # a worse reading never replaces a better one
     assert solve_with_zoom({}, MAT, (1280, 720)) == (None, None)
+
+
+def test_solve_with_zoom_uses_saved_then_assumed():
+    _, obs = _webcam_obs(ids=(0, 1))
+    saved = nominal_K(1280, 720, 50.0)
+    sol, _ = solve_with_zoom(obs, MAT, (1280, 720), saved=(saved, 0.01))
+    assert sol.quality == "saved" and np.allclose(sol.K, saved)
+    sol, _ = solve_with_zoom(obs, MAT, (1280, 720), saved=(saved, None))  # never measured: not trusted
+    assert sol.quality == "assumed" and np.allclose(sol.K, nominal_K(1280, 720)) and sol.zoom_std is None
+    assert "calib_refine" in sol.zoom_msg
+
+
+def test_rough_zoom_is_usable():
+    _, obs = _webcam_obs(ids=(1, 3), noise=1.0)
+    est, reason = estimate_focal(obs, MAT, (1280, 720))
+    assert reason is None and 0.03 < est.f_std / est.f <= 0.10
+    sol, _ = solve_with_zoom(obs, MAT, (1280, 720))
+    assert sol.quality == "rough" and "rough" in sol.zoom_msg

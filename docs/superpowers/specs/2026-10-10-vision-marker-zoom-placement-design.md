@@ -139,3 +139,21 @@ There is no lens-calibration step.
 - `MoveMonitor`: steady 5 px shift → "moved" after 3 checks; single-check outliers and missing markers → not moved; all hidden 10 s → "blind"; rate limit respected.
 - Height estimate on a synthetic skeleton of known height within 1%.
 - Config round-trip of `target_eye`; an old file with `intrinsics_rms` still loads.
+
+## Addendum (after rig testing, 2026-10-10)
+
+Rig testing showed the cameras are constrained by cable length and mount height and are moved between
+locations, and that zoom from the markers is often too uncertain at ~4.5 m (markers small and edge-on).
+Changes, superseding the decisions above where they conflict:
+
+- **Zoom ladder:** measured (≤ 3% std, white) → saved from an earlier session if its std ≤ 3% → rough
+  (≤ 10%, orange) → assumed typical webcam (55° diagonal, orange). The best reading of a session is kept,
+  not the latest. Saving is always allowed; `calib_refine` fine-tunes zoom and, when its guards pass,
+  marks it refined (std 2%), so it is reused at every later setup. `CameraConfig.zoom_std` stores this.
+- **Lock in place (replaces mirrored targets):** `t` saves each camera's own spot and view direction
+  (`target_eye`, `target_aim`). Locked spots more than 1 m from the camera are treated as another setup
+  and ignored. Unlocked cameras get no move/turn instructions; the map shows the default spot as a hint.
+- **Visual guidance:** bird's-eye map with each camera's field of view; a "person box" (mat footprint up to
+  1.8 m) drawn in each camera view with what is cut off; one instruction at a time with a big arrow when
+  a locked spot exists; A/B swap warning when A is on the −x side and B on the +x side.
+- **Markers can be turned:** `marker_rotation_deg` in `config/mat.yaml` (the rig uses 180).

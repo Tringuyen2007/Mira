@@ -31,14 +31,18 @@ to be about 4.5 m from the mat centre to see a whole person.
 
 1. `python -m vision.cams`: assign A (front-left, near marker 0) and B (front-right, near marker 1).
 2. `python -m vision.debug_view`: check both feeds, skeletons, ≥ 20 fps each (2D only until calibrated).
-3. Mat empty: `python -m vision.calib_extrinsics`. Each camera needs to see markers at both ends of the
-   mat so its zoom can be measured.
-   - First time (or a new room): put the cameras roughly in place and press `t` to lock the current
-     spots as a mirror-symmetric target (saved in `config/cameras.yaml`).
-   - Follow the instructions: position first ("Move 20 cm back"), then aim ("Turn right 2°, tilt down
-     1°, rotate clockwise 1°"), until both say Position OK and Aim OK. The green dashed ghost shows
-     where the mat should appear; the red aim dot should sit on the crosshair. The strip at the bottom
-     compares A and B (distance, height, angle). Press `s` to save.
+3. Mat empty: `python -m vision.calib_extrinsics`.
+   - Top: each camera with the markers it sees (yellow) and a box for the space a standing person takes
+     up above the mat: green = fits, red = cut off (the text says what to do, e.g. "feet cut off: tilt
+     down or move back"). Each camera needs to see at least 2 markers.
+   - Bottom left, bird's-eye map (Mira at the top): each camera's position, height and field of view;
+     grey rings are suggested spots, coloured rings are your locked spots.
+   - Zoom is measured from the markers when they are big enough; otherwise the zoom saved from an
+     earlier session or a typical-webcam value is used (orange), and step 4 fine-tunes it. These webcams
+     can't zoom, so once refined it is remembered for every later setup. You can always save.
+   - Press `s` to save. Press `t` to lock the current camera spots if you want the overlay to guide you
+     back to exactly these spots later at this location (one big instruction and arrow at a time, plus a
+     green ghost of the mat). At a new location the old spots are ignored; press `t` again there.
 4. `python -m vision.calib_refine`: move around the mat for 20 s; refines poses and zoom; saves only if
    the fit improves.
 5. `python -m vision.debug_view`: magenta (3D) dots should sit on the green (2D) skeletons; raise your
@@ -47,7 +51,7 @@ to be about 4.5 m from the mat centre to see a whole person.
 7. Press r in the debug view to record; `python -m vision.replay FILE` or
    `python -m vision.debug_view --replay FILE [--retriangulate]` to play back.
 
-Every session after: step 3 without `t`, then step 4.
+Every session after (or after moving): step 3, then step 4. Zoom is remembered, so this takes a minute.
 
 **Camera moved?** The live tools re-check the markers about once a second. If a camera has been
 bumped, the debug view shows "Camera A has moved (… px): re-run calib_extrinsics", `calib_refine`

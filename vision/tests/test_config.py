@@ -75,3 +75,14 @@ def test_marker_rotation_turns_each_marker_in_place():
 
 def test_repo_mat_markers_are_turned_180():
     assert load_mat().marker_rotation_deg == 180
+
+
+def test_zoom_std_and_target_aim_round_trip(tmp_path):
+    path = tmp_path / "cameras.yaml"
+    cam = CameraConfig(name="A", index=0, K=np.eye(3), dist=np.zeros(5), zoom_std=0.012,
+                       target_eye=np.array([3.0, 0.9, 3.1]), target_aim=np.array([0.1, 0.8, 0.0]))
+    save_cameras({"A": cam}, path)
+    loaded = load_cameras(path)["A"]
+    assert loaded.zoom_std == 0.012
+    np.testing.assert_allclose(loaded.target_aim, [0.1, 0.8, 0.0])
+    assert CameraConfig.from_dict("B", {"index": 1}).zoom_std is None

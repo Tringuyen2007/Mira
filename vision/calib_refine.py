@@ -27,6 +27,11 @@ from vision.record import Recorder, default_path
 from vision.replay import iter_frames
 
 COUNTDOWN_S = 3.0
+REFINED_ZOOM_STD = 0.02  # a zoom that survived the body refinement counts as measured
+
+
+def refined_zoom_std(previous: float | None) -> float:
+    return REFINED_ZOOM_STD if previous is None else min(previous, REFINED_ZOOM_STD)
 MOVE_CHECK_S = 2.0
 
 
@@ -124,6 +129,8 @@ def main() -> int:
         return 1
     for n in ("A", "B"):
         cams[n].R, cams[n].t, cams[n].K = report.R[n], report.t[n], report.K[n]
+        if report.ok:  # a forced save must not make a rejected zoom look trustworthy for later sessions
+            cams[n].zoom_std = refined_zoom_std(cams[n].zoom_std)
         cams[n].extrinsics_source, cams[n].extrinsics_rms = "bundle", report.body_rms_after
     save_cameras(cams)
     print("saved refined extrinsics. Next: python -m vision.debug_view and python -m vision.checks")

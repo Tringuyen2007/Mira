@@ -63,7 +63,8 @@ def solve_camera_pose(obs: dict[int, np.ndarray], mat: MatConfig, K, dist):
 
 
 NOMINAL_DFOV_DEG = 55.0  # starting guess / fallback: typical narrow webcam diagonal field of view
-MAX_FOCAL_STD = 0.03
+MEASURED_FOCAL_STD = 0.03  # white: good enough on its own
+ROUGH_FOCAL_STD = 0.10  # usable; calib_refine fine-tunes it
 FOV_RANGE_DEG = (30.0, 100.0)
 NEAR_IDS, FAR_IDS = {0, 1}, {2, 3}
 
@@ -116,7 +117,7 @@ def estimate_focal(obs: dict[int, np.ndarray], mat: MatConfig, image_size) -> tu
         return None, "zoom estimate failed"
     hfov = float(np.degrees(2 * np.arctan(w / 2 / f)))
     vfov = float(np.degrees(2 * np.arctan(h / 2 / f)))
-    if f_std / f > MAX_FOCAL_STD:
+    if f_std / f > ROUGH_FOCAL_STD:
         return None, f"zoom too uncertain (±{100 * f_std / f:.0f}%): get more of the mat in view"
     if not FOV_RANGE_DEG[0] <= hfov <= FOV_RANGE_DEG[1]:
         return None, f"zoom estimate {hfov:.0f}° is implausible: check marker IDs and orientation"
@@ -131,25 +132,57 @@ class ZoomSolve:
     R: np.ndarray
     t: np.ndarray
     rms: float
-    guessed: bool  # True: K is a fallback, not measured this time; the pose is for placement only
+    quality: str  # "measured" | "saved" | "rough" | "assumed"
+    zoom_std: float | None  # relative focal std; None when assumed
     zoom_msg: str
 
+    @property
+    def guessed(self) -> bool:
+        return self.quality == "assumed"
 
-def solve_with_zoom(obs: dict[int, np.ndarray], mat: MatConfig, image_size,
-                    last_good: FocalEstimate | None = None) -> tuple[ZoomSolve | None, FocalEstimate | None]:
-    """Zoom then pose from markers. Returns (solve or None, the focal estimate to remember)."""
+
+def _centered(f: float, image_size) -> np.ndarray:
+    w, h = image_size
+    return np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1.0]])
+
+
+def solve_with_zoom(obs: dict[int, np.ndarray], mat: MatConfig, image_size, best: FocalEstimate | None = None,
+                    saved: tuple[np.ndarray, float | None] | None = None
+                    ) -> tuple[ZoomSolve | None, FocalEstimate | None]:
+    """Zoom then pose from markers. Returns (solve or None, the best focal estimate seen so far).
+
+    Zoom source, most certain first: this reading or the best earlier reading this session, the zoom
+    saved from an earlier session (`saved` = (K, relative std); a None std means it was never measured
+    and is ignored), else a typical-webcam guess. These webcams can't zoom, so a saved zoom stays valid.
+    """
     est, reason = estimate_focal(obs, mat, image_size)
-    if est is not None:
-        K, guessed, msg, last_good = est.K, False, f"zoom {est.hfov_deg:.1f}° x {est.vfov_deg:.1f}°", est
-    elif last_good is not None:
-        K, guessed, msg = last_good.K, True, f"zoom from earlier ({reason})"
+    if est is not None and (best is None or est.f_std / est.f < best.f_std / best.f):
+        best = est
+    w, h = image_size
+    candidates = []
+    if best is not None:
+        candidates.append((best.f_std / best.f, best.f, "session"))
+    if saved is not None and saved[1] is not None:
+        candidates.append((float(saved[1]), float(np.asarray(saved[0])[0, 0]), "saved"))
+    if candidates:
+        std, f, source = min(candidates)
+        K = _centered(f, image_size)
+        hfov = np.degrees(2 * np.arctan(w / 2 / f))
+        if source == "saved" and std <= MEASURED_FOCAL_STD:
+            quality, msg = "saved", f"zoom {hfov:.1f}° (saved)"
+        elif std <= MEASURED_FOCAL_STD:
+            quality, msg = "measured", f"zoom {hfov:.1f}° (measured ±{std * 100:.0f}%)"
+        else:
+            quality, msg = "rough", f"zoom {hfov:.1f}° (rough ±{std * 100:.0f}%: calib_refine will fine-tune)"
     else:
-        K, guessed, msg = nominal_K(*image_size), True, f"zoom guessed ({reason})"
+        std, K = None, nominal_K(w, h)
+        quality = "assumed"
+        msg = f"zoom assumed {np.degrees(2 * np.arctan(w / 2 / K[0, 0])):.0f}° ({reason}): calib_refine will fine-tune"
     sol = solve_camera_pose(obs, mat, K, np.zeros(5))
     if sol is None:
-        return None, last_good
+        return None, best
     R, t, rms = sol
-    return ZoomSolve(K=K, R=R, t=t, rms=rms, guessed=guessed, zoom_msg=msg), last_good
+    return ZoomSolve(K=K, R=R, t=t, rms=rms, quality=quality, zoom_std=std, zoom_msg=msg), best
 
 
 def _floor_unit(v) -> np.ndarray:

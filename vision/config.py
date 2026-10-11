@@ -84,12 +84,14 @@ class CameraConfig:
     height: int = 720
     K: np.ndarray | None = None
     dist: np.ndarray | None = None
+    zoom_std: float | None = None  # relative std of K's focal length; None = assumed, not measured
     R: np.ndarray | None = None
     t: np.ndarray | None = None
     extrinsics_source: str | None = None
     extrinsics_rms: float | None = None
     marker_obs: dict[int, np.ndarray] | None = None
     target_eye: np.ndarray | None = None  # locked placement target (mat frame), see vision.placement
+    target_aim: np.ndarray | None = None  # point the camera looked at when locked
 
     @property
     def has_intrinsics(self) -> bool:
@@ -104,6 +106,7 @@ class CameraConfig:
         if self.has_intrinsics:
             d["K"] = np.asarray(self.K, float).tolist()
             d["dist"] = np.asarray(self.dist, float).ravel().tolist()
+            d["zoom_std"] = None if self.zoom_std is None else float(self.zoom_std)
         if self.R is not None and self.t is not None:
             d["R"] = np.asarray(self.R, float).tolist()
             d["t"] = np.asarray(self.t, float).ravel().tolist()
@@ -113,6 +116,8 @@ class CameraConfig:
             d["marker_obs"] = {int(k): np.asarray(v, float).tolist() for k, v in self.marker_obs.items()}
         if self.target_eye is not None:
             d["target_eye"] = np.asarray(self.target_eye, float).ravel().tolist()
+        if self.target_aim is not None:
+            d["target_aim"] = np.asarray(self.target_aim, float).ravel().tolist()
         return d
 
     @classmethod
@@ -129,12 +134,14 @@ class CameraConfig:
             height=int(d.get("height", 720)),
             K=arr("K"),
             dist=arr("dist"),
+            zoom_std=d.get("zoom_std"),
             R=arr("R"),
             t=arr("t"),
             extrinsics_source=d.get("extrinsics_source"),
             extrinsics_rms=d.get("extrinsics_rms"),
             marker_obs=None if not obs else {int(k): np.array(v, float) for k, v in obs.items()},
             target_eye=arr("target_eye"),
+            target_aim=arr("target_aim"),
         )
 
 
