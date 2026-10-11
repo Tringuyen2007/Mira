@@ -279,7 +279,7 @@ class SessionAnalyst:
             next_focus=words["next_focus"], flagged_moments=flagged, comparison=comparison, audio_url=audio_url,
             source=source, model=model)
         payload = {
-            "session_id": sid, "t": round(time.time(), 3), "exercise_id": exercise_id,
+            "session_id": sid, "patient_id": patient_id, "t": round(time.time(), 3), "exercise_id": exercise_id,
             "exercise_name": data["exercise_name"], "form_score": data["form_score"],
             "reps_total": data["reps_total"], "good_reps": data["good_reps"], "sets_done": data["sets_done"],
             "spoken": words["spoken"], "note": label_note(words["note"]), "highlights": words["highlights"],
@@ -452,7 +452,7 @@ class SessionAnalyst:
         body = (f"Form {data['form_score']}/100 · {data['good_reps']}/{data['reps_total']} good reps"
                 if data.get("form_score") is not None else "No reps counted")
         try:
-            await service.create(kind="session_summary", severity="info", therapist_id=therapist_id,
+            await service.create(kind="session_summary", severity="low", therapist_id=therapist_id,
                                  patient_id=patient_id, title=f"{first_name} finished {data['exercise_name']}",
                                  body=body, link=f"/sessions/{sid}", source_table="session_analyses",
                                  source_id=sid, dedupe_key=f"session_summary:{sid}")

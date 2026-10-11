@@ -123,3 +123,44 @@ def test_proposal_for_another_patient_never_reaches_the_phone(client: TestClient
         get_state().hub.emit("proposal_created", {"patient_id": "bob", "proposal": {"id": 1}})
         msgs = _drain(ws, 1.0)
         assert all(m.get("type") != "proposal_created" for m in msgs), msgs
+
+
+def test_patient_receives_own_session_summary_after_the_session_ends(client: TestClient, token: str,
+                                                                      dsn: str) -> None:
+    """Maya's phone is still connected when her session is stopped; the analyst's `session_summary` (emitted
+    after `stop()` has already cleared `sessions.current`) must still reach her socket. A mock auto-restart may
+    start a fresh session for her in the meantime; that is fine, we only care about the stopped session's id."""
+    import psycopg
+
+    stopped_sid = get_state().sessions.current.session_id
+    with psycopg.connect(dsn, autocommit=True) as conn:  # one rep so the analyst doesn't skip this as a false start
+        conn.execute("INSERT INTO reps (session_id, rep, set_no, quality, rom, asym_avg) "
+                     "VALUES (%s, 1, 1, 1.0, 80.0, 5.0)", (stopped_sid,))
+    with client.websocket_connect(f"/ws/events?token={token}") as ws:
+        r = client.post(f"/sessions/{stopped_sid}/stop", headers=AUTH)
+        assert r.status_code == 200
+        msgs = _drain(ws, 15.0)
+        summaries = [m for m in msgs if m.get("type") == "session_summary"]
+        assert any(m.get("session_id") == stopped_sid for m in summaries), msgs
+
+
+def test_event_tagged_for_another_patient_with_no_session_is_dropped(client: TestClient, token: str) -> None:
+    with client.websocket_connect(f"/ws/events?token={token}") as ws:
+        get_state().hub.emit("session_summary", {"patient_id": "bob", "session_id": "not-a-real-session"})
+        msgs = _drain(ws, 1.0)
+        assert all(m.get("type") != "session_summary" for m in msgs), msgs
+
+
+def test_event_for_another_patients_ended_session_is_dropped(client: TestClient, token: str) -> None:
+    r = client.post("/sessions", json={"patient_id": "bob", "exercise_id": "squat"}, headers=AUTH)
+    assert r.status_code == 200
+    bob_sid = r.json()["session_id"]
+    r = client.post(f"/sessions/{bob_sid}/stop", headers=AUTH)
+    assert r.status_code == 200
+    try:
+        with client.websocket_connect(f"/ws/events?token={token}") as ws:
+            get_state().hub.emit("session_summary", {"session_id": bob_sid})
+            msgs = _drain(ws, 1.0)
+            assert all(m.get("type") != "session_summary" for m in msgs), msgs
+    finally:
+        client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)

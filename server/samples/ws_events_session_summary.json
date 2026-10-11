@@ -1,6 +1,7 @@
 {
   "type": "session_summary",
   "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
+  "patient_id": "maya",
   "t": 1791707075.179,
   "exercise_id": "squat",
   "exercise_name": "Mini squats",

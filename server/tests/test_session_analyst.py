@@ -26,9 +26,13 @@ NOW = datetime.now(UTC).replace(microsecond=0)
 class FakeHub:
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []
+        self.published: list[dict[str, Any]] = []
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         self.events.append({"type": event_type, **payload})
+
+    def publish(self, channel: str, payload: dict[str, Any]) -> None:
+        self.published.append({"channel": channel, **payload})
 
     def of(self, kind: str) -> list[dict[str, Any]]:
         return [e for e in self.events if e["type"] == kind]
@@ -120,9 +124,13 @@ def test_form_score_is_mean_quality_half_up() -> None:
 
 
 async def test_on_stop_emits_one_session_summary_stores_row_and_notifies(dsn: str, db: Database) -> None:
+    from server.notify.notifications import NotificationService
+
     registry, session = await _full_session(dsn, exercise_id="glute_bridge")
-    notes = FakeNotifications()
-    analyst, hub = _analyst(registry, db, notes)
+    hub = FakeHub()
+    notes = NotificationService(hub, db)
+    analyst = SessionAnalyst(hub, registry, db_provider=lambda: db, notifications_provider=lambda: notes,
+                             delay_s=0)
     registry.on_stop.append(analyst.on_stop)
     await registry.stop(session.session_id)
     await analyst.drain()
@@ -154,8 +162,10 @@ async def test_on_stop_emits_one_session_summary_stores_row_and_notifies(dsn: st
     assert not row["note"].startswith(AI_DRAFT_LABEL)  # stored without the label
     assert row["flagged_moments"] == moments and row["comparison"] == comparison
 
-    [note] = notes.created
-    assert note["kind"] == "session_summary" and note["severity"] == "info" and note["therapist_id"] == "okafor"
+    count_row = await db.fetchrow("SELECT count(*) AS n FROM notifications WHERE kind = 'session_summary'")
+    assert count_row is not None and count_row["n"] == 1
+    note = await db.fetchrow("SELECT * FROM notifications WHERE kind = 'session_summary'")
+    assert note is not None and note["severity"] == "low" and note["therapist_id"] == "okafor"
     assert note["title"] == "Maya finished Glute bridge" and note["body"] == "Form 92/100 · 10/12 good reps"
     assert note["dedupe_key"] == f"session_summary:{session.session_id}"
     assert note["link"] == f"/sessions/{session.session_id}" and note["source_table"] == "session_analyses"

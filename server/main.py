@@ -354,13 +354,21 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
 
 
 def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
-    """Per-client hub filter: a phone sees frames and events only while the live session is its patient's, and
-    never an event explicitly tagged for a different patient (e.g. another patient's proposal_created/
-    proposal_decided, which carry no live session to gate them)."""
+    """Per-client hub filter: a phone sees frames and events for its own patient, even after the session that
+    produced them has ended (e.g. the analyst's `session_summary`, emitted ~2s after `stop()` already cleared
+    `sessions.current`). Priority: an explicit `patient_id` on the message decides outright; else an explicit
+    `session_id` is looked up (the registry still knows ended sessions) and that session's patient decides;
+    else (no tag at all — `/ws/live` and `/ws/pose` frames) fall back to the current-session rule."""
     def accept(msg: dict[str, Any]) -> bool:
+        tagged_patient = msg.get("patient_id")
+        if isinstance(tagged_patient, str):
+            return tagged_patient == patient_id
+        session_id = msg.get("session_id")
+        if isinstance(session_id, str):
+            session = get_state().sessions.get(session_id)
+            return session is not None and session.patient_id == patient_id
         current = get_state().sessions.current
-        return (current is not None and current.patient_id == patient_id
-                and msg.get("patient_id") in (None, patient_id))
+        return current is not None and current.patient_id == patient_id
 
     return accept
 
