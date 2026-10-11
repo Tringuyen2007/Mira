@@ -37,5 +37,11 @@ export function createToaster(container) {
     return id;
   }
 
-  return { toast, dismiss };
+  function clearAll() {
+    for (const item of queue) clearTimeout(item.timer);
+    queue = [];
+    render();
+  }
+
+  return { toast, dismiss, clearAll };
 }

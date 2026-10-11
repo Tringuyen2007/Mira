@@ -60,6 +60,10 @@
   --color-card: #ffffff;
   --color-card-sunk: #f6f4f7;
   --color-sidebar: rgba(255, 255, 255, 0.72);
+  /* Focus ring: the accent is ~6:1 against both the light canvas and white (WCAG non-text contrast >= 3:1). */
+  --color-ring-focus: var(--color-accent);
+  /* Text/icon colour for elements filled with --color-ink (active nav pill, avatar, selected pill tab). */
+  --color-on-ink: #ffffff;
   --radius-card: 20px;
   --radius-control: 12px;
   --shadow-card: 0 1px 2px rgba(28, 26, 34, 0.04), 0 8px 24px rgba(143, 186, 204, 0.12);
@@ -73,4 +77,8 @@
   --color-ink: #f4f1f6; --color-ink-soft: #c9c3cf; --color-card: #211d27; --color-card-sunk: #2b2632;
   --color-line: #3a3442; --color-line-strong: #f4f1f6; --color-sidebar: rgba(24, 21, 29, 0.9);
   --canvas: #15121a; --text-meta: 16px; --text-body: 18px; --text-card-title: 22px; --text-page-title: 36px;
+  /* --color-ink flips to a light colour here, so anything filled with it needs dark (not white) text/icons,
+     and the focus ring needs a light colour to stay visible against the dark canvas/cards (M18/I6). */
+  --color-on-ink: #15121a;
+  --color-ring-focus: var(--color-ink);
 }

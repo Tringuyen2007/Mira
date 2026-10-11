@@ -3,8 +3,13 @@ function toDate(iso) {
   return iso instanceof Date ? iso : new Date(iso);
 }
 
+function isValidDate(d) {
+  return d instanceof Date && !Number.isNaN(d.getTime());
+}
+
 export function fmtDateLong(iso, now) {
   const d = toDate(iso ?? now);
+  if (!isValidDate(d)) return "—";
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(d);
 }
 
@@ -14,6 +19,7 @@ function sameDay(a, b) {
 
 export function fmtWhen(iso, now) {
   const d = toDate(iso);
+  if (!isValidDate(d)) return "—";
   const n = toDate(now);
   if (sameDay(d, n)) {
     return `today, ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -25,11 +31,13 @@ export function fmtWhen(iso, now) {
 }
 
 export function fmtDeg(n) {
-  return n === null || n === undefined || Number.isNaN(n) ? "—" : `${Math.round(n)}°`;
+  const num = Number(n);
+  return n === null || n === undefined || !Number.isFinite(num) ? "—" : `${Math.round(num)}°`;
 }
 
 export function fmtPct(n) {
-  return n === null || n === undefined || Number.isNaN(n) ? "—" : `${Math.round(n)}%`;
+  const num = Number(n);
+  return n === null || n === undefined || !Number.isFinite(num) ? "—" : `${Math.round(num)}%`;
 }
 
 export function fmtSide(side) {

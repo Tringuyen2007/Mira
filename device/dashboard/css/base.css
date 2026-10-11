@@ -1,6 +1,10 @@
 /* Base element resets and the shared component classes used across every screen (Figma components frame
    203:109): cards, buttons, chips, pill tabs and status dots. Screen-specific layout lives in css/screens/*.css. */
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 html, body {
   margin: 0;
   min-height: 100%;
@@ -28,7 +32,9 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid var(--color-ring-cool);
+  /* --color-ring-focus (tokens.css) is >= 3:1 against both the canvas and white in light theme, and against the
+     dark canvas/cards in projector theme (WCAG 2.x 1.4.11 / 2.4.13 non-text contrast). */
+  outline: 3px solid var(--color-ring-focus);
   outline-offset: 2px;
 }
 
@@ -139,7 +145,7 @@ a {
 
 .pill-tabs button[aria-selected="true"] {
   background: var(--color-ink);
-  color: #ffffff;
+  color: var(--color-on-ink);
 }
 
 /* ---------- Meta text ---------- */

@@ -21,6 +21,49 @@ test("on* attributes become listeners; style is refused", () => {
   assert.throws(() => h("a", { href: "javascript:alert(1)" }), /href/);
 });
 
+test("on* attributes reject string values (no inline handler strings)", () => {
+  assert.throws(() => h("button", { onclick: "doStuff()" }), /onclick/);
+  assert.throws(() => h("form", { onsubmit: "return false" }), /onsubmit/);
+});
+
+test("url-bearing attributes allow only in-app hash routes and safe relative/same-origin paths", () => {
+  for (const good of [
+    ["a", "href", "#/caseload"],
+    ["a", "href", "./patient.html"],
+    ["img", "src", "assets/icons/live.svg"],
+    ["img", "src", "./assets/icons/live.svg"],
+    ["script", "src", "vendor/three/three.module.min.js"],
+    ["a", "href", "/dashboard/#/caseload"],
+  ]) {
+    const [tag, attr, value] = good;
+    assert.doesNotThrow(() => h(tag, { [attr]: value }), `${attr}=${value} should be allowed`);
+  }
+  for (const bad of [
+    ["a", "href", "https://evil.example/dashboard/x"],
+    ["a", "href", "https://example.com/#/caseload"],
+    ["a", "href", "//evil.example/x"],
+    ["a", "href", "javascript:alert(1)"],
+    ["a", "href", "/dashboard/../etc/passwd"],
+    ["a", "href", "./../../etc/passwd"],
+    ["a", "href", "assets/../../../etc/passwd"],
+    ["img", "src", "https://evil.example/x.png"],
+  ]) {
+    const [tag, attr, value] = bad;
+    assert.throws(() => h(tag, { [attr]: value }), new RegExp(attr), `${attr}=${value} should throw`);
+  }
+});
+
+test("url attribute names are checked case-insensitively", () => {
+  assert.throws(() => h("a", { HREF: "https://evil.example/x" }), /HREF/);
+  assert.throws(() => h("img", { SRC: "https://evil.example/x.png" }), /SRC/);
+  assert.throws(() => h("a", { "xlink:href": "https://evil.example/x" }), /xlink:href/);
+  assert.throws(() => h("form", { formaction: "https://evil.example/x" }), /formaction/);
+  assert.throws(() => h("form", { action: "https://evil.example/x" }), /action/);
+  assert.throws(() => h("img", { srcset: "https://evil.example/x.png 1x" }), /srcset/);
+  assert.throws(() => h("video", { poster: "https://evil.example/x.png" }), /poster/);
+  assert.doesNotThrow(() => h("img", { SRC: "assets/icons/live.svg" }));
+});
+
 test("clear removes children", () => {
   const ul = h("ul", null, h("li", null, "a"), h("li", null, "b"));
   clear(ul);

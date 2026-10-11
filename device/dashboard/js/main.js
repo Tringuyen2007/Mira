@@ -1,7 +1,7 @@
 // Boot: sign-in -> shell. Owns the single ctx object every screen is mounted with, the hash router outlet,
 // the sidebar re-render on route/store changes, and sign-out (which tears every listener/socket down).
-import { clear } from "./core/dom.js";
-import { parseRoute } from "./core/router.js";
+import { clear, h } from "./core/dom.js";
+import { parseRoute, href } from "./core/router.js";
 import { createStore } from "./core/store.js";
 import { loadAuth, clearAuth } from "./net/auth.js";
 import { createApi } from "./net/api.js";
@@ -44,9 +44,16 @@ async function bootShell({ token, therapistId }) {
   mainEl.hidden = false;
   appEl.setAttribute("data-state", "app");
 
+  // Set false (once, idempotently) by signOut. Checked after every await below so a sign-out that happens
+  // mid-boot (stale token -> 401 -> onUnauthorized -> signOut) stops this session from resuming and re-mounting
+  // a screen, stealing focus from the sign-in form, or re-opening sockets with the now-revoked token.
+  let alive = true;
+  let signedOut = false;
+
   const api = createApi({ token, onUnauthorized: () => signOut() });
   const endpoints = createEndpoints(api, therapistId);
   const caps = await loadCapabilities(globalThis.fetch.bind(globalThis));
+  if (!alive) return;
   const sockets = createSocketHub({ location: globalThis.location, token, therapistId });
   const store = createStore({ proposalsWaiting: 0, selectedPatientId: null, therapist: null, live: null });
 
@@ -54,11 +61,13 @@ async function bootShell({ token, therapistId }) {
   let unmount = null;
 
   function renderSidebarInto() {
+    if (!alive) return;
     clear(sidebarEl);
     sidebarEl.append(renderSidebar({ route: currentRoute, ...store.get() }));
   }
 
   function render() {
+    if (!alive) return;
     unmount?.();
     unmount = null;
     clear(mainEl);
@@ -69,6 +78,10 @@ async function bootShell({ token, therapistId }) {
     const screen = SCREENS[key];
     if (screen && typeof screen.mount === "function") {
       unmount = screen.mount(mainEl, ctx, currentRoute) || null;
+    } else if (currentRoute.name === "notfound") {
+      mainEl.append(
+        empty("Page not found", "That page doesn't exist."),
+        h("a", { class: "btn btn--secondary", href: href("caseload") }, "Go to caseload"));
     } else {
       mainEl.append(empty("Coming soon", ""));
     }
@@ -86,7 +99,12 @@ async function bootShell({ token, therapistId }) {
   function onHashChange() { render(); }
   globalThis.addEventListener("hashchange", onHashChange);
 
+  // Idempotent: a stale token can produce several concurrent 401s (patients list + patient detail, say), each
+  // calling onUnauthorized -> signOut(); only the first should tear anything down or touch the DOM.
   function signOut() {
+    if (signedOut) return;
+    signedOut = true;
+    alive = false;
     globalThis.removeEventListener("hashchange", onHashChange);
     unsubStore();
     unsubEvents();
@@ -94,6 +112,11 @@ async function bootShell({ token, therapistId }) {
     sockets.closeAll();
     unmount?.();
     unmount = null;
+    // Clear patient data and any lingering toasts before handing the workstation back to the sign-in screen
+    // (shared clinic workstation / projector: nothing from this session should stay on screen).
+    clear(mainEl);
+    clear(sidebarEl);
+    toaster.clearAll();
     clearAuth(sessionStorage);
     globalThis.location.hash = "";
     showSignIn();
@@ -110,25 +133,36 @@ async function bootShell({ token, therapistId }) {
   };
 
   // Therapist display name: GET /patients/{first} -> patient.therapist_name when available, else the id.
+  // Clinic name has no data source yet (server TODO); the sidebar hides the line when it's empty.
   try {
     const list = await endpoints.patients();
+    if (!alive) return;
     const items = (list && list.patients) || [];
     let name = therapistId;
     if (items.length > 0) {
       try {
         const detail = await endpoints.patient(items[0].id);
+        if (!alive) return;
         const therapistName = detail && detail.patient && detail.patient.therapist_name;
         if (typeof therapistName === "string" && therapistName) name = therapistName;
       } catch { /* keep the id as the display name */ }
     }
+    if (!alive) return;
     store.set({ therapist: { id: therapistId, name, clinic: "" } });
   } catch {
-    store.set({ therapist: { id: therapistId, name: therapistId, clinic: "" } });
+    if (alive) store.set({ therapist: { id: therapistId, name: therapistId, clinic: "" } });
   }
 
+  if (!alive) return;
   render();
 }
 
-const auth = loadAuth(sessionStorage);
-if (auth) bootShell(auth);
-else showSignIn();
+// Clickjacking: frame-ancestors can't be set in a <meta> CSP and the server doesn't send X-Frame-Options for
+// /dashboard/, so refuse to boot the token-entry page inside a frame instead (no-op outside a browser, e.g. tests).
+if (typeof globalThis.top !== "undefined" && typeof globalThis.self !== "undefined" && globalThis.top !== globalThis.self) {
+  clear(document.body);
+} else {
+  const auth = loadAuth(sessionStorage);
+  if (auth) bootShell(auth);
+  else showSignIn();
+}

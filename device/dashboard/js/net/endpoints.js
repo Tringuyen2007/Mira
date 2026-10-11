@@ -43,7 +43,7 @@ export function createEndpoints(api, therapistId) {
 
     notifications: ({ unread, limit, sinceId } = {}) =>
       api.get("/notifications", { unread, limit, since_id: sinceId, therapist_id: therapistId }),
-    notificationCount: () => api.get("/notifications/count"),
+    notificationCount: () => api.get("/notifications/count", { therapist_id: therapistId }),
     markRead: (id) => api.post(`/notifications/${enc(id)}/read`),
     markAllRead: () => api.post("/notifications/read-all", { therapist_id: therapistId }),
     ack: (id) => api.post(`/notifications/${enc(id)}/ack`, { therapist_id: therapistId }),

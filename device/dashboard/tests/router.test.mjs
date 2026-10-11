@@ -16,16 +16,30 @@ test("parses every dashboard route", () => {
   assert.equal(parseRoute("#/nope").name, "notfound");
 });
 
+test("the pid-less live route resolves to the live screen with no params", () => {
+  assert.deepEqual(parseRoute("#/live"), { name: "live", params: {}, query: {} });
+  assert.deepEqual(parseRoute("#/live?x=1"), { name: "live", params: {}, query: { x: "1" } });
+  assert.equal(href("live"), "#/live");
+  assert.equal(href("live", { pid: "george" }), "#/live/george");
+});
+
 test("rejects ids that are not plain ids", () => {
   assert.equal(parseRoute("#/patients/..%2Fx").name, "notfound");
   assert.equal(parseRoute("#/patients/a b").name, "notfound");
   assert.equal(parseRoute("#/proposals/abc").name, "notfound");
 });
 
+test("replay session ids must be a UUID", () => {
+  assert.equal(parseRoute("#/replay/abc-1").name, "notfound");
+  assert.equal(parseRoute("#/replay/----").name, "notfound");
+  assert.equal(parseRoute("#/replay/0590e71e-b7a4-4add-ab11-c14a27b7a1d6").name, "replay");
+});
+
 test("href round-trips and encodes", () => {
   assert.equal(href("patient", { pid: "maya" }), "#/patients/maya");
   assert.equal(href("caseload", {}, { filter: "watch" }), "#/caseload?filter=watch");
-  for (const h of [href("prescribe", { pid: "p02" }), href("replay", { sid: "abc-1" })]) {
+  for (const h of [href("prescribe", { pid: "p02" }),
+    href("replay", { sid: "0590e71e-b7a4-4add-ab11-c14a27b7a1d6" })]) {
     assert.notEqual(parseRoute(h).name, "notfound");
   }
 });

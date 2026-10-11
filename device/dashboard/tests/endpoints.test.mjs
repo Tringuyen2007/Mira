@@ -69,7 +69,7 @@ test("more endpoints: query building, omission rules, and other writes", async (
     ["POST", "/copilot/ask", { question: "How is Maya doing?", patient_id: "maya" }],
     ["POST", "/copilot/ask", { question: "How is Maya doing?" }],
     ["GET", "/notifications", { unread: true, limit: 10, since_id: 5, therapist_id: "okafor" }],
-    ["GET", "/notifications/count", undefined],
+    ["GET", "/notifications/count", { therapist_id: "okafor" }],
     ["POST", "/notifications/3/read", undefined],
     ["POST", "/notifications/read-all", { therapist_id: "okafor" }],
     ["POST", "/notifications/3/ack", { therapist_id: "okafor" }],

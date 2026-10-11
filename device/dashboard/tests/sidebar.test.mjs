@@ -95,3 +95,34 @@ test("privacy note and footer initials", () => {
   const avatar = root.querySelector(".sidebar__avatar");
   assert.equal(avatar.textContent, "SL");
 });
+
+test("Live sessions links to the pid-less route when nothing is live, and to the live patient otherwise", () => {
+  const root1 = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+  });
+  const byLabel1 = Object.fromEntries(
+    navLinks(root1).map((a) => [a.querySelector(".nav-item__label").textContent, a]));
+  assert.equal(byLabel1["Live sessions"].getAttribute("href"), "#/live");
+
+  const root2 = renderSidebar({
+    route: { name: "live" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: { pid: "maya" },
+  });
+  const byLabel2 = Object.fromEntries(
+    navLinks(root2).map((a) => [a.querySelector(".nav-item__label").textContent, a]));
+  assert.equal(byLabel2["Live sessions"].getAttribute("href"), "#/live/maya");
+});
+
+test("the clinic line is omitted when the therapist has no clinic", () => {
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null,
+    therapist: { name: "Dr. Sam Lee, PT", clinic: "" }, live: null,
+  });
+  assert.equal(root.querySelector(".sidebar__clinic"), null);
+});
+
+test("the clinic line is rendered when the therapist has a clinic", () => {
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+  });
+  assert.equal(root.querySelector(".sidebar__clinic").textContent, "Lakeside Rehab");
+});

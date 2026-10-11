@@ -1,6 +1,9 @@
 // Hash router. Ids are validated raw (never decoded) so a URL-encoded path separator cannot slip through.
 const PID = "[A-Za-z0-9_-]{1,64}";
-const SID = "[0-9a-fA-F-]{1,64}";
+// Strict UUID (8-4-4-4-12 hex, case-insensitive): the server only ever accepts uuid.UUID for session ids
+// (server/api/sessions.py), so a loose charset here just produces routes that 422 at the server instead of
+// 404ing locally.
+const SID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 const PROPOSAL_ID = "\\d{1,12}";
 
 const ROUTES = [
@@ -11,6 +14,7 @@ const ROUTES = [
   ["replay", new RegExp(`^/replay/(${SID})$`), ["sid"]],
   ["proposal", new RegExp(`^/proposals/(${PROPOSAL_ID})$`), ["id"]],
   ["live", new RegExp(`^/live/(${PID})$`), ["pid"]],
+  ["live", new RegExp(`^/live$`), []],
   ["copilot", new RegExp(`^/copilot$`), []],
 ];
 
@@ -35,7 +39,7 @@ const PATHS = {
   timelapse: (p) => `/patients/${p.pid}/timelapse`,
   replay: (p) => `/replay/${p.sid}`,
   proposal: (p) => `/proposals/${p.id}`,
-  live: (p) => `/live/${p.pid}`,
+  live: (p) => (p && p.pid ? `/live/${p.pid}` : "/live"),
   copilot: () => "/copilot",
 };
 

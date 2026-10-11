@@ -41,11 +41,12 @@ function navItem({ id, label, iconName, active, href: linkHref, disabled, badge 
 }
 
 export function renderSidebar(state) {
-  const { route, proposalsWaiting, selectedPatientId, therapist } = state || {};
+  const { route, proposalsWaiting, selectedPatientId, therapist, live } = state || {};
   const activeKey = ACTIVE_FOR[route && route.name] || null;
   const patientHref = selectedPatientId ? href("patient", { pid: selectedPatientId }) : href("caseload");
   const prescribeHref = selectedPatientId ? href("prescribe", { pid: selectedPatientId }) : href("caseload");
   const timelapseHref = selectedPatientId ? href("timelapse", { pid: selectedPatientId }) : href("caseload");
+  const liveHref = live && live.pid ? href("live", { pid: live.pid }) : href("live");
   const hasPatient = Boolean(selectedPatientId);
   const waiting = typeof proposalsWaiting === "number" && proposalsWaiting > 0 ? proposalsWaiting : null;
   const name = (therapist && therapist.name) || "";
@@ -67,7 +68,7 @@ export function renderSidebar(state) {
       navItem({ id: "timelapse", label: "Time-lapse", iconName: "timelapse",
         active: activeKey === "timelapse", href: timelapseHref, disabled: !hasPatient }),
       navItem({ id: "live", label: "Live sessions", iconName: "live",
-        active: activeKey === "live", href: "#/live" }),
+        active: activeKey === "live", href: liveHref }),
       navItem({ id: "copilot", label: "Care Copilot", iconName: "copilot",
         active: activeKey === "copilot", href: href("copilot"), badge: waiting })),
     h("div", { class: "sidebar__spacer" }),
@@ -78,5 +79,5 @@ export function renderSidebar(state) {
       h("span", { class: "sidebar__avatar" }, initials(name)),
       h("div", {},
         h("p", { class: "sidebar__name" }, name || "—"),
-        h("p", { class: "sidebar__clinic" }, clinic))));
+        clinic ? h("p", { class: "sidebar__clinic" }, clinic) : null)));
 }

@@ -15,3 +15,12 @@ test("formats", () => {
   assert.equal(firstName("Maya Ellis"), "Maya");
   assert.equal(weeksSince("2026-09-20T00:00:00", now), 3);
 });
+
+test("invalid/missing dates and non-numeric degrees degrade to an em dash instead of throwing", () => {
+  assert.equal(fmtDateLong("not a date"), "—");
+  assert.equal(fmtWhen("not a date", now), "—");
+  assert.equal(fmtDeg("abc"), "—");
+  assert.equal(fmtPct("abc"), "—");
+  assert.equal(fmtDeg(undefined), "—");
+  assert.equal(fmtPct(Infinity), "—");
+});

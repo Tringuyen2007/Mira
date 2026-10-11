@@ -9,7 +9,10 @@ export function createApi({ token, fetchImpl = globalThis.fetch.bind(globalThis)
   async function request(method, path, { query, body } = {}) {
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(query || {})) if (v !== null && v !== undefined) qs.set(k, String(v));
-    const url = `${base}${path}${qs.size ? `?${qs}` : ""}`;
+    // qs.toString() (not URLSearchParams.size, unsupported on Safari < 17 / Chrome < 113) so params aren't
+    // silently dropped on older browsers.
+    const qsStr = qs.toString();
+    const url = `${base}${path}${qsStr ? `?${qsStr}` : ""}`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };

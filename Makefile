@@ -17,8 +17,8 @@ run:
 	$(VENV)/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers 1
 
 test:
-	$(PY) -m pytest
 	$(MAKE) test-dashboard
+	$(PY) -m pytest
 
 # Guard tests for the therapist dashboard's static scaffold (CSP, banned APIs, socket.js drift).
 # Globbed (not a bare directory path) because this Node's --test does not recurse into an explicit dir arg.

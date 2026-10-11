@@ -1,13 +1,15 @@
 // Sign-in: collects the API token + therapist id, saves them to sessionStorage, then probes GET /patients with
 // the new token before handing control back to main.js. A 503 (no database) still means the token is valid.
 import { h, clear } from "../../core/dom.js";
-import { saveAuth, clearAuth } from "../../net/auth.js";
+import { saveAuth } from "../../net/auth.js";
 import { createApi, ApiError } from "../../net/api.js";
 
 export function mountSignIn(root, { storage = globalThis.sessionStorage, fetchImpl = globalThis.fetch?.bind(globalThis),
                                      onSignedIn } = {}) {
-  const tokenInput = h("input", { id: "signin-token", name: "token", type: "password", autocomplete: "off",
-    spellcheck: "false", required: true });
+  // autocomplete="new-password" (not "off", which browsers ignore on password fields) stops the password
+  // manager from offering to save the API token.
+  const tokenInput = h("input", { id: "signin-token", name: "token", type: "password",
+    autocomplete: "new-password", spellcheck: "false", required: true });
   const idInput = h("input", { id: "signin-therapist", name: "therapistId", type: "text", autocomplete: "off",
     required: true, value: "okafor" });
   const submitBtn = h("button", { class: "btn btn--primary", type: "submit" }, "Sign in");
@@ -29,24 +31,23 @@ export function mountSignIn(root, { storage = globalThis.sessionStorage, fetchIm
     }
   }
 
+  // Probe before saving: a reload mid-probe must not boot the shell with a token that was never verified.
   async function onSubmit(e) {
     e.preventDefault();
     clear(errorEl);
     const token = tokenInput.value.trim();
     const therapistId = idInput.value.trim() || "okafor";
     submitBtn.setAttribute("disabled", "");
+    const result = await probe(token, therapistId);
+    submitBtn.removeAttribute("disabled");
+    if (!result.ok) {
+      errorEl.textContent = result.message;
+      return;
+    }
     try {
       saveAuth(storage, { token, therapistId });
     } catch {
       errorEl.textContent = "Enter a valid token and therapist id.";
-      submitBtn.removeAttribute("disabled");
-      return;
-    }
-    const result = await probe(token, therapistId);
-    submitBtn.removeAttribute("disabled");
-    if (!result.ok) {
-      clearAuth(storage);
-      errorEl.textContent = result.message;
       return;
     }
     onSignedIn?.({ token, therapistId });

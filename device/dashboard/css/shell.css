@@ -8,6 +8,12 @@
   min-height: 100vh;
 }
 
+/* Signed out / still booting: #sidebar and #main are hidden, so #signin is the only grid item and should
+   span and centre on the whole canvas rather than sit inside the 232px sidebar column (I3). */
+#app[data-state="signin"], #app[data-state="booting"] {
+  grid-template-columns: 1fr;
+}
+
 #sidebar {
   position: sticky;
   top: 0;
@@ -24,7 +30,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  width: 220px;
+  width: 100%;
   height: 44px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-pill);
@@ -41,8 +47,14 @@
 
 #sidebar .nav-item[aria-current="page"] {
   background: var(--color-ink);
-  color: #ffffff;
+  color: var(--color-on-ink);
   font-weight: 600;
+}
+
+/* Icons are <img>s drawn with a fixed dark stroke/fill (CSP img-src 'self' means they can't use currentColor);
+   invert them on the ink-filled active pill so they stay visible in both themes (I4 / browser bug 3). */
+#sidebar .nav-item[aria-current="page"] img {
+  filter: invert(1) brightness(2);
 }
 
 #main {
@@ -57,7 +69,7 @@
   align-items: start;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1279.98px) {
   .grid-main-rail {
     grid-template-columns: 1fr;
   }
@@ -98,6 +110,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
+  object-fit: contain;
 }
 
 .sidebar__brand {
@@ -141,14 +154,16 @@
   padding: 0 6px;
   border-radius: var(--radius-pill);
   background: var(--color-ink);
-  color: #ffffff;
+  color: var(--color-on-ink);
   font-size: 12px;
   font-weight: 600;
 }
 
 #sidebar .nav-item[aria-current="page"] .nav-item__badge {
+  /* Deliberately not themed: this badge sits on the ink-filled active pill, so it stays white-on-dark-text
+     regardless of theme (unlike --color-on-ink, which flips with --color-ink). */
   background: #ffffff;
-  color: var(--color-ink);
+  color: #1c1a22;
 }
 
 .sidebar__spacer {
@@ -189,7 +204,7 @@
   height: 36px;
   border-radius: 50%;
   background: var(--color-ink);
-  color: #ffffff;
+  color: var(--color-on-ink);
   font-size: var(--text-meta);
   font-weight: 600;
   flex-shrink: 0;
