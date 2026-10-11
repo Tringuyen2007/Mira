@@ -332,18 +332,32 @@ def test_one_camera_walking_toward_the_camera_keeps_up():
     assert _walk_toward_camera_errors(1.2) < 0.12
 
 
-def test_one_camera_gate_passes_a_held_back_position_but_still_holds_an_angle():
+def test_one_camera_hold_frees_the_position_more_than_an_angle_and_moving_points_fully():
     import vision.tracker as T
 
     tr = T.ModelTracker({"B": _cam_b()})
     uv, w = np.zeros((33, 2)), np.ones(33)
-    tr._gate(np.zeros(T.N_PARAMS), (None, uv, w))  # first frame: taken as is
-    x = np.zeros(T.N_PARAMS)
-    x[0] = 0.10  # the hips 10 cm along the line of sight (barely moves in 2D)
-    x[T.SPINE.start] = 0.3  # a large one-off bend from a noisy depth guess, with nothing moving in 2D
-    out = tr._gate(x, (None, uv, w))
-    assert abs(out[0] - 0.10) < 1e-9  # a lasting position change passes through
-    assert abs(out[T.SPINE.start] - T.GATE_MIN_GAIN * 0.3) < 1e-9  # an angle is still held
+    assert tr._hold((None, uv, w)) is None  # first frame: nothing to hold to
+    still = tr._hold((None, uv, w))  # nothing moved in 2D
+    assert np.allclose(still[T.SPINE], T.GATE_MIN_GAIN ** -T.GATE_POWER)  # an angle held strongly
+    assert np.allclose(still[T.ROOT], T.GATE_ROOT_MIN ** -T.GATE_POWER)  # the position held less
+    moving = tr._hold((None, uv + T.GATE_FULL_PX, w))  # everything moved a full GATE_FULL_PX
+    assert np.allclose(moving, 1.0)
+
+
+def test_one_camera_held_body_keeps_its_feet_on_the_floor():
+    """The hold is part of the solve: a still body with depth noise never lifts a planted foot."""
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    rng = np.random.default_rng(5)
+    lows = []
+    for k in range(150):
+        v = pose_from_points(cam, X, t=k / 30, noise_px=0.3, rng=rng)
+        v.world = v.world + rng.normal(0, 0.03, v.world.shape)
+        out = pipe.process(k / 30, None, v)
+        if out.tracker == "model":
+            lows.append(np.min(out.frame.joints[[29, 30, 31, 32], 1]))
+    assert len(lows) > 50 and np.max(np.abs(lows)) < 0.03
 
 
 def _crouched():
