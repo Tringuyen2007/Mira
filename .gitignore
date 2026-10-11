@@ -32,3 +32,6 @@ build/
 *.dSYM
 *.dSYM.zip
 
+# Vision (Eric's rig)
+vision/models/*.task
+config/backups/

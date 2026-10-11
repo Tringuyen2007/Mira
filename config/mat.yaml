@@ -1,0 +1,17 @@
+# Mat frame: origin mat centre on the mat surface, +y up, +z toward Mira,
+# +x toward the patient's left (Mira's right). Right-handed.
+length_m: 1.73
+width_m: 0.61
+marker_size_m: 0.17
+marker_inset_m: 0.02
+aruco_dictionary: DICT_4X4_50
+# The sheets on the rig are upside down: printed top edge toward the back of the mat, not toward Mira.
+# 0 = upright; 90/180/270 = every marker turned in place, clockwise seen from above with Mira at the top.
+marker_rotation_deg: 180
+# Defaults until `t` in calib_extrinsics locks targets for the room: ~4.5 m from mat centre at ±45°,
+# what the ~48°-wide webcams need to see a whole person.
+camera_targets:
+  A: {eye: [3.18, 0.85, 3.18]}
+  B: {eye: [-3.18, 0.85, 3.18]}
+aim_point: [0.0, 0.8, 0.0]
+placement_tolerance: {position_m: 0.05, angle_deg: 2.0}

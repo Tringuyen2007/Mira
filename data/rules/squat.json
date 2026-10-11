@@ -1,0 +1,26 @@
+{
+  "exercise": "squat",
+  "metric": "knee_mean",
+  "start_above": 155,
+  "enter_below": 145,
+  "target_below": 110,
+  "finish_above": 155,
+  "min_rom_deg": 45,
+  "single_ready_above": 115,
+  "single_ready_hip_min_m": 0.55,
+  "single_enter_drop_deg": 15,
+  "single_target_drop_deg": 72,
+  "single_target_hip_drop_m": 0.30,
+  "single_image_target_knee_below": 108,
+  "single_image_target_hip_drop_torso": 0.55,
+  "single_image_depth_dwell_s": 0.05,
+  "single_finish_within_deg": 12,
+  "single_finish_hip_within_m": 0.10,
+  "min_rep_s": 0.7,
+  "max_rep_s": 8.0,
+  "rules": [
+    {"id": "knee_valgus", "metric": "knee_to_ankle_gap_ratio", "op": "lt", "threshold": 0.75, "duration_s": 0.25, "cooldown_s": 2.0},
+    {"id": "trunk_lean", "metric": "trunk_lean_abs", "op": "gt", "threshold": 38, "duration_s": 0.4, "cooldown_s": 2.0},
+    {"id": "knee_asymmetry", "metric": "knee_difference", "op": "gt", "threshold": 18, "duration_s": 0.3, "cooldown_s": 2.0}
+  ]
+}
