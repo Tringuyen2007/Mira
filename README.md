@@ -269,7 +269,8 @@ no new engine API — but it depends on these specifically:
 
 - `arrived`, then `awaiting_gesture` a few seconds later, before each session's first set: the gap is what
   keeps the greeting on screen, and `awaiting_gesture` makes the kiosk show "give me a thumbs up" instead of
-  jumping straight to a countdown. (The mock holds the greeting `MOCK_GREETING_HOLD_S` = 3 s.)
+  jumping straight to a countdown. (The mock holds the greeting `MOCK_GREETING_HOLD_S` = 3 s.) Put
+  `reps_target`, `sets_target` and `exercise_id` on `arrived` so the greeting can show the plan ("3 sets · 10 reps").
 - `gesture {name}` on a thumbs-up or raised hand.
 - `countdown {n, set, reps_target, sets_target, exercise_id}`.
 - `rep {index, set, quality}`.

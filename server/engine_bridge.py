@@ -373,7 +373,9 @@ class MockSource:
             # (REST or boot) restarts this via `_restart_session`, so later sessions get their own arrival too.
             if not self._arrived and self._sim_s >= self._arrive_due_s:
                 self._arrived = True
-                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id})
+                # The plan rides on `arrived` so the greeting can show "3 sets · 10 reps" before the first countdown.
+                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id, "exercise_id": _EXERCISE,
+                                  "reps_target": _REPS, "sets_target": _SETS})
                 self._awaiting_due_s = self._sim_s + MOCK_GREETING_HOLD_S
             # Like the vision engine: after the greeting has been on screen a moment, ask for a thumbs-up, and
             # start the program once it is seen.

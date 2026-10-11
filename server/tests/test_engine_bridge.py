@@ -231,6 +231,7 @@ async def test_mock_emits_arrived_once_before_the_program(run_bridge: Callable[.
     program = [e["type"] for e in got.events if e["type"] != "hr"]
     assert len(arrived) == 1 and program[0] == "arrived", "the squat program starts after the patient arrives"
     assert arrived[0]["session_id"] == SESSION and arrived[0]["patient_id"] == "maya"
+    assert (arrived[0]["reps_target"], arrived[0]["sets_target"]) == (10, 3), "the greeting shows the plan"
 
 
 async def test_notify_session_start_restarts_mock_program(run_bridge: Callable[..., Any]) -> None:
