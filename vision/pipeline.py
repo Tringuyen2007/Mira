@@ -6,11 +6,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from vision.cleanup import Cleaner
-from vision.config import CameraConfig
+from vision.config import CameraConfig, MatConfig
 from vision.filters import OneEuroFilter
 from vision.frames import world_to_mat
 from vision.triangulate import Triangulation, triangulate_pair
-from vision.types import LEFT_HIP, RIGHT_HIP, FrameResult, PoseResult, swap_left_right
+from vision.select import PersonSelector
+from vision.types import LEFT_HIP, RIGHT_HIP, CameraPeople, FrameResult, PoseResult, swap_left_right
 
 MIN_3D_JOINTS = 8  # below this the calibration or detections disagree; use one camera instead
 FLIP_MARGIN_M = 0.05  # a relabelling must beat the as-detected labels by this much to be used
@@ -24,6 +25,9 @@ class PipelineOutput:
     tri: Triangulation | None = None
     skew_s: float | None = None
     swapped: str | None = None  # "A", "B" or "AB": cameras whose left/right labels were flipped back
+    people: dict[str, list[PoseResult]] | None = None  # everyone found per camera (multi-person input)
+    ignored: dict[str, list[PoseResult]] | None = None  # people not tracked, per camera
+    dropped: str | None = None  # camera ignored this frame because it disagreed with the other
 
 
 def _flipped(p: PoseResult) -> PoseResult:
@@ -64,16 +68,37 @@ def _labelling_cost(tri: Triangulation, views: list[PoseResult], cams: dict[str,
     return cost
 
 
+def _as_people(x) -> list[PoseResult] | None:
+    """A camera's input as a list of people, or None for a plain single PoseResult/None (legacy)."""
+    if isinstance(x, CameraPeople):
+        return list(x.people)
+    if isinstance(x, list):
+        return x
+    return None
+
+
 class Pipeline:
     def __init__(self, cams: dict[str, CameraConfig], smoothing: bool = True,
-                 min_vis: float = 0.5, max_reproj_px: float = 15.0):
+                 min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None):
         self.cams = cams
+        self._selector = PersonSelector(cams, mat or MatConfig())
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
         self._cleaner = Cleaner(cams)
         self._filter = OneEuroFilter() if smoothing else None
 
-    def process(self, t: float, a: PoseResult | None, b: PoseResult | None, skew_s: float | None = None) -> PipelineOutput:
-        """t is unix seconds (the FrameResult clock)."""
+    def process(self, t: float, a, b, skew_s: float | None = None) -> PipelineOutput:
+        """t is unix seconds (the FrameResult clock).
+
+        a, b: per camera a PoseResult (one person, as in old recordings), a CameraPeople or list of
+        PoseResults (everyone found; the person at the mat is selected first), or None.
+        """
+        pa, pb = _as_people(a), _as_people(b)
+        people = ignored = dropped = None
+        if pa is not None or pb is not None:
+            pa = pa if pa is not None else ([a] if isinstance(a, PoseResult) else [])
+            pb = pb if pb is not None else ([b] if isinstance(b, PoseResult) else [])
+            sel = self._selector.select(t, pa, pb)
+            people, ignored, dropped, a, b = {"A": pa, "B": pb}, sel.ignored, sel.dropped, sel.a, sel.b
         raw = {"A": a, "B": b}
         tri, swapped = None, None
         ca, cb = self.cams.get("A"), self.cams.get("B")
@@ -95,4 +120,5 @@ class Pipeline:
         if self._filter is not None:
             joints = self._filter(joints, t)
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
-        return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped)
+        return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
+                              people=people, ignored=ignored, dropped=dropped)

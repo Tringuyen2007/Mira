@@ -31,7 +31,10 @@ class Recorder:
 
     def write(self, out: PipelineOutput) -> None:
         raw = {k: (v.to_dict() if v is not None else None) for k, v in out.raw.items()}
-        self._write({"type": "frame", **out.frame.to_dict(), "raw": raw, "skew_s": out.skew_s})
+        line = {"type": "frame", **out.frame.to_dict(), "raw": raw, "skew_s": out.skew_s}
+        if out.people is not None:  # everyone found, so selection can be re-run on replay
+            line["people"] = {k: [p.to_dict() for p in v] for k, v in out.people.items()}
+        self._write(line)
         self.count += 1
 
     def _write(self, obj: dict) -> None:

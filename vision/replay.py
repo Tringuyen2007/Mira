@@ -12,7 +12,7 @@ from typing import Iterator
 
 import numpy as np
 
-from vision.config import CameraConfig, load_cameras
+from vision.config import CameraConfig, load_cameras, load_mat
 from vision.pipeline import Pipeline, PipelineOutput
 from vision.types import FrameResult, PoseResult
 
@@ -29,25 +29,35 @@ def cams_from_header(header: dict) -> dict[str, CameraConfig]:
     return {n: CameraConfig.from_dict(n, d) for n, d in (header.get("cameras") or {}).items()}
 
 
-def iter_frames(path) -> Iterator[tuple[FrameResult, dict[str, PoseResult | None], float | None]]:
+def iter_records(path) -> Iterator[tuple[FrameResult, dict[str, PoseResult | None], float | None,
+                                         dict[str, list[PoseResult]] | None]]:
+    """(frame, selected person per camera, skew, everyone found per camera or None for old recordings)."""
     with open(path) as f:
         for line in f:
             d = json.loads(line)
             if d.get("type") != "frame":
                 continue
             raw = {k: (PoseResult.from_dict(v) if v else None) for k, v in (d.pop("raw") or {}).items()}
+            people = d.pop("people", None)
+            if people is not None:
+                people = {k: [PoseResult.from_dict(p) for p in v] for k, v in people.items()}
             skew = d.pop("skew_s", None)
             d.pop("type")
-            yield FrameResult.from_dict(d), raw, skew
+            yield FrameResult.from_dict(d), raw, skew, people
+
+
+def iter_frames(path) -> Iterator[tuple[FrameResult, dict[str, PoseResult | None], float | None]]:
+    for frame, raw, skew, _ in iter_records(path):
+        yield frame, raw, skew
 
 
 def replay_outputs(path, retriangulate: bool = False, cams: dict[str, CameraConfig] | None = None,
                    realtime: bool = True, speed: float = 1.0, smoothing: bool = True) -> Iterator[PipelineOutput]:
     pipeline = None
     if retriangulate:
-        pipeline = Pipeline(cams if cams is not None else load_cameras(), smoothing=smoothing)
+        pipeline = Pipeline(cams if cams is not None else load_cameras(), smoothing=smoothing, mat=load_mat())
     start_t = start_wall = None
-    for frame, raw, skew in iter_frames(path):
+    for frame, raw, skew, people in iter_records(path):
         if realtime:
             if start_t is None:
                 start_t, start_wall = frame.t, time.monotonic()
@@ -55,7 +65,9 @@ def replay_outputs(path, retriangulate: bool = False, cams: dict[str, CameraConf
                 delay = (frame.t - start_t) / speed - (time.monotonic() - start_wall)
                 if delay > 0:
                     time.sleep(delay)
-        if pipeline is not None:
+        if pipeline is not None and people is not None:  # re-run person selection too
+            yield pipeline.process(frame.t, people.get("A", []), people.get("B", []), skew)
+        elif pipeline is not None:
             yield pipeline.process(frame.t, raw.get("A"), raw.get("B"), skew)
         else:
             yield PipelineOutput(frame=frame, raw=raw, tri=None, skew_s=skew)
