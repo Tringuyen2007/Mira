@@ -1,0 +1,454 @@
+/* Patient review screen (Figma 206:202): head, 3D replay room + This session rail, rep timeline, 3-week
+   trend / Therapist Memory / Progress note row. */
+
+.patient__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.patient__meta {
+  margin-bottom: var(--space-1);
+}
+
+.patient__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  position: relative;
+}
+
+.patient__mode button {
+  min-width: 64px;
+}
+
+.patient__session-btn img {
+  width: 18px;
+  height: 18px;
+}
+
+.patient__popover {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.patient__session-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  text-align: left;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.patient__session-item:hover,
+.patient__session-item.is-active {
+  background: var(--color-card-sunk);
+}
+
+.patient__message-textarea,
+.patient__note-textarea {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  font: inherit;
+  color: var(--color-ink);
+  background: var(--color-card);
+  resize: vertical;
+}
+
+.patient__popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+.patient__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (max-width: 1279px) {
+  .patient__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.patient__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* ---- Room card (avatar placeholder host) ---- */
+
+.patient__room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.patient__replaying-pill {
+  background: var(--color-card-sunk);
+}
+
+.patient__avatar-host {
+  min-height: 360px;
+}
+
+.patient__flag-callout {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--color-alert);
+  border-radius: var(--radius-control);
+  color: var(--color-alert-text);
+  font-weight: 500;
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+/* avatar placeholder (js/avatar/avatarView.js) */
+
+.avatar-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.avatar-placeholder__segmented {
+  align-self: flex-start;
+}
+
+.avatar-placeholder__floor {
+  position: relative;
+  background: var(--color-card-sunk);
+  border-radius: var(--radius-card);
+  padding: var(--space-8) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+.avatar-placeholder__title {
+  font-weight: 600;
+  font-size: var(--text-card-title);
+}
+
+.avatar-placeholder__sub {
+  color: var(--color-ink-soft);
+  font-size: var(--text-meta);
+  margin-bottom: var(--space-4);
+}
+
+.avatar-placeholder__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+.avatar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-line);
+  background: var(--color-card);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.avatar-pill--alert {
+  border-color: var(--color-alert);
+  color: var(--color-alert-text);
+}
+
+.avatar-placeholder__balance {
+  margin-top: var(--space-2);
+}
+
+/* ---- balance bar (js/ui/balanceBar.js) ---- */
+
+.balance-bar__track {
+  display: block;
+  border-radius: var(--radius-track);
+  overflow: hidden;
+}
+
+.balance-bar__fill--affected {
+  fill: var(--color-flag);
+}
+
+.balance-bar--flagged .balance-bar__fill--affected {
+  fill: var(--color-alert);
+}
+
+.balance-bar__fill--other {
+  fill: var(--color-line-strong);
+}
+
+.balance-bar__labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.balance-bar__label--affected {
+  color: var(--color-alert-text);
+}
+
+.balance-bar--flagged .balance-bar__label--affected {
+  color: var(--color-alert-text);
+}
+
+.balance-bar:not(.balance-bar--flagged) .balance-bar__label--affected {
+  color: var(--color-ink);
+}
+
+.balance-bar__warn {
+  margin-right: 4px;
+}
+
+/* ---- This session rail ---- */
+
+.patient__this-session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.patient__stat-big {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.patient__stat-label {
+  margin-top: var(--space-3);
+}
+
+.patient__stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.patient__flag-text {
+  color: var(--color-alert-text);
+  font-weight: 600;
+}
+
+.patient__load-bar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius-track);
+  overflow: hidden;
+  background: var(--color-line);
+}
+
+.patient__load-fill--affected {
+  flex: 1 1 50%;
+  background: var(--color-flag);
+}
+
+.patient__load-bar--flagged .patient__load-fill--affected {
+  background: var(--color-alert);
+}
+
+.patient__load-fill--other {
+  flex: 1 1 50%;
+  background: var(--color-line-strong);
+}
+
+/* ---- Timeline card ---- */
+
+.patient__timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.patient__play {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.patient__play img {
+  width: 18px;
+  height: 18px;
+}
+
+.patient__time {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.patient__reps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.patient__rep {
+  position: relative;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  border: 2px solid transparent;
+  color: var(--color-on-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.patient__rep--good {
+  background: var(--color-good);
+}
+
+.patient__rep--flagged {
+  background: var(--color-flag);
+}
+
+.patient__rep--current {
+  border-color: var(--color-line-strong);
+}
+
+.patient__rep-warn {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--color-alert);
+}
+
+.patient__rep-legend {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.patient__legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.patient__legend-swatch--good {
+  background: var(--color-good);
+}
+
+.patient__legend-swatch--flag {
+  background: var(--color-flag);
+}
+
+/* ---- Bottom row: trend / memory / note ---- */
+
+.patient__bottom-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (max-width: 1279px) {
+  .patient__bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.patient__trend-chart svg {
+  width: 100%;
+  height: auto;
+}
+
+.patient__trend-captions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+.patient__insight {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--color-alert);
+  border-radius: var(--radius-control);
+  color: var(--color-alert-text);
+  font-weight: 500;
+}
+
+.patient__memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.patient__memory-list li {
+  padding-left: var(--space-4);
+  position: relative;
+}
+
+.patient__memory-list li::before {
+  content: "\2022";
+  position: absolute;
+  left: 0;
+}
+
+.patient__note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.patient__note-text {
+  white-space: pre-wrap;
+}
+
+.patient__note-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.patient__note-error {
+  color: var(--color-alert-text);
+  margin-top: var(--space-2);
+}

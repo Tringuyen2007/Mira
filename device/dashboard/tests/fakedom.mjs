@@ -84,6 +84,19 @@ class FakeElement extends FakeNode {
     return this.childNodes[0] ?? null;
   }
 
+  get parentElement() {
+    return this.parentNode && this.parentNode.nodeType === ELEMENT_NODE ? this.parentNode : null;
+  }
+
+  contains(node) {
+    let n = node;
+    while (n) {
+      if (n === this) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
   get textContent() {
     const walk = (n) => n.nodeType === TEXT_NODE ? n.data : n.childNodes.map(walk).join("");
     return walk(this);
@@ -187,6 +200,11 @@ function parseSelector(selector) {
 }
 
 class FakeDocument {
+  constructor() {
+    this.listeners = new Map();
+    this.body = new FakeElement("body");
+  }
+
   createElement(tag) {
     return new FakeElement(tag);
   }
@@ -197,6 +215,23 @@ class FakeDocument {
 
   createTextNode(text) {
     return new FakeText(text);
+  }
+
+  // Document-level listeners (e.g. a screen's own-click-outside-closes-popover handler); same shape as
+  // FakeElement's, kept separate since a document isn't a node in this minimal fake.
+  addEventListener(type, fn) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(fn);
+  }
+
+  removeEventListener(type, fn) {
+    this.listeners.get(type)?.delete(fn);
+  }
+
+  dispatch(type, init) {
+    const event = { type, target: this, ...init, preventDefault() {} };
+    for (const fn of this.listeners.get(type) || []) fn(event);
+    return event;
   }
 }
 

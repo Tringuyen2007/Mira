@@ -14,9 +14,10 @@ import { empty } from "./ui/states.js";
 import { mountSignIn } from "./screens/signin/index.js";
 import { screen as caseloadScreen } from "./screens/caseload/index.js";
 import { screen as assistantScreen } from "./screens/assistant/index.js";
+import { screen as patientScreen } from "./screens/patient/index.js";
 
 // Screens land here in later milestones; a route that resolves but has no entry shows "Coming soon".
-const SCREENS = { caseload: caseloadScreen, assistant: assistantScreen };
+const SCREENS = { caseload: caseloadScreen, assistant: assistantScreen, patient: patientScreen };
 const SCREEN_ALIAS = { replay: "patient", proposal: "assistant" };
 
 const appEl = document.getElementById("app");
