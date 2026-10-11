@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = REPO_ROOT / "config"
 MAT_PATH = CONFIG_DIR / "mat.yaml"
 CAMERAS_PATH = CONFIG_DIR / "cameras.yaml"
+PERSON_PATH = CONFIG_DIR / "person.yaml"  # local: the tracked person's height (one-camera scale)
 
 # Marker id -> (sign of x, sign of z). +x is the patient's left, +z is toward Mira.
 _MARKER_SIGNS = {0: (1, 1), 1: (-1, 1), 2: (1, -1), 3: (-1, -1)}
@@ -166,3 +167,25 @@ def save_cameras(cams: dict[str, CameraConfig], path: Path = CAMERAS_PATH) -> Pa
     data = {"cameras": {n: c.to_dict() for n, c in sorted(cams.items())}}
     path.write_text(yaml.safe_dump(data, sort_keys=False))
     return backup
+
+
+def load_person(path: Path = PERSON_PATH) -> float | None:
+    """The person's height in cm, or None if never entered."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    h = (yaml.safe_load(path.read_text()) or {}).get("height_cm")
+    return None if h is None else float(h)
+
+
+def save_person(height_cm: float, path: Path = PERSON_PATH) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(yaml.safe_dump({"height_cm": float(height_cm)}))
+
+
+def height_from(args_height_cm: float | None, path: Path = PERSON_PATH) -> float | None:
+    """--height-cm if given (and remembered for next time), else the saved height."""
+    if args_height_cm is not None:
+        save_person(args_height_cm, path)
+        return float(args_height_cm)
+    return load_person(path)

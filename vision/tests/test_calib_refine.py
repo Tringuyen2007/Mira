@@ -35,3 +35,15 @@ def test_refine_views_uses_lone_people_even_when_the_cameras_disagree():
     out2 = Pipeline(cams, mat=MatConfig()).process(1000.0, pair2.a, pair2.b, 0.0)
     a, b = refine_views(pair2, out2)
     assert a is out2.raw["A"] and b is out2.raw["B"]
+
+
+def test_calib_refine_explains_it_needs_two_cameras(monkeypatch, capsys):
+    import sys
+
+    import vision.calib_refine as R
+    from vision.tests.synth import target_cams
+
+    monkeypatch.setattr(R, "load_cameras", lambda: {"B": target_cams()["B"]})
+    monkeypatch.setattr(sys, "argv", ["calib_refine"])
+    assert R.main() == 1
+    assert "needs two calibrated cameras" in capsys.readouterr().out

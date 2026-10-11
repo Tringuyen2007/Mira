@@ -124,6 +124,10 @@ def main() -> int:
     args = p.parse_args()
 
     cams, mat = load_cameras(), load_mat()
+    if len([c for c in cams.values() if c.calibrated]) < 2:
+        print("calib_refine needs two calibrated cameras; with one camera, calib_extrinsics is the whole "
+              "calibration")
+        return 1
     if args.from_path:
         pairs = [(raw.get("A"), raw.get("B")) for _, raw, _ in iter_frames(args.from_path)]
     else:

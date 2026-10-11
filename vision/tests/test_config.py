@@ -86,3 +86,14 @@ def test_zoom_std_and_target_aim_round_trip(tmp_path):
     assert loaded.zoom_std == 0.012
     np.testing.assert_allclose(loaded.target_aim, [0.1, 0.8, 0.0])
     assert CameraConfig.from_dict("B", {"index": 1}).zoom_std is None
+
+
+def test_person_height_is_remembered(tmp_path):
+    from vision.config import height_from, load_person, save_person
+
+    path = tmp_path / "person.yaml"
+    assert load_person(path) is None and height_from(None, path) is None
+    assert height_from(175.0, path) == 175.0  # given once ...
+    assert height_from(None, path) == 175.0  # ... remembered
+    save_person(168.5, path)
+    assert load_person(path) == 168.5

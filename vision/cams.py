@@ -4,6 +4,7 @@
 
 Shows every camera that opens, tiled and labelled by index. Press a or b, then the
 index digit, to assign; s saves to config/cameras.yaml; q quits without saving.
+One camera is enough (the other is simply not assigned); `--remove A` drops A from the config.
 """
 from __future__ import annotations
 
@@ -22,7 +23,16 @@ TILE = (480, 270)
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--max-index", type=int, default=6)
+    p.add_argument("--remove", choices=["A", "B"], help="drop a camera from config/cameras.yaml and exit")
     args = p.parse_args()
+    if args.remove:
+        cams = load_cameras()
+        if cams.pop(args.remove, None) is None:
+            print(f"camera {args.remove} is not configured")
+            return 1
+        save_cameras(cams)
+        print(f"removed camera {args.remove}; configured: {sorted(cams) or 'none'}")
+        return 0
 
     caps = {}
     for i in range(args.max_index):
