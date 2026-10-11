@@ -1,6 +1,8 @@
 // Draws the LCD stage (index.html) in one demo state at a time, through the same pure reducer and renderer
 // as the real kiosk (state.js, view.js), with no server, sockets or token. Pick a screen with the buttons,
 // the ←/→ keys, ?screen=<name> in the URL, or Play to cycle through them. Edit the copy in SCREENS below.
+// There is no audio: whenever a screen with a caption is shown, Mira "speaks" (data-speaking="true") for
+// SPEAK_MS so the talk animation and the caption's voice bars are visible, as when the kiosk plays a `say` line.
 
 import { initialState, reduce, view } from "./state.js";
 import { render } from "./view.js";
@@ -8,6 +10,7 @@ import { loadMascot } from "./mascot.js";
 
 const NAV_PX = 56; // the switcher bar under the stage
 const PLAY_EVERY_MS = 4000;
+const SPEAK_MS = 2000; // how long Mira "talks" after a captioned screen is shown
 
 const base = { phase: "idle", rep: 0, reps_target: 12, set: 2, sets_target: 3, countdown: null, load_l_pct: null,
   hr: 96, paused: false, caption: null, first_name: "Maya", exercise_name: "Mini squats", incident: false };
@@ -33,6 +36,10 @@ const SCREENS = [
   { name: "setDone", label: "Set done", inputs: [open, live({ phase: "rest", rep: 12, load_l_pct: 52, hr: 92,
     caption: cap("Set 2 done. Twelve steady reps. Rest for 60 seconds, you earned it.") })] },
   { name: "fall", label: "Fall alert", inputs: [open, live({ phase: "active", incident: true, rep: 7 })] },
+  { name: "calling", label: "Calling", inputs: [open, live({ phase: "active", incident: true, rep: 7 }),
+    ev({ type: "alert", alert_id: "a_01", kind: "fall", step: "detected", message: "Fall detected." }),
+    ev({ type: "alert", alert_id: "a_01", kind: "fall", step: "escalated",
+      message: "No response from Maya. Calling the emergency contact.", show_call_911: true })] },
   { name: "idle", label: "Idle", inputs: [open, live({ caption: null })] },
 ];
 
@@ -49,6 +56,7 @@ async function main() {
   const buttons = new Map();
   let index = Math.max(0, SCREENS.findIndex((s) => s.name === new URLSearchParams(window.location.search).get("screen")));
   let timer = null;
+  let speakTimer = null;
 
   const show = (i) => {
     index = (i + SCREENS.length) % SCREENS.length;
@@ -56,7 +64,16 @@ async function main() {
     const now = Date.now();
     let state = initialState();
     for (const input of screen.inputs) state = reduce(state, input, now);
-    render(document, view(state, now), mascot);
+    clearTimeout(speakTimer);
+    speakTimer = null;
+    const vm = view(state, now);
+    if (vm.caption !== "" && vm.captionsOn !== false && vm.screen !== "fall" && vm.screen !== "unpaired") {
+      // Speak for SPEAK_MS, then fall quiet on the same screen.
+      render(document, view(reduce(state, { channel: "speaking", msg: { on: true } }, now), now), mascot);
+      speakTimer = setTimeout(() => { speakTimer = null; render(document, view(state, now), mascot); }, SPEAK_MS);
+    } else {
+      render(document, vm, mascot);
+    }
     for (const [name, button] of buttons) button.setAttribute("aria-pressed", String(name === screen.name));
     const url = new URL(window.location.href);
     url.searchParams.set("screen", screen.name);
