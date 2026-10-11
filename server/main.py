@@ -36,7 +36,7 @@ from server.api import pair as pair_api
 from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
-from server.config import REPO_ROOT, cfg
+from server.config import Config, REPO_ROOT, cfg
 from server.db import migrate, queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
@@ -95,6 +95,18 @@ class KioskStaticFiles(StaticFiles):
         if (parts and parts[0] in self.HIDDEN_DIRS) or (parts and parts[-1] == "readme.md"):
             raise HTTPException(status_code=404)
         return await super().get_response(path, scope)
+
+
+def _mock_loops(c: Config) -> bool:
+    """True when the mock engine's squat program repeats forever (pre-Plan-2 behaviour): its own `stopped`
+    never fires, so neither the last-set auto-stop nor the mock auto-restart should race it."""
+    return c.MIRA_SOURCE.startswith("mock") and c.MOCK_LOOP
+
+
+def _last_set_enabled(c: Config) -> bool:
+    """Whether `SessionEnder` should end the session when the last set is done (engines without `stopped`).
+    Never when MOCK_LOOP keeps the mock program running forever."""
+    return c.AUTO_STOP_AFTER_LAST_SET and not _mock_loops(c)
 
 
 @asynccontextmanager
@@ -173,10 +185,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
 
-    ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=cfg.AUTO_STOP_AFTER_LAST_SET)
+    ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
     auto_restart: MockAutoRestart | None = None
-    if cfg.MIRA_SOURCE.startswith("mock"):
+    if cfg.MIRA_SOURCE.startswith("mock") and not _mock_loops(cfg):
         auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S)
         sessions.on_stop.append(auto_restart.on_stop)
     # Every ended session gets a whole-session analysis (session_summary event, session_analyses row).
@@ -374,15 +386,37 @@ def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
     return accept
 
 
+def _patient_owns_current(patient_id: str) -> Callable[[dict[str, Any]], bool]:
+    """Inbound gate for a patient's own messages: ONLY the current session's patient, never an explicit
+    `patient_id`/`session_id` tag on the message (unlike `_patient_accepts`, the outbound filter that
+    deliberately honours those tags so a phone still receives its own `session_summary` after the session
+    it describes has ended). Without this, a phone could write `{"type":"command","name":"stop",
+    "patient_id":"someone-else"}` and steer another patient's live session."""
+    def owns(msg: dict[str, Any]) -> bool:  # noqa: ARG001 - signature matches the hub's message-filter shape
+        current = get_state().sessions.current
+        return current is not None and current.patient_id == patient_id
+
+    return owns
+
+
+_STRIP_CLIENT_TAGS = ("patient_id", "session_id")
+
+
+def _strip_client_tags(msg: dict[str, Any]) -> dict[str, Any]:
+    """Drop any client-supplied `patient_id`/`session_id` before `_on_client_event`: those keys are stamped
+    by the server on outbound events for routing, never trusted as input from a phone."""
+    return {k: v for k, v in msg.items() if k not in _STRIP_CLIENT_TAGS}
+
+
 def _patient_event_handler(patient_id: str) -> Callable[[dict[str, Any]], None]:
     """Like _client_event_handler, minus device_health, and only while the session is the patient's own."""
     limiter = RateLimiter(CLIENT_MSGS_PER_S)
-    owns = _patient_accepts(patient_id)
+    owns = _patient_owns_current(patient_id)
 
     def handle(msg: dict[str, Any]) -> None:
         if not limiter.allow() or msg.get("type") not in PATIENT_CLIENT_EVENT_TYPES or not owns(msg):
             return
-        _on_client_event(msg)
+        _on_client_event(_strip_client_tags(msg))
 
     return handle
 

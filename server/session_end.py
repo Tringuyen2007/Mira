@@ -57,10 +57,10 @@ class MockAutoRestart:
 
     async def _restart(self) -> None:
         await asyncio.sleep(self.delay_s)
-        if self.registry.current is not None:
+        started = await self.registry.start_if_idle(self.patient_id, self.exercise_id)
+        if started is None:
             return
         log.info("mock auto-restart", extra={"patient_id": self.patient_id})
-        await self.registry.start(self.patient_id, self.exercise_id)
 
     async def close(self) -> None:
         if self._task is not None:

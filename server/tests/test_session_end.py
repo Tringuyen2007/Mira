@@ -95,6 +95,78 @@ async def test_mock_auto_restart_starts_a_new_session_after_delay() -> None:
     await restart.close()
 
 
+async def test_start_if_idle_lets_exactly_one_concurrent_caller_win() -> None:
+    reg = SessionRegistry()
+    results = await asyncio.gather(*(reg.start_if_idle("maya", "squat") for _ in range(5)))
+    winners = [r for r in results if r is not None]
+    assert len(winners) == 1
+    assert reg.current is winners[0]
+
+
+async def test_start_if_idle_returns_none_when_a_session_is_already_current() -> None:
+    reg = SessionRegistry()
+    session = await reg.start("maya", "squat")
+    assert await reg.start_if_idle("maya", "squat") is None
+    assert reg.current is session
+
+
+async def test_stop_prunes_old_ended_sessions() -> None:
+    from server.state import MAX_ENDED_SESSIONS
+
+    reg = SessionRegistry()
+    first_id = None
+    for i in range(MAX_ENDED_SESSIONS + 5):
+        session = await reg.start("maya", "squat")
+        if i == 0:
+            first_id = session.session_id
+        await reg.stop(session.session_id)
+    assert first_id is not None
+    assert len(reg.ended) == MAX_ENDED_SESSIONS
+    assert first_id not in reg.ended
+    assert reg.get(first_id) is None  # pruned out of _sessions too
+
+
+def test_mock_loop_disables_last_set_auto_stop_and_auto_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MOCK_LOOP=1 restores the pre-Plan-2 behaviour: the mock program's own `stopped` never fires, so
+    neither SessionEnder's last-set check nor MockAutoRestart should race it."""
+    from server.config import cfg
+    from server.main import _last_set_enabled, _mock_loops
+
+    original_source, original_loop = cfg.MIRA_SOURCE, cfg.MOCK_LOOP
+    try:
+        object.__setattr__(cfg, "MIRA_SOURCE", "mock")
+        object.__setattr__(cfg, "MOCK_LOOP", True)
+        assert _mock_loops(cfg) is True
+        assert _last_set_enabled(cfg) is False
+
+        object.__setattr__(cfg, "MOCK_LOOP", False)
+        assert _mock_loops(cfg) is False
+        assert _last_set_enabled(cfg) is True
+    finally:
+        object.__setattr__(cfg, "MIRA_SOURCE", original_source)
+        object.__setattr__(cfg, "MOCK_LOOP", original_loop)
+
+
+async def test_set_3_done_does_not_end_the_session_when_last_set_disabled_for_mock_loop() -> None:
+    """The actual SessionEnder, constructed the way main.py's lifespan would when MOCK_LOOP=1: a set 3
+    `set_done` must not end the session."""
+    from server.config import cfg
+    from server.main import _last_set_enabled
+
+    original_source, original_loop = cfg.MIRA_SOURCE, cfg.MOCK_LOOP
+    try:
+        object.__setattr__(cfg, "MIRA_SOURCE", "mock")
+        object.__setattr__(cfg, "MOCK_LOOP", True)
+        reg = SessionRegistry()
+        session = await reg.start("maya", "squat")
+        ender = session_end.SessionEnder(reg, Live(), auto_stop_after_last_set=_last_set_enabled(cfg))
+        await ender.on_event({"type": "set_done", "set": 3, "reps": 10, "session_id": session.session_id})
+        assert reg.current is session
+    finally:
+        object.__setattr__(cfg, "MIRA_SOURCE", original_source)
+        object.__setattr__(cfg, "MOCK_LOOP", original_loop)
+
+
 def test_mock_program_emits_stopped_after_last_set(monkeypatch: pytest.MonkeyPatch) -> None:
     from server import engine_bridge
     from server.config import cfg

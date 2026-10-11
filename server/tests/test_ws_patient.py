@@ -94,6 +94,31 @@ def test_patient_commands_and_forbidden_messages(client: TestClient, token: str,
     assert [m["type"] for m in seen] == ["command", "hr"]
 
 
+def test_tagged_command_cannot_steer_another_patients_session(client: TestClient, token: str,
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    """A phone that tags a message with someone else's patient_id/session_id must not reach
+    `_on_client_event` at all: the inbound gate (`_patient_owns_current`) only ever checks the *current*
+    session's patient, unlike the outbound `_patient_accepts` filter (which deliberately honours those
+    tags so a phone still receives its own late `session_summary`)."""
+    from server import main
+
+    r = client.post("/sessions", json={"patient_id": "bob", "exercise_id": "squat"}, headers=AUTH)
+    assert r.status_code == 200
+    bob_sid = r.json()["session_id"]
+    seen: list[dict] = []
+    monkeypatch.setattr(main, "_on_client_event", lambda msg: seen.append(msg))
+    try:
+        with client.websocket_connect(f"/ws/events?token={token}") as ws:
+            ws.send_json({"type": "command", "name": "stop", "patient_id": "bob", "session_id": bob_sid})
+            ws.send_json({"type": "hr", "t": 1.0, "bpm": 90, "patient_id": "bob", "session_id": bob_sid})
+            _drain(ws, 0.5)
+        assert seen == []
+        assert get_state().sessions.current is not None
+        assert get_state().sessions.current.session_id == bob_sid
+    finally:
+        client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
+
+
 def test_ws_token_check_db_error_closes_1013_not_1008(client: TestClient, token: str,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     """A DB hiccup while checking a patient token must look like "try again later" (1013), not a rejected

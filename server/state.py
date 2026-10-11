@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 log = get_logger("sessions")
 
 STORE_TIMEOUT_S = 1.0
+MAX_ENDED_SESSIONS = 50  # _sessions/ended are pruned to this many most-recently-ended sessions on stop()
 
 
 @dataclass
@@ -119,11 +120,27 @@ class SessionRegistry:
         # engine's program and to warm up the greeting (server.ai.session_voice.SessionVoice.prepare_greeting).
         self.on_start: list[Callable[[LiveSession], None]] = []
         self.ended: set[str] = set()
+        self._ended_order: list[str] = []  # oldest-first, for pruning _sessions/ended in stop()
         # Called once per session after it ends (REST stop, engine `stopped`, last set, shutdown). Sync hooks run
         # inline; a coroutine result is scheduled as a task — stop() never waits on the analyst.
         self.on_stop: list[Callable[[LiveSession], Any]] = []
+        # Shared by start() and start_if_idle() so two concurrent callers (e.g. a REST start racing the mock
+        # auto-restart) can never both see `current is None` and both start a session.
+        self._start_lock = asyncio.Lock()
 
     async def start(self, patient_id: str, exercise_id: str) -> LiveSession:
+        async with self._start_lock:
+            return await self._start_locked(patient_id, exercise_id)
+
+    async def start_if_idle(self, patient_id: str, exercise_id: str) -> LiveSession | None:
+        """Like start(), but returns None instead of starting when a session is already current. Holds the
+        same lock as start(), so exactly one caller among concurrent start()/start_if_idle() calls wins."""
+        async with self._start_lock:
+            if self.current is not None:
+                return None
+            return await self._start_locked(patient_id, exercise_id)
+
+    async def _start_locked(self, patient_id: str, exercise_id: str) -> LiveSession:
         profile = await self._load_profile(patient_id)
         session = LiveSession(
             session_id=str(uuid.uuid4()),
@@ -153,6 +170,7 @@ class SessionRegistry:
         if session is None or session_id in self.ended:
             return
         self.ended.add(session_id)
+        self._ended_order.append(session_id)
         if self.current is session:
             self.current = None
         await self._store_call("session_stopped", session)
@@ -164,7 +182,16 @@ class SessionRegistry:
                     task.add_done_callback(_log_hook_failure)
             except Exception as exc:  # noqa: BLE001 - a hook bug must not break session stop
                 log.warning("session stop hook failed", extra={"session_id": session_id, "error": repr(exc)})
+        self._prune_ended()
         log.info("session stopped", extra={"session_id": session_id})
+
+    def _prune_ended(self) -> None:
+        """Keep only the MAX_ENDED_SESSIONS most-recently-ended sessions; `current` is never in `ended` (it
+        was cleared above), so this can never evict it."""
+        while len(self._ended_order) > MAX_ENDED_SESSIONS:
+            oldest = self._ended_order.pop(0)
+            self.ended.discard(oldest)
+            self._sessions.pop(oldest, None)
 
     def get(self, session_id: str) -> LiveSession | None:
         return self._sessions.get(session_id)

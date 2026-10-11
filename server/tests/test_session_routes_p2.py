@@ -106,14 +106,25 @@ def test_checkin_persists_pain_effort_note(client: TestClient, phone: dict[str, 
     assert detail["session"]["note"] == "felt okay"
 
 
-def test_checkin_high_pain_opens_a_guardian_alert(client: TestClient, phone: dict[str, str]) -> None:
+def test_checkin_high_pain_notifies_the_therapist(client: TestClient, phone: dict[str, str], dsn: str) -> None:
+    """Post-session pain >= 7 routes to the therapist as a notification, not through the live Guardian (the
+    session has already ended, so there is no live call left to escalate into). Posting the same check-in
+    twice must still leave exactly one row (dedupe_key = pain_post:{sid})."""
+    from psycopg.rows import dict_row
+
     sid = _finished_session(client, phone)
-    token = phone["Authorization"].split()[1]
-    with client.websocket_connect(f"/ws/events?token={token}") as ws:
-        r = client.post(f"/sessions/{sid}/checkin", headers=phone, json={"pain_post": 8})
+    for _ in range(2):
+        r = client.post(f"/sessions/{sid}/checkin", headers=phone, json={"pain_post": 8, "note": "sharp pain"})
         assert r.status_code == 200
-        alert = read_until(ws, lambda m: m.get("type") == "alert")
-        assert alert["kind"] == "pain" and alert["session_id"] == sid
+    with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
+        rows = conn.execute("SELECT * FROM notifications WHERE kind = 'pain' AND source_id = %s", (sid,)).fetchall()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["severity"] == "high" and row["therapist_id"] == "okafor"
+    assert row["title"] == "Maya reported pain 8/10 after a session"
+    assert row["body"] == "sharp pain"
+    assert row["link"] == f"/sessions/{sid}" and row["source_table"] == "sessions"
+    assert row["dedupe_key"] == f"pain_post:{sid}"
 
 
 def test_checkin_rejects_someone_elses_session(client: TestClient, phone: dict[str, str]) -> None:

@@ -150,7 +150,7 @@ Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" b
 | `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
 | `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
 | `DEMO_TOOLS_ENABLED=1` | 0 | enables `POST /demo/trigger_fall` (rehearsals only) |
-| `MOCK_LOOP=1` | 0 | the mock squat program repeats forever instead of finishing after 3 sets (pre-Plan-2 behaviour) |
+| `MOCK_LOOP=1` | 0 | the mock squat program repeats forever instead of finishing after 3 sets (pre-Plan-2 behaviour); implies no auto-stop/auto-restart (below) |
 | `AUTO_STOP_AFTER_LAST_SET=0` | 1 | don't auto-end the session once `set == sets_target` (needed for engines that already send their own `stopped`) |
 
 ## Run
@@ -439,8 +439,8 @@ Three env flags control it:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `MOCK_LOOP=1` | 0 | the mock program repeats forever (pre-Plan-2 behaviour); see Kill switches above |
-| `MOCK_AUTO_RESTART_S` | `30.0` | mock mode only: `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one; `0` disables the auto-restart so the LCD stays on "Session complete" |
+| `MOCK_LOOP=1` | 0 | the mock program repeats forever (pre-Plan-2 behaviour); see Kill switches above. Implies no auto-stop/auto-restart: `SessionEnder`'s last-set check and `MockAutoRestart` are both skipped, since the mock program's own `stopped` never fires either |
+| `MOCK_AUTO_RESTART_S` | `30.0` | mock mode only (and not `MOCK_LOOP`): `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one; `0` disables the auto-restart so the LCD stays on "Session complete" |
 | `AUTO_STOP_AFTER_LAST_SET=0` | 1 | see Kill switches above |
 | `ANALYST_DELAY_S` | `2.0` | how long `SessionAnalyst` waits after a session ends before reading it, so the last reps/form_events writes have landed |
 
@@ -476,6 +476,8 @@ and runs once per ended session, after `ANALYST_DELAY_S`:
   session) through `server.notify.notifications.create`, same as the other agents.
 - Never raises into its caller: every DB read is individually guarded and an unexpected error is logged and
   swallowed, so a broken analysis can never break the live stream or `stop()`.
+- On shutdown, `SessionAnalyst.close()` cancels every pending analysis task: a session that ends right at
+  shutdown gets no analysis (there's no live request left to serve one to, and the process is exiting).
 
 **New/changed REST:**
 
@@ -483,9 +485,11 @@ and runs once per ended session, after `ANALYST_DELAY_S`:
   — the `session_analyses` row (with `note` labeled) or `null` if the analyst hasn't finished yet. Poll this
   until `analysis` is non-null, or just listen for `session_summary` on `/ws/events`.
 - `POST /sessions/{id}/checkin` (owner or full scope) — `{pain_post?: 0..10, effort?: 1..10, note?: ≤1000
-  chars}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` also injects
-  `{"type": "command", "name": "pain", "payload": {"level": pain_post, "when": "post"}, "session_id": id}`
-  into the engine reverse channel, opening a Safety Guardian incident exactly as a live pain report would.
+  chars}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` raises a therapist notification
+  (`kind="pain"`, `severity="high"`, title `"<first name> reported pain <n>/10 after a session"`, deduped
+  per session so re-posting the same check-in is harmless) instead of opening a live Safety Guardian
+  incident — the check-in arrives after the session (and usually its analysis) already ended, so there is
+  no live call left for the Guardian to hold open.
 - `GET /patients/{id}/sessions?limit=30&before=` (owner or full scope) → `{patient_id, sessions: [...]}`,
   newest first, ended and non-simulated sessions only, each row carrying `form_score`/`good_reps`/
   `reps_total`/`spoken_preview` (first 140 chars of `spoken`) alongside the usual session fields.

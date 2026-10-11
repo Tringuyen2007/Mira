@@ -19,7 +19,10 @@ from server.config import cfg
 from server.db import queries, writes
 from server.db.pool import Database
 from server.exercises import display_name
+from server.notify import notifications
 from server.state import get_state
+
+DEFAULT_THERAPIST_ID = "okafor"
 
 router = APIRouter()
 
@@ -89,13 +92,37 @@ async def checkin_session(session_id: uuid.UUID, body: CheckinIn,
                           principal: security.Principal = Depends(security.require_principal),
                           db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
-    await _owned_session(db, sid, principal)
+    session = await _owned_session(db, sid, principal)
     await writes.record_session_feedback(db, sid, pain_post=body.pain_post, effort=body.effort, note=body.note)
     if body.pain_post is not None and body.pain_post >= 7:
-        get_state().bridge.inject({"type": "command", "name": "pain",
-                                   "payload": {"level": body.pain_post, "when": "post"}, "session_id": sid})
+        await _notify_post_session_pain(db, sid, session["patient_id"], session["exercise_id"], body.pain_post,
+                                        body.note)
     return {"session_id": sid, "pain_post": body.pain_post, "effort": body.effort,
             "note_saved": body.note is not None}
+
+
+async def _notify_post_session_pain(db: Database, sid: str, patient_id: str, exercise_id: str, pain_post: int,
+                                    note: str | None) -> None:
+    """A pain_post >= 7 check-in arrives after the session (and often after its analysis) already ended, so
+    it can't open a live Safety Guardian incident — there's no live call to escalate into. Instead it routes
+    straight to the therapist as a notification; `dedupe_key` makes re-posting the same check-in harmless.
+    Spec deviation: post-session pain routes to the therapist as a notification, not through the live
+    Guardian (there is nothing left for the Guardian to hold open)."""
+    live = get_state().sessions.get(sid)
+    first_name = live.profile.first_name if live else None
+    therapist_id = live.profile.therapist_id if live else None
+    if not therapist_id:
+        row = await queries.patient_me_row(db, patient_id)
+        therapist_id = (row or {}).get("therapist_id")
+        if first_name is None and row is not None and row.get("name"):
+            first_name = str(row["name"]).split()[0]
+    therapist_id = therapist_id or DEFAULT_THERAPIST_ID
+    first_name = first_name or patient_id
+    body = (note or "").strip()[:140] or display_name(exercise_id)
+    await notifications.create(kind="pain", severity="high", therapist_id=therapist_id, patient_id=patient_id,
+                               title=f"{first_name} reported pain {pain_post}/10 after a session", body=body,
+                               link=f"/sessions/{sid}", source_table="sessions", source_id=sid,
+                               dedupe_key=f"pain_post:{sid}")
 
 
 @router.get("/sessions/{session_id}")

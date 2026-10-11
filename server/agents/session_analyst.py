@@ -227,6 +227,9 @@ class SessionAnalyst:
         await self.analyze(session.session_id, session.patient_id, session.exercise_id)
 
     async def close(self) -> None:
+        """Cancel every pending analysis on shutdown. The session that ended right at shutdown (its
+        `on_stop` hook scheduled `_after_stop` only moments ago) is cancelled along with the rest and gets
+        no analysis — there is no next request to serve one to, and the process is exiting anyway."""
         for task in list(self._tasks):
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
