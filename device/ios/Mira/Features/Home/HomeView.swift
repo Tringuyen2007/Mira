@@ -100,14 +100,14 @@ struct HomeView: View {
                 .disabled(isWorking)
             if preview {
                 HStack(spacing: 14) {
-                    FigmaIcon(screen: "home", slot: "imgIconThumbsUp", size: 36)
-                    Text("Or give Mira a thumbs-up when\nyou’re standing on your mat.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                    Image(systemName: "hand.raised").font(.system(size: 30)).foregroundStyle(MiraUI.soft).frame(width: 36, height: 36).accessibilityHidden(true)
+                    Text("Or raise your hand to Mira when\nyou’re standing on your mat.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                 }.padding(.horizontal, 16)
             } else {
                 if state.isLinked {
                     HStack(spacing: 14) {
-                        FigmaIcon(screen: "home", slot: "imgIconThumbsUp", size: 36)
-                        Text("Or give Mira a thumbs-up when\nyou’re standing on your mat.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                        Image(systemName: "hand.raised").font(.system(size: 30)).foregroundStyle(MiraUI.soft).frame(width: 36, height: 36).accessibilityHidden(true)
+                        Text("Or raise your hand to Mira when\nyou’re standing on your mat.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                     }.padding(.horizontal, 16)
                 }
                 HStack {

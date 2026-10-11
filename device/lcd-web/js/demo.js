@@ -24,7 +24,7 @@ const SCREENS = [
   { name: "greeting", label: "Greeting", inputs: [open, ev({ type: "arrived" }), live({ set: 1, hr: 88,
     caption: cap("Good morning, Maya. It's mini squats today, and I'll count every one with you.") })] },
   { name: "gesture", label: "Ready?", inputs: [open, ev({ type: "awaiting_gesture" }), live({ hr: null,
-    caption: cap("Give me a thumbs up or raise your hand whenever you're ready.") })] },
+    caption: cap("Raise your hand whenever you're ready.") })] },
   { name: "countdown", label: "Countdown", inputs: [open, live({ phase: "countdown", countdown: 3,
     caption: cap("Get ready. Three, two, one.") })] },
   { name: "cue", label: "Form cue", inputs: [open, live({ phase: "active", rep: 4, load_l_pct: 68, hr: 96,

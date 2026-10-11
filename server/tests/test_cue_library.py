@@ -58,7 +58,7 @@ def test_default_library_covers_builtin_ids_and_passes_validation() -> None:
         for line in lines:
             assert validate_text(line["text"], "cue", []) == line["text"], (cue_id, line)
             assert line["file"].startswith(cue_id + "_")
-    assert lib.pick("check_in")["text"] == "Are you okay? Give me a thumbs up or raise your hand."  # type: ignore[index]
+    assert lib.pick("check_in")["text"] == "Are you okay? Raise your hand to let me know."  # type: ignore[index]
 
 
 def test_rule_ids_are_merged(tmp_path: Path) -> None:
@@ -112,7 +112,7 @@ async def test_generate_audio_only_missing(monkeypatch: pytest.MonkeyPatch) -> N
     # (and voiced with force=True even though ELEVEN_RUNTIME_TTS is off).
     hand_written = [t for lines in cue_library.HAND_WRITTEN.values() for t in lines]
     assert calls == ["Yo.", *hand_written]
-    assert calls[1:3] == ["Are you okay? Give me a thumbs up or raise your hand.",
+    assert calls[1:3] == ["Are you okay? Raise your hand to let me know.",
                           "Thanks for letting me know you're okay."]
     assert result == {"generated": len(calls), "failed": 0, "chars": sum(map(len, calls))}
     assert cue_library.pick("c") is not None and cue_library.pick("c")["audio_url"]  # type: ignore[index]

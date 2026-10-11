@@ -5,7 +5,13 @@ once offline by the CLI generator, so the running server never spends ElevenLabs
 The kiosk plays `audio_url`, shows `text` as the caption and animates the mascot while she talks.
 
 Event -> line (spec §3, docs/superpowers/specs/2026-10-11-lcd-agent-design.md):
-- `awaiting_gesture` -> `raise_hand`; `gesture` -> `lets_go`; `countdown{n}` -> `countdown_{n}` (3, 2, 1 only).
+- Start instructions (`instructions`: stand back, raise your hand) once per session: right after the `greeting`, or
+  `INSTRUCTIONS_FALLBACK_S` after `arrived` when no greeting came, or on `awaiting_gesture` if still unsaid.
+  Never once the session has moved on (`gesture`, `countdown`, `rep`).
+- `awaiting_gesture` -> `raise_hand` (skipped when the instructions were spoken in the last
+  `INSTRUCTIONS_COVER_S`), repeated every `RAISE_HAND_REPEAT_S` until `gesture`/`countdown`/`paused`/`stopped` or
+  an incident.
+- `gesture` -> `lets_go`; `countdown{n}` -> `countdown_{n}` (3, 2, 1 only).
 - `rep{quality: "good", index: i}` -> `count_{min(i, 20)}`, then `halfway` at `i == ceil(target / 2)` (when
   `i < target - 1`) and `last_rep` at `i == target - 1`. The target comes from the rep itself or the last
   `countdown`/`arrived` of the session; with no known target both extras are skipped. Other reps are silent
@@ -49,16 +55,22 @@ log = get_logger("trainer_voice")
 
 DEDUPE_WINDOW_S = 1.5
 SET_DONE_WAIT_S = 1.0
+INSTRUCTIONS_FALLBACK_S = 6.0
+INSTRUCTIONS_COVER_S = 10.0
+RAISE_HAND_REPEAT_S = 20.0
 MAX_COUNT = 20
 SEEN_EVENTS_MAX = 256
 COUNTDOWN_LINES = {3: "countdown_3", 2: "countdown_2", 1: "countdown_1"}
-SIMPLE_LINES = {"awaiting_gesture": "raise_hand", "gesture": "lets_go", "paused": "pause", "resumed": "resume",
-                "session_summary": "session_done"}
+SIMPLE_LINES = {"gesture": "lets_go", "paused": "pause", "resumed": "resume", "session_summary": "session_done"}
+# Events that end the wait for the start gesture (no more instructions or raise-hand reminders).
+PROMPT_ENDERS = frozenset({"gesture", "countdown", "paused", "stopped"})
+# Events that mean the session has started: the instructions are no longer worth saying.
+STARTED_EVENTS = frozenset({"gesture", "countdown", "rep"})
 CALL_LINES = {"escalated": "calling_contact", "call_registered": "calling_contact",
               "call_ongoing": "contact_on_call",
               "call_failed": "call_failed", "call_not_connected": "call_failed", "call_error": "call_failed"}
 # Agent events (hub.emit) this agent needs; engine events come through the bridge subscription.
-AGENT_EVENT_TYPES = frozenset({"alert", "cue", "session_summary", "summary_ready"})
+AGENT_EVENT_TYPES = frozenset({"alert", "cue", "greeting", "session_summary", "summary_ready"})
 
 Pick = Callable[[str], "dict[str, Any] | None"]
 
@@ -77,6 +89,9 @@ class TrainerVoice:
         self._last_said: dict[tuple[str | None, str], float] = {}
         self._call_lines_said: dict[str | None, set[tuple[Any, str]]] = {}
         self._set_done_tasks: dict[str | None, asyncio.Task[None]] = {}
+        # One pending start prompt per session: the instructions fallback, then the raise-hand reminder loop.
+        self._prompt_tasks: dict[str | None, asyncio.Task[None]] = {}
+        self._instructed: set[str | None] = set()
         self._seen: deque[tuple[Any, ...]] = deque(maxlen=SEEN_EVENTS_MAX)
 
     # ---- inputs ----------------------------------------------------------------------------------
@@ -97,8 +112,9 @@ class TrainerVoice:
         loop.call_soon(self._handle, dict(ev))
 
     async def close(self) -> None:
-        tasks = list(self._set_done_tasks.values())
+        tasks = [*self._set_done_tasks.values(), *self._prompt_tasks.values()]
         self._set_done_tasks.clear()
+        self._prompt_tasks.clear()
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -133,6 +149,18 @@ class TrainerVoice:
             return
         if sid in self._incident:
             return
+        if kind in PROMPT_ENDERS:
+            self._cancel_prompt(sid)
+        if kind in STARTED_EVENTS:
+            self._instructed.add(sid)
+        if kind == "arrived":
+            self._schedule_prompt(sid, self._instructions_later(sid))
+        elif kind == "greeting":
+            if sid not in self._instructed:
+                self._cancel_prompt(sid)
+                self._say_instructions(sid)
+        elif kind == "awaiting_gesture":
+            self._on_awaiting_gesture(sid)
         if kind == "session_summary":
             self._cancel_set_done(sid)  # the last set's pending "Set done" must not cut off "That's your whole session"
         if kind in SIMPLE_LINES:
@@ -145,6 +173,46 @@ class TrainerVoice:
             self._on_rep(sid, ev)
         elif kind == "set_done":
             self._schedule_set_done(sid)
+
+    def _on_awaiting_gesture(self, sid: str | None) -> None:
+        if sid not in self._instructed:
+            self._say_instructions(sid)
+        else:
+            last = self._last_said.get((sid, "instructions"))
+            if last is None or self._now() - last >= INSTRUCTIONS_COVER_S:
+                self._say(sid, "raise_hand")
+        self._schedule_prompt(sid, self._raise_hand_reminders(sid))
+
+    def _say_instructions(self, sid: str | None) -> None:
+        if sid not in self._instructed and self._say(sid, "instructions"):
+            self._instructed.add(sid)
+
+    async def _instructions_later(self, sid: str | None) -> None:
+        await asyncio.sleep(INSTRUCTIONS_FALLBACK_S)
+        self._prompt_done(sid)
+        if sid not in self._incident:
+            self._say_instructions(sid)
+
+    async def _raise_hand_reminders(self, sid: str | None) -> None:
+        while True:
+            await asyncio.sleep(RAISE_HAND_REPEAT_S)
+            if sid in self._incident:
+                self._prompt_done(sid)
+                return
+            self._say(sid, "raise_hand")
+
+    def _schedule_prompt(self, sid: str | None, coro: Any) -> None:
+        self._cancel_prompt(sid)
+        self._prompt_tasks[sid] = asyncio.get_running_loop().create_task(coro, name="trainer-start-prompt")
+
+    def _prompt_done(self, sid: str | None) -> None:
+        if self._prompt_tasks.get(sid) is asyncio.current_task():
+            del self._prompt_tasks[sid]
+
+    def _cancel_prompt(self, sid: str | None) -> None:
+        task = self._prompt_tasks.pop(sid, None)
+        if task is not None:
+            task.cancel()
 
     def _on_rep(self, sid: str | None, ev: dict[str, Any]) -> None:
         index = ev.get("index")
@@ -181,6 +249,7 @@ class TrainerVoice:
     def _open_incident(self, sid: str | None) -> None:
         self._incident.add(sid)
         self._cancel_set_done(sid)
+        self._cancel_prompt(sid)
 
     def _cancel_set_done(self, sid: str | None) -> None:
         task = self._set_done_tasks.pop(sid, None)
@@ -191,6 +260,8 @@ class TrainerVoice:
         """`stopped`: drop the session's per-session state so it stays bounded. An open incident keeps its
         hold and its said call lines until the alert closes (the call flow outlives the session)."""
         self._cancel_set_done(sid)
+        self._cancel_prompt(sid)
+        self._instructed.discard(sid)
         self._reps_target.pop(sid, None)
         for key in [k for k in self._last_said if k[0] == sid]:
             del self._last_said[key]
@@ -199,8 +270,8 @@ class TrainerVoice:
 
     def _forget_other_sessions(self, sid: str | None) -> None:
         """`arrived` for a new session: nothing of any other session is needed any more."""
-        for other in {*self._reps_target, *self._set_done_tasks, *self._call_lines_said, *self._incident,
-                      *(k[0] for k in self._last_said)} - {sid}:
+        for other in {*self._reps_target, *self._set_done_tasks, *self._prompt_tasks, *self._instructed,
+                      *self._call_lines_said, *self._incident, *(k[0] for k in self._last_said)} - {sid}:
             self._forget_session(other)
             self._incident.discard(other)
             self._call_lines_said.pop(other, None)

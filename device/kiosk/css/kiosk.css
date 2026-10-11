@@ -232,7 +232,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   white-space: pre;
 }
 
-.idle-line { margin-top: 10px; }
+/* The idle prompt is longer than the greeting dose line: it wraps inside the 534px right column */
+.idle-line { margin-top: 10px; width: 534px; white-space: normal; line-height: 1.25; }
 
 /* ---------- 2 Awaiting Gesture (35:210 "Prompt" at x450 y52, w534) ---------- */
 

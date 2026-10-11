@@ -50,7 +50,7 @@ make run   # from the repo root
 
 then open `http://localhost:8000/device/#token=<MIRA_DEVICE_TOKEN>` in Chrome at any window size. With
 `MIRA_SOURCE=mock` (the default) the mock session plays through every screen: `arrived` → greeting (held ~3 s)
-→ `awaiting_gesture` → (~4 s later) `gesture {name: "thumbs_up"}` → countdown → reps → set done → summary. To see
+→ `awaiting_gesture` → (~4 s later) `gesture {name: "raised_hand"}` → countdown → reps → set done → summary. To see
 the fall screen, start the server with `DEMO_TOOLS_ENABLED=1` and trigger it:
 
 ```sh
@@ -87,7 +87,7 @@ to update itself mid-session.
 | # | Screen | Shown when | Mira mood |
 |---|---|---|---|
 | 1 | Greeting | after `arrived` / `greeting` until `awaiting_gesture` or `countdown` | idle |
-| 2 | Awaiting gesture | `awaiting_gesture` until `gesture` / `countdown`; "Raise your hand to start", hint "A thumbs up works too." (both gesture icons stay); Mira waves | idle |
+| 2 | Awaiting gesture | `awaiting_gesture` until `gesture` / `countdown`; "Raise your hand to start" (raise-hand icon only); Mira waves | idle |
 | 3 | Countdown | `live.phase == "countdown"` (big `live.countdown`, ring progress n/3) | — (no mascot) |
 | 4 | Cue | `phase == "active"` and a correction cue arrived < 4 s ago, or balance off > 15 % | worried |
 | 5 | Rep | `phase == "active"` otherwise; cheering 1.5 s after a `rep` with `quality == "good"` | cheering → idle |

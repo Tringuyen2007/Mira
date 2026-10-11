@@ -223,7 +223,7 @@ def _posture_sentence(s: dict[str, Any]) -> str:
 
 def _checkin_sentence(s: dict[str, Any]) -> str:
     subj, obj, poss = s["pronoun_subj"], s["pronoun_obj"], s["pronoun_poss"]
-    asked = f"Mira asked {obj} {_times(max(1, s['checkins']))} to give a thumbs up or raise {poss} hand"
+    asked = f"Mira asked {obj} {_times(max(1, s['checkins']))} to raise {poss} hand"
     return f"{asked}, and {subj} {_have(subj)} not responded."
 
 

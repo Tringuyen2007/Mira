@@ -48,7 +48,7 @@ def test_recorded_fall_gives_the_expected_sentence() -> None:
     assert snap.situation_text(inc.snapshot) == (
         "At 3:42 PM, during set 2 of her squats, Mira's cameras saw Maya drop quickly to the floor, about 0.9 "
         "meters in under a second. She appears to be lying down on the mat and has barely moved for 35 seconds. "
-        "Mira asked her once to give a thumbs up or raise her hand, and she has not responded. "
+        "Mira asked her once to raise her hand, and she has not responded. "
         "Her heart rate was 112 just before and is 118 now.")
     assert snap.situation_short(inc.snapshot) == "Mira saw Maya fall at 3:42 PM and she hasn't responded."
     assert snap.status_text(inc.snapshot) == "Still lying down on the mat, not moving. No response yet."
@@ -142,7 +142,7 @@ def test_pronouns_come_from_the_profile() -> None:
     inc = with_snapshot(incident(profile), lying_frames(20))
     text = snap.situation_text(inc.snapshot)
     assert "during set 2 of their squats" in text and "They appear to be lying down" in text
-    assert "Mira asked them once to give a thumbs up or raise their hand, and they have not responded." in text
+    assert "Mira asked them once to raise their hand, and they have not responded." in text
     assert snap.situation_short(inc.snapshot).endswith("and they haven't responded.")
     assert "whether they are conscious" in snap.call_variables(inc, "Lee")["limits"]
 

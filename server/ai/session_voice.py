@@ -77,7 +77,7 @@ def _read_data(messages: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def template_greeting(data: dict[str, Any]) -> str:
-    return f"Hi {data.get('first_name') or 'there'}! Thumbs up or raise your hand when you're ready."
+    return f"Hi {data.get('first_name') or 'there'}! Raise your hand when you're ready."
 
 
 def template_spoken(data: dict[str, Any]) -> str:
@@ -100,7 +100,7 @@ def _fake_greeting(messages: list[dict[str, Any]], tools: Any) -> gemini.Reply:
     data = _read_data(messages)
     reps = f" {data['reps_target']} reps today." if data.get("reps_target") else ""
     return gemini.Reply(text=f"Hi {data.get('first_name') or 'there'}!{reps} "
-                             "Thumbs up or raise your hand when you're ready.")
+                             "Raise your hand when you're ready.")
 
 
 def _fake_summary(messages: list[dict[str, Any]], tools: Any) -> gemini.Reply:

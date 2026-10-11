@@ -62,7 +62,6 @@ strokes are as in Figma.
 
 | File | Figma node | viewBox | Colours / notes |
 |---|---|---|---|
-| `thumbs-up.svg` | `35:132` (Gesture Thumbs up `35:130`) | 60×60 | stroke #1C1A22, 4 px; drawn 60×60 in a 136 px white halo button |
 | `raise-hand.svg` | `35:138` (Gesture Raise hand `35:136`) | 60×60 | stroke #1C1A22, 4 px |
 | `sparkle.svg` | `24:135` Sparkle | 24×24 | fill white; component adds `drop-shadow(0 0 6px rgba(143,186,204,.7))` |
 | `heart.svg` | `24:124` (Heart Rate Chip `24:123`) | 26×26 | fill #9F3462 |

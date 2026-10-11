@@ -60,7 +60,7 @@ async def test_set_done_emits_set_done_haptic(coach: HapticCoach, hub: FakeHub, 
 
 
 async def test_other_events_are_ignored(coach: HapticCoach, hub: FakeHub, live_session: LiveSession) -> None:
-    await coach.on_event({"type": "gesture", "name": "thumbs_up", "session_id": live_session.session_id})
+    await coach.on_event({"type": "gesture", "name": "raised_hand", "session_id": live_session.session_id})
     assert hub.events == []
 
 

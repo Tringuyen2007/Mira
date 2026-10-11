@@ -48,7 +48,7 @@ FALL_STATUS_EVERY_S = 2.0
 MOCK_FALL_AT_S = 20.0
 MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
 MOCK_GREETING_HOLD_S = 3.0  # simulated seconds between arrived and awaiting_gesture (the LCD greeting shows)
-MOCK_GESTURE_AFTER_S = 4.0  # simulated seconds between awaiting_gesture and the mock's thumbs-up
+MOCK_GESTURE_AFTER_S = 4.0  # simulated seconds between awaiting_gesture and the mock's raised hand
 JOIN_TIMEOUT_S = 2.0
 
 # Reverse-channel message types understood by the mock source (beyond incident_closed).
@@ -89,7 +89,7 @@ class SourceSpec:
 
 
 class FallScript:
-    """Fall → fall_status every 2 s → optional thumbs_up `responds_at_s` seconds after the fall."""
+    """Fall → fall_status every 2 s → optional raised hand `responds_at_s` seconds after the fall."""
 
     def __init__(self, responds_at_s: float | None, context: dict[str, Any]) -> None:
         self.responds_at_s = responds_at_s
@@ -111,7 +111,7 @@ class FallScript:
                         "posture": "unknown", "on_mat": True, **self.context})
         if self.responds_at_s is not None and not self._responded and elapsed_s >= self.responds_at_s:
             self._responded = True
-            out.append({"type": "gesture", "name": "thumbs_up"})
+            out.append({"type": "gesture", "name": "raised_hand"})
         while elapsed_s >= self._next_status_s:
             still_s = 0.0 if self._responded else self._next_status_s
             out.append({"type": "fall_status", "posture": "unknown", "moving": self._responded,
@@ -421,15 +421,15 @@ class MockSource:
                 self._emit(emit, {"type": "arrived", "patient_id": self._patient_id, "exercise_id": self._exercise,
                                   "reps_target": _REPS, "sets_target": _SETS})
                 self._awaiting_due_s = self._sim_s + MOCK_GREETING_HOLD_S
-            # Like the vision engine: after the greeting has been on screen a moment, ask for a thumbs-up, and
+            # Like the vision engine: after the greeting has been on screen a moment, ask for a raised hand, and
             # start the program once it is seen.
             if self._arrived and not self._awaiting and self._fall is None and self._sim_s >= self._awaiting_due_s:
                 self._awaiting = True
-                self._emit(emit, {"type": "awaiting_gesture", "gesture": "thumbs_up"})
+                self._emit(emit, {"type": "awaiting_gesture", "gesture": "raised_hand"})
                 self._gesture_due_s = self._sim_s + MOCK_GESTURE_AFTER_S
             if self._awaiting and not self._ready and self._fall is None and self._sim_s >= self._gesture_due_s:
                 self._ready = True
-                self._emit(emit, {"type": "gesture", "name": "thumbs_up"})
+                self._emit(emit, {"type": "gesture", "name": "raised_hand"})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
                 self._auto_fall_done = True
                 self._start_fall(self.responds_at_s)
