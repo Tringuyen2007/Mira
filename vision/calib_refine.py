@@ -26,7 +26,7 @@ from vision.pipeline import Pipeline
 from vision.record import Recorder, default_path
 from vision.replay import iter_frames
 
-COUNTDOWN_S = 3.0
+COUNTDOWN_S = 8.0  # time to walk from the laptop to the mat
 REFINED_ZOOM_STD = 0.02  # a zoom that survived the body refinement counts as measured
 
 
