@@ -25,7 +25,7 @@ from server.agents.scheduler import Scheduler
 from server.agents.session_coach import SessionCoach
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
-from server.api import alerts, calibration, demo, health, patients, prescriptions
+from server.api import alerts, calibration, demo, health, lcd_link, patients, prescriptions
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
 from server.api import insight as insight_api
@@ -88,7 +88,7 @@ class KioskStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    problem = cfg.token_problem() or cfg.device_token_problem()
+    problem = cfg.token_problem() or cfg.device_token_problem() or cfg.lcd_link_problem()
     if problem:
         raise RuntimeError(f"{problem}; refusing to start. Generate one with: "
                            "python -c \"import secrets;print(secrets.token_urlsafe(32))\"")
@@ -338,6 +338,7 @@ def create_app() -> FastAPI:
     for module in (copilot_api, proposals):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
+    app.include_router(lcd_link.router)  # its own secret key, no API token
 
     @app.websocket("/ws/pose")
     async def ws_pose(ws: WebSocket) -> None:
