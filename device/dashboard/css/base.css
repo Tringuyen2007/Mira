@@ -1,0 +1,188 @@
+/* Base element resets and the shared component classes used across every screen (Figma components frame
+   203:109): cards, buttons, chips, pill tabs and status dots. Screen-specific layout lives in css/screens/*.css. */
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--color-ink);
+  font-family: var(--font);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[hidden] { display: none !important; }
+
+h1, h2, h3, p, ul, ol, dl { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button { font: inherit; color: inherit; }
+img { max-width: 100%; display: block; }
+
+a {
+  color: var(--color-accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ring-cool);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--color-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+}
+
+.card__title {
+  font-size: var(--text-card-title);
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 44px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: var(--text-body);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn--primary {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+.btn--primary:hover { background: var(--color-accent-text-small); }
+
+.btn--secondary {
+  background: var(--color-card);
+  color: var(--color-ink);
+  border-color: var(--color-line);
+}
+
+.btn--secondary:hover { background: var(--color-card-sunk); }
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-ink);
+  border-color: transparent;
+}
+
+.btn--ghost:hover { background: var(--color-card-sunk); }
+
+/* ---------- Chips ---------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  background: var(--color-card-sunk);
+  color: var(--color-ink-soft);
+}
+
+.chip--ai {
+  background: transparent;
+  border: 1.5px dashed var(--color-berry);
+  color: var(--color-berry);
+  font-size: 12px;
+}
+
+.chip--ai::before {
+  content: "\2726"; /* ✦ */
+}
+
+/* ---------- Pill tabs ---------- */
+
+.pill-tabs {
+  display: inline-flex;
+  gap: var(--space-1);
+  background: var(--color-card-sunk);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1);
+}
+
+.pill-tabs button {
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+}
+
+.pill-tabs button[aria-selected="true"] {
+  background: var(--color-ink);
+  color: #ffffff;
+}
+
+/* ---------- Meta text ---------- */
+
+.meta {
+  font-size: var(--text-meta);
+  color: var(--color-ink-soft);
+}
+
+/* ---------- Page head ---------- */
+
+.page-head {
+  margin-bottom: var(--space-6);
+}
+
+.page-title {
+  font-size: var(--text-page-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.page-sub {
+  margin-top: var(--space-1);
+  color: var(--color-ink-soft);
+  font-size: var(--text-body);
+}
+
+/* ---------- Status dots ---------- */
+
+.status--needs, .status--watch, .status--ok {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.status--needs::before, .status--watch::before, .status--ok::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status--needs::before { background: var(--color-flag); }
+.status--watch::before { background: var(--color-watch); }
+.status--ok::before { background: var(--color-good); }

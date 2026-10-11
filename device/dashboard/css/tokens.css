@@ -1,0 +1,76 @@
+/* Design tokens from the Figma "MIRA Hi-Fi" variable collection (palette frame 59:305). */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* Text and surfaces */
+  --color-ink: #1c1a22;
+  --color-ink-soft: #5e5a63;
+  --color-surface: #ffffff;
+  --color-dose: #6e6875;          /* Greeting dose line (24:278), a literal in Figma */
+  --color-voice: #1e1e1e;         /* caption voice disc as overridden on every screen */
+
+  /* Aurora background */
+  --color-canvas: #fbf2eb;        /* color/canvas, "Seashell" */
+  --color-mist: #e5eeed;          /* aurora/mist */
+  --color-sky: #f5faf8;           /* aurora/sky */
+
+  /* Accents */
+  --color-accent: #0f6e56;
+  --color-accent-text-small: #0b5a47;
+  --color-accent-bright: #1d9e75;
+  --color-berry: #9f3462;
+  --color-berry-deep: #391323;    /* end of the hero text gradient */
+  --color-mauve: #ddc3da;
+
+  /* Alerts */
+  --color-alert: #d92d20;
+  --color-alert-text: #b42318;
+
+  /* Halo rings */
+  --color-ring-cool: #90bbcc;
+
+  /* Radii */
+  --radius-pill: 999px;
+  --radius-caption: 40px;
+  --radius-track: 11px;
+
+  /* Shadows (Figma drop-shadows; box-shadow on round/rect shapes is identical and needs no filter) */
+  --shadow-caption: 0 -12px 30px rgba(143, 186, 204, 0.18);
+  --shadow-gesture: 0 0 22px rgba(143, 186, 204, 0.5);
+  --shadow-pause: 0 0 20px rgba(143, 186, 204, 0.5);
+  --shadow-call: 0 8px 32px rgba(217, 46, 33, 0.25);
+
+  /* Type */
+  --font: "Inter", system-ui, sans-serif;
+  --hero-gradient: linear-gradient(90deg, var(--color-berry), var(--color-berry-deep));
+}
+:root {
+  --color-watch: #b54708;
+  --color-line: #e7e3ea;
+  --color-line-strong: #1c1a22;
+  --color-good: var(--color-accent-bright);
+  --color-flag: var(--color-alert);
+  --color-card: #ffffff;
+  --color-card-sunk: #f6f4f7;
+  --color-sidebar: rgba(255, 255, 255, 0.72);
+  --radius-card: 20px;
+  --radius-control: 12px;
+  --shadow-card: 0 1px 2px rgba(28, 26, 34, 0.04), 0 8px 24px rgba(143, 186, 204, 0.12);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px;
+  --text-meta: 14px; --text-body: 16px; --text-card-title: 20px; --text-page-title: 32px;
+  --canvas: radial-gradient(1200px 800px at 85% -10%, var(--color-mist), transparent 60%),
+            radial-gradient(900px 700px at -10% 110%, var(--color-sky), transparent 60%), var(--color-canvas);
+}
+:root[data-theme="projector"] {
+  --color-ink: #f4f1f6; --color-ink-soft: #c9c3cf; --color-card: #211d27; --color-card-sunk: #2b2632;
+  --color-line: #3a3442; --color-line-strong: #f4f1f6; --color-sidebar: rgba(24, 21, 29, 0.9);
+  --canvas: #15121a; --text-meta: 16px; --text-body: 18px; --text-card-title: 22px; --text-page-title: 36px;
+}

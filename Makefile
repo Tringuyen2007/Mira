@@ -10,7 +10,7 @@ DB_LOCAL_DSN ?= postgresql://postgres:mira@localhost:$(DB_LOCAL_PORT)/mira
 # (server/tests/dbutil.py), so a local COPILOT_DSN with it keeps working after `make test`. Never the Tiger one.
 LOCAL_RO_PASSWORD ?= mira-local-ro
 
-.PHONY: run test db-local db-setup evals demo-data
+.PHONY: run test test-dashboard db-local db-setup evals demo-data
 
 # Exactly one server process: the hub, Guardian timers and ring buffer live in memory (TRI.md §3.1).
 run:
@@ -18,6 +18,12 @@ run:
 
 test:
 	$(PY) -m pytest
+	$(MAKE) test-dashboard
+
+# Guard tests for the therapist dashboard's static scaffold (CSP, banned APIs, socket.js drift).
+# Globbed (not a bare directory path) because this Node's --test does not recurse into an explicit dir arg.
+test-dashboard:
+	node --test "device/dashboard/tests/*.test.mjs"
 
 # Start (or reuse) the local container, then rebuild the `mira` database from our scripts (§5.11).
 db-local:
