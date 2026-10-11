@@ -208,7 +208,7 @@ export function proposalCard(proposal, opts = {}) {
   }
 
   if (pending) {
-    const dismissBtn = h("button", { class: "btn btn--ghost", type: "button", onclick: () => run(opts.onDismiss) }, "Dismiss");
+    const dismissBtn = h("button", { class: "btn btn--ghost proposal-card__dismiss", type: "button", onclick: () => run(opts.onDismiss) }, "Dismiss");
     const editBtn = h("button", { class: "btn btn--secondary", type: "button", onclick: openEdit }, "Edit");
     const approveBtn = h("button", { class: "btn btn--primary", type: "button", onclick: () => run(opts.onApprove) }, "Approve");
     actionButtons.push(dismissBtn, editBtn, approveBtn);

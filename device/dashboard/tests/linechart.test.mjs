@@ -54,6 +54,34 @@ test("numeric x values and a single point do not throw", () => {
   assert.match(el.getAttribute("aria-label"), /a: 5 at 1 to 5 at 1/);
 });
 
+test("a two-point series at a narrow width anchors ticks so they can't overlap", () => {
+  const twoDay = {
+    title: "t",
+    series: [{ name: "a", points: [{ x: "2026-10-10", y: 1 }, { x: "2026-10-11", y: 2 }] }],
+  };
+  const el = lineChart(twoDay, { width: 200, height: 120 });
+  const xticks = el.querySelectorAll(".chart__xtick");
+  assert.equal(xticks.length, 2);
+  assert.equal(xticks[0].textContent, "Oct 10");
+  assert.equal(xticks[0].getAttribute("text-anchor"), "start");
+  assert.equal(xticks.at(-1).textContent, "Oct 11");
+  assert.equal(xticks.at(-1).getAttribute("text-anchor"), "end");
+});
+
+test("a narrow 3-week daily trend never places two kept ticks within 48 chart units", () => {
+  const points = Array.from({ length: 21 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 8, 20 + i));
+    return { x: d.toISOString().slice(0, 10), y: i };
+  });
+  const el = lineChart({ title: "t", series: [{ name: "a", points }] }, { width: 220, height: 120 });
+  const xticks = el.querySelectorAll(".chart__xtick");
+  assert.ok(xticks.length <= 4);
+  const xs = xticks.map((t) => Number(t.getAttribute("x")));
+  for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] >= 48, `ticks ${i - 1},${i} too close: ${xs}`);
+  assert.equal(xticks[0].getAttribute("text-anchor"), "start");
+  assert.equal(xticks.at(-1).getAttribute("text-anchor"), "end");
+});
+
 test("labels are text nodes even when they look like markup", () => {
   const el = lineChart({ title: "<img src=x onerror=alert(1)>", series: [{ name: "<b>x</b>", points: [{ x: "2026-01-01", y: 1 }, { x: "2026-01-02", y: 2 }] }] });
   const legend = el.querySelector(".chart__legend-text");

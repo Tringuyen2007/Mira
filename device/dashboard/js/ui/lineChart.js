@@ -9,7 +9,8 @@ const H_DEFAULT = 260;
 const PAD = { top: 36, right: 16, bottom: 32, left: 44 };
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}/;
 const Y_TICKS = 4;
-const MAX_X_TICKS = 5;
+const MAX_X_TICKS = 4;
+const MIN_X_TICK_GAP = 48; // chart units; labels closer than this to a neighbour get dropped
 
 const fmtDay = (d) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(d);
 
@@ -73,13 +74,32 @@ export function lineChart(chart, { width = W_DEFAULT, height = H_DEFAULT } = {})
     grid.push(svg("text", { class: "chart__ytick", x: PAD.left - 6, y: y + 4, "text-anchor": "end" }, fmtNum(r1(v))));
   }
 
-  // X ticks: the distinct x values, thinned to at most MAX_X_TICKS, always keeping the first and last.
+  // X ticks: the distinct x values, thinned to at most MAX_X_TICKS, evenly spread over the x range, always
+  // keeping the first and last. Any tick whose label would land closer than MIN_X_TICK_GAP (chart units) to its
+  // kept neighbour is dropped so labels never overlap; the last label anchors "end" and the first "start" (both
+  // middle in between) so they stay inside the plot instead of running off its edges.
   const distinct = [...new Map(series.flatMap((s) => s.points.map((p) => [xVal(p.x), p.x]))).entries()]
     .sort((a, b) => a[0] - b[0]);
-  const step = Math.max(1, Math.ceil((distinct.length - 1) / (MAX_X_TICKS - 1)));
-  const ticks = distinct.filter((_, i) => i % step === 0 || i === distinct.length - 1);
-  const xTicks = ticks.map(([v, raw]) => svg("text", {
-    class: "chart__xtick", x: r1(sx(v)), y: H - PAD.bottom + 18, "text-anchor": "middle",
+  const n = Math.min(MAX_X_TICKS, distinct.length);
+  const idxs = [...new Set(Array.from({ length: n }, (_, i) =>
+    Math.round((i * (distinct.length - 1)) / Math.max(1, n - 1))))];
+  const kept = [idxs[0]];
+  for (let k = 1; k < idxs.length; k++) {
+    const idx = idxs[k];
+    const isLast = k === idxs.length - 1;
+    const pos = sx(distinct[idx][0]);
+    const prevPos = sx(distinct[kept[kept.length - 1]][0]);
+    if (isLast) {
+      if (pos - prevPos < MIN_X_TICK_GAP && kept.length > 1) kept.pop();
+      kept.push(idx);
+    } else if (pos - prevPos >= MIN_X_TICK_GAP) {
+      kept.push(idx);
+    }
+  }
+  const ticks = kept.map((idx) => distinct[idx]);
+  const xTicks = ticks.map(([v, raw], i) => svg("text", {
+    class: "chart__xtick", x: r1(sx(v)), y: H - PAD.bottom + 18,
+    "text-anchor": ticks.length < 2 ? "middle" : i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle",
   }, kind === "date" ? fmtDay(new Date(v)) : String(raw)));
 
   const lines = series.map((s, i) => {
