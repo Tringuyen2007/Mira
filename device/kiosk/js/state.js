@@ -17,7 +17,6 @@ export function initialState() {
     lastCorrectionAt: -Infinity,
     lastGoodRepAt: -Infinity,
     alertOpen: false,
-    eventCaption: "",
     socket: "connecting",
     closedAt: null,
   };
@@ -35,27 +34,29 @@ export function reduce(state, input, now) {
   if (channel === "live") {
     let next = { ...state, live: msg };
     if (msg.phase === "countdown" || msg.phase === "active") next = { ...next, awaitingGesture: false };
+    // The live snapshot is authoritative: once it reports no incident, the alert the kiosk showed early
+    // (from a fall/check_in event, ahead of the next 10 Hz snapshot) is stale and must not stick.
+    if (msg.incident !== true && msg.phase !== "incident") next = { ...next, alertOpen: false };
     return next;
   }
   switch (msg.type) {
     case "arrived":
-      return { ...state, arrived: true, awaitingGesture: false, alertOpen: false, eventCaption: "" };
+      // A session boundary: nothing carries over to the new patient/session.
+      return { ...state, arrived: true, awaitingGesture: false, alertOpen: false,
+        lastCorrectionAt: -Infinity, lastGoodRepAt: -Infinity };
     case "greeting":
-      return { ...state, arrived: true, eventCaption: textOf(msg.text, state.eventCaption) };
+      return { ...state, arrived: true };
     case "awaiting_gesture":
       return { ...state, arrived: true, awaitingGesture: true };
     case "gesture":
       return { ...state, awaitingGesture: false };
     case "cue": {
       const correction = !NON_CORRECTION_CUES.has(msg.id);
-      return { ...state, eventCaption: textOf(msg.text, state.eventCaption),
-        lastCorrectionAt: correction ? now : state.lastCorrectionAt,
+      return { ...state, lastCorrectionAt: correction ? now : state.lastCorrectionAt,
         alertOpen: msg.id === "check_in" ? true : state.alertOpen };
     }
     case "rep":
       return msg.quality === "good" ? { ...state, lastGoodRepAt: now } : state;
-    case "summary_ready":
-      return { ...state, eventCaption: textOf(msg.spoken, state.eventCaption) };
     case "fall":
       return { ...state, alertOpen: true };
     case "alert":
@@ -65,10 +66,6 @@ export function reduce(state, input, now) {
     default:
       return state;
   }
-}
-
-function textOf(value, fallback) {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function num(value) {
@@ -84,7 +81,7 @@ export function view(state, now) {
     : { leftPct: Math.round(leftPct), ok: Math.abs(leftPct - 50) <= BALANCE_LIMIT };
   const set = num(live.set);
   const setsTarget = num(live.sets_target);
-  const liveCaption = live.caption && typeof live.caption.text === "string" ? live.caption.text : "";
+  const caption = live.caption && typeof live.caption.text === "string" ? live.caption.text : "";
   const base = {
     offline: state.socket === "closed" && state.closedAt !== null && now - state.closedAt > OFFLINE_AFTER_MS,
     setLabel: set !== null && setsTarget !== null ? `SET ${set} OF ${setsTarget}` : null,
@@ -96,9 +93,10 @@ export function view(state, now) {
     repsTarget,
     countdown: num(live.countdown),
     balance,
-    // The newest line wins: an event caption is at least as new as the 10 Hz snapshot; live.caption repaints
-    // a kiosk that (re)joined mid-session before any event arrived.
-    caption: state.eventCaption || liveCaption,
+    // live.caption is the server's own derived line (≤100 ms behind the greeting/cue/summary_ready event
+    // that set it); taking it straight from the snapshot means a kiosk that (re)joins mid-session gets it
+    // repainted on the very next live message, with no separate event-caption state to go stale.
+    caption,
     summary: null,
   };
 

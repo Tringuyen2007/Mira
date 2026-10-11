@@ -686,6 +686,11 @@ class LiveState:
         self.exercise_name = EXERCISE_NAMES.get(exercise_id, exercise_id.replace("_", " ").capitalize())
         self.caption = None
         self.incident = False
+        self.phase = "idle"
+        self.rep = 0
+        self.paused = False
+        self.countdown = None
+        self.cue_id = None
 
     def on_agent_event(self, ev: Message) -> None:
         """Caption and incident only. Agent events (hub.emit) come here directly; they must not move phase,

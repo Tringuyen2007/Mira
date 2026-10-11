@@ -32,6 +32,17 @@ def test_session_start_sets_name_and_exercise_and_clears_caption() -> None:
     assert live.payload()["exercise_name"] == "Lunge", "unknown ids fall back to a readable name"
 
 
+def test_session_start_resets_phase_and_counters() -> None:
+    live = LiveState()
+    live.on_event({"type": "countdown", "n": 3, "set": 1})
+    live.on_event({"type": "rep", "index": 4})
+    live.on_event({"type": "paused", "reason": "user"})
+    live.on_event({"type": "stopped"})
+    live.on_session_start("Maya", "squat")
+    p = live.payload()
+    assert (p["phase"], p["rep"], p["paused"], p["countdown"], p["cue_id"]) == ("idle", 0, False, None, None)
+
+
 def test_incident_flag() -> None:
     live = LiveState()
     live.on_event({"type": "cue", "id": "check_in", "text": "Are you okay?"})

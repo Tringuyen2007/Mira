@@ -33,6 +33,14 @@ test("no token anywhere", () => {
   assert.equal(readToken(f.location, f.storage, f.history), null);
 });
 
+test("empty #token= is not stored or used, but the fragment is still stripped", () => {
+  const f = fakes("#token=");
+  f.store.set("mira.deviceToken", "saved");
+  assert.equal(readToken(f.location, f.storage, f.history), "saved");
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].slice(2), ["/device/"]);
+});
+
 test("ws url follows the page scheme and encodes the token", () => {
   assert.equal(wsUrl({ protocol: "http:", host: "h:8000" }, "/ws/live", "a+b"), "ws://h:8000/ws/live?token=a%2Bb");
   assert.equal(wsUrl({ protocol: "https:", host: "h" }, "/ws/events", "t"), "wss://h/ws/events?token=t");

@@ -81,11 +81,23 @@ test("open alert forces fall screen until resolved", () => {
   assert.equal(view(s, 1000).screen, "rep");
 });
 
-test("caption comes from live, falls back to latest event text", () => {
+test("alert-triggered fall screen clears once a live snapshot reports no incident", () => {
+  let s = run([open, live({ phase: "active" })]);
+  s = reduce(s, ev({ type: "alert", step: "detected" }), 1000);
+  assert.equal(view(s, 1000).screen, "fall");
+  s = reduce(s, live({ phase: "active", incident: false }), 1000);
+  assert.equal(view(s, 1000).screen, "rep");
+});
+
+test("caption comes from live", () => {
   let s = run([open, live({ caption: { text: "Hi Maya!", source: "greeting", t: 1 } })]);
   assert.equal(view(s, 1000).caption, "Hi Maya!");
   s = reduce(s, ev({ type: "cue", id: "knees_out", text: "Knees out." }), 1000);
+  assert.equal(view(s, 1000).caption, "Hi Maya!", "a cue event alone does not change the caption");
+  s = reduce(s, live({ caption: { text: "Knees out.", source: "cue", t: 2 } }), 1000);
   assert.equal(view(s, 1000).caption, "Knees out.");
+  s = reduce(s, live({ caption: null }), 1000);
+  assert.equal(view(s, 1000).caption, "");
 });
 
 test("offline after the socket is closed for a while; unpaired on rejection", () => {

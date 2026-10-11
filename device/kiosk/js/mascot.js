@@ -7,12 +7,22 @@ export async function loadMascot(fetchImpl = globalThis.fetch, base = "assets/mi
   let manifest = { moods: {} };
   try {
     const res = await fetchImpl(`${base}mascot.json`);
-    if (res.ok) manifest = await res.json();
+    if (res.ok) {
+      const parsed = await res.json();
+      // A malformed manifest (not an object, or no object `moods`) falls back to the default file names
+      // instead of throwing when entry() indexes into it below.
+      if (parsed && typeof parsed === "object" && parsed.moods && typeof parsed.moods === "object") {
+        manifest = parsed;
+      }
+    }
   } catch { /* fall back to the default file names */ }
-  const entry = (mood) => manifest.moods?.[mood] ?? { src: `${mood}.png` };
+  const entry = (mood) => {
+    const known = MOODS.includes(mood) ? mood : "idle";
+    return manifest.moods[known] ?? { src: `${known}.png` };
+  };
   return {
     moods: MOODS,
-    srcFor: (mood) => `${base}${entry(MOODS.includes(mood) ? mood : "idle").src ?? `${mood}.png`}`,
+    srcFor: (mood) => `${base}${entry(mood).src ?? `${MOODS.includes(mood) ? mood : "idle"}.png`}`,
     framesFor: (mood) => {
       const e = entry(mood);
       return Array.isArray(e.frames) ? { frames: e.frames.map((f) => `${base}${f}`), fps: e.fps ?? 12,

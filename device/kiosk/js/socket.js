@@ -18,24 +18,36 @@ export class ReconnectingSocket {
   }
 
   start() {
+    if (this.ws && !this.stopped) return; // already connecting/connected
     this.stopped = false;
     this.connect();
   }
 
   connect() {
-    const ws = new this.WebSocketImpl(this.url);
+    let ws;
+    try {
+      ws = new this.WebSocketImpl(this.url);
+    } catch {
+      // Constructing the socket itself threw (e.g. a bad URL): treat it like a dropped connection.
+      this.onStatus?.("closed");
+      this.schedule();
+      return;
+    }
     this.ws = ws;
     ws.onopen = () => {
+      if (ws !== this.ws) return; // a late callback from a socket we've since replaced/stopped
       this.attempt = 0;
       this.onStatus?.("open");
     };
     ws.onmessage = (event) => {
+      if (ws !== this.ws) return;
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       if (!msg || typeof msg !== "object" || msg.type === "ping") return;
       this.onMessage?.(msg);
     };
     ws.onclose = (event) => {
+      if (ws !== this.ws) return;
       if (this.stopped) return;
       if (event.code === 1008) {
         this.onStatus?.("rejected");
@@ -61,5 +73,6 @@ export class ReconnectingSocket {
     this.stopped = true;
     clearTimeout(this.timer);
     this.ws?.close();
+    this.ws = null;
   }
 }

@@ -5,11 +5,14 @@ export const TOKEN_KEY = "mira.deviceToken";
 
 export function readToken(location, storage, history) {
   const params = new URLSearchParams((location.hash || "").replace(/^#/, ""));
-  const fromHash = params.get("token");
-  if (fromHash) {
-    try { storage.setItem(TOKEN_KEY, fromHash); } catch { /* private mode: keep it for this load only */ }
+  if (params.has("token")) {
+    // Strip the fragment either way, so a stale or empty #token= never lingers in the address bar.
     history.replaceState(null, "", location.pathname + (location.search || ""));
-    return fromHash;
+    const fromHash = params.get("token");
+    if (fromHash) {
+      try { storage.setItem(TOKEN_KEY, fromHash); } catch { /* private mode: keep it for this load only */ }
+      return fromHash;
+    }
   }
   try { return storage.getItem(TOKEN_KEY); } catch { return null; }
 }
