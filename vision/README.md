@@ -22,17 +22,33 @@ Origin at mat centre on the mat surface; +y up; +z toward Mira; +x toward the pa
 
 ## Workflow
 
-1. `python -m vision.cams`: assign A (front-left) and B (front-right).
+No lens calibration: each camera's zoom comes from the floor markers. These webcams (~48° wide) need
+to be about 4.5 m from the mat centre to see a whole person.
+
+1. `python -m vision.cams`: assign A (front-left, near marker 0) and B (front-right, near marker 1).
 2. `python -m vision.debug_view`: check both feeds, skeletons, ≥ 20 fps each (2D only until calibrated).
-3. `python -m vision.calib_intrinsics --cam A` then `--cam B`: before mounting, point each webcam at the
-   on-screen checkerboard; target RMS < 0.5 px.
-4. Mount the cameras. `python -m vision.calib_extrinsics`: follow the hints until both say OK, press s.
-5. `python -m vision.calib_refine`: move around the mat for 20 s; saves only if the fit improves.
-6. `python -m vision.debug_view`: magenta (3D) dots should sit on the green (2D) skeletons; raise your
+3. Mat empty: `python -m vision.calib_extrinsics`. Each camera needs to see markers at both ends of the
+   mat so its zoom can be measured.
+   - First time (or a new room): put the cameras roughly in place and press `t` to lock the current
+     spots as a mirror-symmetric target (saved in `config/cameras.yaml`).
+   - Follow the instructions: position first ("Move 20 cm back"), then aim ("Turn right 2°, tilt down
+     1°, rotate clockwise 1°"), until both say Position OK and Aim OK. The green dashed ghost shows
+     where the mat should appear; the red aim dot should sit on the crosshair. The strip at the bottom
+     compares A and B (distance, height, angle). Press `s` to save.
+4. `python -m vision.calib_refine`: move around the mat for 20 s; refines poses and zoom; saves only if
+   the fit improves.
+5. `python -m vision.debug_view`: magenta (3D) dots should sit on the green (2D) skeletons; raise your
    left hand → it moves on the +x side (left in the top view, right in the front view).
-7. `python -m vision.checks`: stand still for 5 s; everything should PASS.
-8. Press r in the debug view to record; `python -m vision.replay FILE` or
+6. `python -m vision.checks --height-cm <your height>`: stand still for 5 s; everything should PASS.
+7. Press r in the debug view to record; `python -m vision.replay FILE` or
    `python -m vision.debug_view --replay FILE [--retriangulate]` to play back.
+
+Every session after: step 3 without `t`, then step 4.
+
+**Camera moved?** The live tools re-check the markers about once a second. If a camera has been
+bumped, the debug view shows "Camera A has moved (… px): re-run calib_extrinsics", `calib_refine`
+refuses to start, and `checks` fails "camera A not moved". Re-run steps 3–4. "Markers hidden" only
+means someone is standing over them.
 
 If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on macOS cannot.
 
