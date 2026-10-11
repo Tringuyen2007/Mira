@@ -45,7 +45,7 @@ Track exactly one person: the one on or next to the mat. Ignore people elsewhere
 `PersonSelector(cams, mat, vicinity_m=1.0, pair_px=25.0, switch_m=0.3, switch_s=0.5)` with
 `select(t, a_people, b_people) -> Selection(a: PoseResult | None, b: PoseResult | None, ignored: dict[str, list[PoseResult]], dropped: str | None, position: np.ndarray | None)`.
 
-- **Floor position of one camera's candidate:** rays through the visible (vis ≥ 0.5) ankle/heel pixels (27–30) intersected with the plane y = 0.05 m; median (x, z). Without visible feet: hip midpoint ray ∩ plane y = 0.9 m. None if neither.
+- **Floor position of one camera's candidate:** rays through the visible (vis ≥ 0.5) ankle and heel pixels (27–30) intersected with the planes y = 0.08 m (ankles) and y = 0.04 m (heels); median (x, z). None without visible feet. (No hip fallback: with cameras at about hip height the hip ray is nearly parallel to a hip-height plane and the position is meaningless. A single plane for ankles and heels was 20 cm off at the rig's low camera angle.)
 - **Distance to the mat:** 0 inside the mat rectangle, else the distance to its edge, on the floor.
 - **Steps:**
   1. Uncalibrated A or B → return the first candidate per camera (today's behaviour).
