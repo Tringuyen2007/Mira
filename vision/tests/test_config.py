@@ -60,3 +60,18 @@ def test_old_file_with_intrinsics_rms_still_loads(tmp_path):
     cam = load_cameras(path)["A"]
     assert cam.has_intrinsics and cam.target_eye is None
     assert "intrinsics_rms" not in cam.to_dict()
+
+
+def test_marker_rotation_turns_each_marker_in_place():
+    h = 0.085
+    plain, turned = MatConfig().marker_corners(), MatConfig(marker_rotation_deg=180).marker_corners()
+    centers = MatConfig().marker_centers()
+    for i in plain:
+        np.testing.assert_allclose(turned[i] - centers[i], -(plain[i] - centers[i]), atol=1e-12)
+    # 90° clockwise seen from above (Mira at the top, +x drawn left): the top-left corner moves to top-right
+    q = MatConfig(marker_rotation_deg=90).marker_corners()
+    np.testing.assert_allclose(q[0][0] - centers[0], [-h, 0, h], atol=1e-12)
+
+
+def test_repo_mat_markers_are_turned_180():
+    assert load_mat().marker_rotation_deg == 180

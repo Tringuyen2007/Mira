@@ -25,6 +25,7 @@ class MatConfig:
     marker_size_m: float = 0.17
     marker_inset_m: float = 0.02
     aruco_dictionary: str = "DICT_4X4_50"
+    marker_rotation_deg: int = 0  # every sheet turned in place, clockwise seen from above with Mira at the top
     camera_targets: dict[str, np.ndarray] = field(default_factory=dict)
     aim_point: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.8, 0.0]))
     tol_position_m: float = 0.10
@@ -38,11 +39,14 @@ class MatConfig:
     def marker_corners(self) -> dict[int, np.ndarray]:
         """(4, 3) corners per marker in ArUco order TL, TR, BR, BL.
 
-        Seen from above with +z (Mira) at the top, +x points left, so a
-        marker's top-left corner is at (+h, +h) in (x, z) from its centre.
+        Seen from above with +z (Mira) at the top, +x points left, so an
+        upright marker's top-left corner is at (+h, +h) in (x, z) from its centre.
+        marker_rotation_deg turns every marker in place (clockwise as drawn that way).
         """
         h = self.marker_size_m / 2
-        offsets = np.array([[h, 0, h], [-h, 0, h], [-h, 0, -h], [h, 0, -h]])
+        a = np.radians(self.marker_rotation_deg)
+        c, s = np.cos(a), np.sin(a)
+        offsets = np.array([[x * c - z * s, 0.0, x * s + z * c] for x, z in [(h, h), (-h, h), (-h, -h), (h, -h)]])
         return {i: c + offsets for i, c in self.marker_centers().items()}
 
     def mat_polygon(self) -> np.ndarray:
@@ -63,6 +67,7 @@ def load_mat(path: Path = MAT_PATH) -> MatConfig:
         marker_size_m=raw["marker_size_m"],
         marker_inset_m=raw["marker_inset_m"],
         aruco_dictionary=raw["aruco_dictionary"],
+        marker_rotation_deg=int(raw.get("marker_rotation_deg", 0)),
         camera_targets={k: np.array(v["eye"], float) for k, v in raw["camera_targets"].items()},
         aim_point=np.array(raw["aim_point"], float),
         tol_position_m=raw["placement_tolerance"]["position_m"],

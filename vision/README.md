@@ -20,6 +20,10 @@ Origin at mat centre on the mat surface; +y up; +z toward Mira; +x toward the pa
 (Mira's right), the side with markers 0 and 2. Right-handed, same as Three.js/ARKit. Joints in
 `FrameResult.joints` are metres in this frame.
 
+Markers sit in the corners as in the spec. If the sheets are all turned the same way (e.g. upside
+down, printed top edge toward the back of the mat), set `marker_rotation_deg` in `config/mat.yaml`
+(0/90/180/270, clockwise seen from above with Mira at the top). The rig currently uses 180.
+
 ## Workflow
 
 No lens calibration: each camera's zoom comes from the floor markers. These webcams (~48° wide) need
