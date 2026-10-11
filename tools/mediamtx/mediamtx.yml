@@ -1,0 +1,38 @@
+# MediaMTX for Mira (docs/vision-media-contract.md): WHIP in from the camera laptop, WHEP out to the therapist
+# dashboard, nothing recorded. Every publish/read is authorised by the Mira server (/media/auth): publishing needs
+# MIRA_VISION_TOKEN, playback needs the dashboard token, both as "Authorization: Bearer <token>".
+logLevel: info
+
+authMethod: http
+authHTTPAddress: http://127.0.0.1:8000/media/auth
+authHTTPExclude: []
+
+api: false
+metrics: false
+pprof: false
+playback: false
+record: false
+
+rtsp: false
+rtmp: false
+hls: false
+srt: false
+moq: false
+
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: true
+# The box's public address, so the browser's ICE candidates reach it (set by install_mediamtx.sh).
+webrtcAdditionalHosts: [45.76.255.253]
+webrtcICEServers2: []
+
+pathDefaults:
+  record: false
+
+paths:
+  # One live camera per session: mira/<session_id>. Anything else is refused by /media/auth.
+  "~^mira/[A-Za-z0-9-]{1,64}$":
+    record: false

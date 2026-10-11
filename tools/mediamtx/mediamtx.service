@@ -1,0 +1,18 @@
+[Unit]
+Description=MediaMTX media relay for Mira (WHIP in, WHEP out, no recording)
+After=network-online.target mira.service
+Wants=network-online.target
+
+[Service]
+User=mira
+Group=mira
+ExecStart=/usr/local/bin/mediamtx /opt/mira/mediamtx/mediamtx.yml
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

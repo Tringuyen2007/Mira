@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mira camera publisher</title>
+<!--
+  Publishes the camera laptop's webcam (camera B) to MediaMTX over WHIP, from Chrome, with no extra software.
+  docs/vision-media-contract.md: video goes WHIP -> MediaMTX -> WHEP -> therapist dashboard; it never touches
+  /ws/vision and is never recorded. The publish is authorised by the Mira server with MIRA_VISION_TOKEN.
+
+  Open:  tools/whip_publish.html?url=http://45.76.255.253:8889/mira/<session_id>/whip&autostart=1
+  Add &fake=1 to publish a moving test card instead of the webcam (checks the relay without a camera).
+  The vision agent opens it for you per session with
+    --whip-url "http://45.76.255.253:8889/mira/{session_id}/whip"
+    --whip-cmd "open -a 'Google Chrome' file:///<repo>/tools/whip_publish.html?autostart=1&url={whip_url}"
+  The token is typed once and kept in this browser's localStorage (never in the URL).
+-->
+<style>
+  :root { --bg: #0f1115; --fg: #e8e8ea; --muted: #9a9aa3; --accent: #4cc2ff; --ok: #4ade80; --bad: #f87171; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; display: grid; gap: 12px; }
+  label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+  input, select { padding: 8px 10px; border-radius: 8px; border: 1px solid #2a2d35; background: #171a21; color: var(--fg); font-size: 15px; }
+  button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--accent); color: #06202c; font-weight: 600; font-size: 15px; cursor: pointer; }
+  button.stop { background: #2a2d35; color: var(--fg); }
+  video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 12px; }
+  #status { font-weight: 600; }
+  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+</style>
+</head>
+<body>
+<main>
+  <h2 style="margin:0">Mira camera publisher</h2>
+  <div id="status">idle</div>
+  <label>WHIP URL <input id="url" placeholder="http://45.76.255.253:8889/mira/<session_id>/whip" autocomplete="off"></label>
+  <div class="row">
+    <label style="flex:1">MIRA_VISION_TOKEN <input id="token" type="password" autocomplete="off"></label>
+    <label style="flex:1">Camera <select id="camera"></select></label>
+  </div>
+  <div class="row">
+    <button id="start">Publish</button>
+    <button id="stop" class="stop" disabled>Stop</button>
+  </div>
+  <video id="preview" muted playsinline></video>
+  <p style="color:var(--muted);font-size:13px;margin:0">Keep this tab open during the session. Video is live-only; nothing is recorded.</p>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const status = (text, cls = "") => { $("status").textContent = text; $("status").className = cls; };
+  let peer = null, stream = null, resource = null;
+
+  try { $("token").value = localStorage.getItem("mira_vision_token") || ""; } catch (_) {}
+  try { $("camera").value = localStorage.getItem("mira_camera_id") || ""; } catch (_) {}
+  if (params.get("url")) $("url").value = params.get("url");
+
+  async function listCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const sel = $("camera"); const prev = sel.value; sel.innerHTML = "";
+    for (const d of devices.filter((d) => d.kind === "videoinput")) {
+      const opt = document.createElement("option"); opt.value = d.deviceId; opt.textContent = d.label || `camera ${sel.length + 1}`; sel.appendChild(opt);
+    }
+    let remembered = ""; try { remembered = localStorage.getItem("mira_camera_id") || ""; } catch (_) {}
+    if ([...sel.options].some((o) => o.value === (prev || remembered))) sel.value = prev || remembered;
+  }
+
+  function testPattern() {
+    const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
+    const ctx = canvas.getContext("2d"); const t0 = performance.now();
+    const draw = () => {
+      const s = (performance.now() - t0) / 1000;
+      ctx.fillStyle = "#1b2430"; ctx.fillRect(0, 0, 1280, 720);
+      ctx.fillStyle = "#4cc2ff"; ctx.beginPath(); ctx.arc(640 + 400 * Math.cos(s), 360 + 200 * Math.sin(s), 60, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "48px system-ui"; ctx.fillText("Mira test pattern  " + s.toFixed(1) + " s", 40, 80);
+    };
+    // Keep this tab in the foreground: a hidden tab stops painting the canvas and the relay sees no frames
+    // ("deadline exceeded while waiting tracks"). A real webcam (getUserMedia) keeps running in the background.
+    const out = canvas.captureStream(30); stream = out;
+    const tick = () => { if (!stream) return; draw(); requestAnimationFrame(tick); };
+    tick(); return out;
+  }
+
+  async function waitIce(pc) {
+    if (pc.iceGatheringState === "complete") return;
+    await new Promise((resolve) => {
+      const done = () => { pc.removeEventListener("icegatheringstatechange", check); resolve(); };
+      const check = () => pc.iceGatheringState === "complete" && done();
+      pc.addEventListener("icegatheringstatechange", check);
+      setTimeout(done, 2000); // MediaMTX accepts a partial candidate set; don't wait forever on a laptop with VPNs
+    });
+  }
+
+  async function publish() {
+    const url = $("url").value.trim(), token = $("token").value.trim();
+    if (!url || !token) { status("enter the WHIP URL and the vision token", "bad"); return; }
+    try { localStorage.setItem("mira_vision_token", token); localStorage.setItem("mira_camera_id", $("camera").value); } catch (_) {}
+    $("start").disabled = true;
+    try {
+      status("opening camera…");
+      if (params.get("fake") === "1") {
+        stream = testPattern(); // ?fake=1: a moving test card instead of the webcam (relay/auth checks, rehearsals)
+      } else {
+        const video = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+        if ($("camera").value) video.deviceId = { exact: $("camera").value };
+        stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      }
+      $("preview").srcObject = stream; $("preview").play().catch(() => {});
+      await listCameras();
+      peer = new RTCPeerConnection();
+      for (const track of stream.getVideoTracks()) peer.addTransceiver(track, { direction: "sendonly" });
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === "connected") status("LIVE: publishing to " + url, "ok");
+        else if (["failed", "disconnected", "closed"].includes(peer.connectionState)) status("connection " + peer.connectionState, "bad");
+      };
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await waitIce(peer);
+      status("sending offer…");
+      const res = await fetch(url, { method: "POST", body: peer.localDescription.sdp,
+        headers: { "Content-Type": "application/sdp", Accept: "application/sdp", Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`WHIP ${res.status}: ${res.status === 401 ? "token refused by the Mira server" : await res.text()}`);
+      resource = res.headers.get("Location");
+      if (resource && !/^https?:/.test(resource)) resource = new URL(resource, url).toString();
+      await peer.setRemoteDescription({ type: "answer", sdp: await res.text() });
+      $("stop").disabled = false;
+      status("connecting…");
+    } catch (err) {
+      status(String(err && err.message || err), "bad");
+      await stop();
+    }
+  }
+
+  async function stop() {
+    $("stop").disabled = true; $("start").disabled = false;
+    if (resource) { try { await fetch(resource, { method: "DELETE" }); } catch (_) {} resource = null; }
+    if (peer) { peer.close(); peer = null; }
+    if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
+    $("preview").srcObject = null;
+    if ($("status").className !== "bad") status("stopped");
+  }
+
+  $("start").onclick = publish;
+  $("stop").onclick = stop;
+  window.addEventListener("beforeunload", () => { if (resource) navigator.sendBeacon && fetch(resource, { method: "DELETE", keepalive: true }).catch(() => {}); });
+  navigator.mediaDevices.addEventListener("devicechange", listCameras);
+  listCameras().catch(() => {});
+  if (params.get("autostart") === "1" && $("token").value) publish();
+})();
+</script>
+</body>
+</html>
