@@ -128,3 +128,16 @@ class FrameResult:
             flags=d.get("flags") or [],
             tracking=d.get("tracking", "lost"),
         )
+
+
+@dataclass
+class CameraPeople:
+    """Everyone MediaPipe found in one camera frame (full-frame pixels). cam/t let the Pairer pair it."""
+
+    cam: str
+    t: float
+    people: list[PoseResult]
+
+    @property
+    def detected(self) -> bool:
+        return bool(self.people)

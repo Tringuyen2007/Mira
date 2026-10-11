@@ -12,9 +12,11 @@ import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-from vision.types import PoseResult
+from vision.roi import crop, uncrop
+from vision.types import CameraPeople, PoseResult
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
+NUM_POSES = 3  # people per camera; the PersonSelector keeps the one at the mat
 
 
 def model_path(kind: str = "full") -> Path:
@@ -27,11 +29,11 @@ def model_path(kind: str = "full") -> Path:
 class PoseEstimator:
     """VIDEO-mode landmarker for one camera (timestamps must increase)."""
 
-    def __init__(self, kind: str = "full"):
+    def __init__(self, kind: str = "full", num_poses: int = NUM_POSES):
         options = mp_vision.PoseLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=str(model_path(kind))),
             running_mode=mp_vision.RunningMode.VIDEO,
-            num_poses=1,
+            num_poses=num_poses,
             min_pose_detection_confidence=0.5,
             min_pose_presence_confidence=0.5,
             min_tracking_confidence=0.5,
@@ -39,38 +41,41 @@ class PoseEstimator:
         self._landmarker = mp_vision.PoseLandmarker.create_from_options(options)
         self._last_ms = -1
 
-    def detect(self, frame_bgr: np.ndarray, t_mono: float, cam: str) -> PoseResult:
+    def detect(self, frame_bgr: np.ndarray, t_mono: float, cam: str, roi=None) -> list[PoseResult]:
+        """Everyone found (up to num_poses), in full-frame pixels. Only `roi` of the frame is searched."""
         ts = max(int(t_mono * 1000), self._last_ms + 1)
         self._last_ms = ts
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        sub, offset = crop(frame_bgr, roi)
+        rgb = cv2.cvtColor(np.ascontiguousarray(sub), cv2.COLOR_BGR2RGB)
         res = self._landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
-        if not res.pose_landmarks:
-            return PoseResult(cam=cam, t=t_mono)
-        h, w = frame_bgr.shape[:2]
-        lms = res.pose_landmarks[0]
-        lm2d = np.array([[p.x * w, p.y * h] for p in lms])
-        vis = np.array([p.visibility for p in lms], dtype=float)
-        world = np.array([[p.x, p.y, p.z] for p in res.pose_world_landmarks[0]]) if res.pose_world_landmarks else None
-        return PoseResult(cam=cam, t=t_mono, lm2d=lm2d, vis=vis, world=world)
+        h, w = sub.shape[:2]
+        people = []
+        for k, lms in enumerate(res.pose_landmarks or []):
+            lm2d = uncrop(np.array([[p.x * w, p.y * h] for p in lms]), offset)
+            vis = np.array([p.visibility for p in lms], dtype=float)
+            wl = res.pose_world_landmarks
+            world = np.array([[p.x, p.y, p.z] for p in wl[k]]) if wl and k < len(wl) else None
+            people.append(PoseResult(cam=cam, t=t_mono, lm2d=lm2d, vis=vis, world=world))
+        return people
 
     def close(self) -> None:
         self._landmarker.close()
 
 
 class PoseWorker(threading.Thread):
-    """Runs pose on each new frame from one Camera and puts PoseResults on a shared queue."""
+    """Runs pose on each new frame from one Camera and puts CameraPeople on a shared queue."""
 
-    def __init__(self, camera, out: queue.Queue, model: str = "full"):
+    def __init__(self, camera, out: queue.Queue, model: str = "full", roi=None, num_poses: int = NUM_POSES):
         super().__init__(daemon=True, name=f"pose-{camera.cam_name}")
-        self.camera, self.out, self.model = camera, out, model
+        self.camera, self.out, self.model, self.roi, self.num_poses = camera, out, model, roi, num_poses
         self._halt = threading.Event()  # not _stop: threading.Thread uses that name internally
-        self.latest: tuple[np.ndarray, PoseResult] | None = None
+        self.latest: tuple[np.ndarray, CameraPeople] | None = None
         self.ms = 0.0
         self.error: str | None = None
 
     def run(self) -> None:
         try:
-            est = PoseEstimator(self.model)
+            est = PoseEstimator(self.model, self.num_poses)
         except Exception as e:  # surfaced in the viewer HUD
             self.error = f"pose {self.camera.cam_name}: {e}"
             return
@@ -83,7 +88,7 @@ class PoseWorker(threading.Thread):
                     continue
                 last_seq, t, frame = item
                 t0 = time.perf_counter()
-                r = est.detect(frame, t, self.camera.cam_name)
+                r = CameraPeople(self.camera.cam_name, t, est.detect(frame, t, self.camera.cam_name, self.roi))
                 dt = (time.perf_counter() - t0) * 1000
                 self.ms = dt if self.ms == 0 else 0.9 * self.ms + 0.1 * dt
                 self.latest = (frame, r)
