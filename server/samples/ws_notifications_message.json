@@ -1,0 +1,19 @@
+{
+  "type": "notification",
+  "id": 2,
+  "time": 1791667045.421996,
+  "kind": "milestone",
+  "severity": "low",
+  "therapist_id": "okafor",
+  "patient_id": "maya",
+  "title": "Maya hit her 90\u00b0 squat goal.",
+  "body": null,
+  "link": "/dashboard#/replay/fea67dbd-f43f-4803-85d5-5e205100a69b",
+  "source_table": null,
+  "source_id": null,
+  "dedupe_key": "milestone:maya:squat_90",
+  "read_at": 1791667045.430795,
+  "acked_at": null,
+  "acked_by": null,
+  "push": true
+}

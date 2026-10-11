@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Development-only Mira REST/WS fixture. No third-party dependencies.
 
-This is a provisional section-16 contract, NOT Tri's server or a clinical simulator.
+Prefer Tri's real server with its mock engine (no keys or database needed):
+    MIRA_SOURCE=mock DB_DISABLED=1 MIRA_API_TOKEN=<token> make run
+This fixture remains for outage tests (/test/drop). It enforces the same auth as the
+server (Bearer header on REST except /health, ?token= on WebSockets) and answers REST
+with the server's own samples from server/samples/.
 Bind localhost by default; pass --host 0.0.0.0 for a phone on a trusted LAN.
 """
 import argparse
@@ -12,9 +16,24 @@ import math
 import socket
 import struct
 import threading
+import os
+import re
+import secrets
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+SAMPLES = Path(__file__).resolve().parents[1] / "server" / "samples"
+TOKEN = ""  # set in __main__; required like the real server's MIRA_API_TOKEN
+
+
+def sample(name):
+    return json.loads((SAMPLES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def token_ok(given):
+    return bool(TOKEN) and secrets.compare_digest(given.encode(), TOKEN.encode())
 
 
 class MockState:
@@ -41,27 +60,45 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def log_message(self, format, *args):  # noqa: A002 - BaseHTTPRequestHandler signature
+        # Request lines carry ?token=; never write it to the console.
+        super().log_message(format, *(re.sub(r"(token=)[^&\s\"']+", r"\1***", str(a)) for a in args))
+
+    def authorized(self):
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and token_ok(auth[len("Bearer "):]):
+            return True
+        self.reply(sample("rest_error_401"), 401)
+        return False
+
     def do_GET(self):
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
         if path in ("/ws/live", "/ws/pose", "/ws/events"):
+            if not token_ok(parse_qs(url.query).get("token", [""])[0]):
+                return self.reply({"detail": "forbidden"}, 403)  # the server closes with 1008 → HTTP 403
             return self.websocket(path)
-        if path == "/calibration/status":
-            return self.reply({"board_refined": True, "cameras": [{"id": "A", "ok": True}, {"id": "B", "ok": True}]})
+        if path == "/health":
+            return self.reply(sample("rest_get_health"))
         if path == "/test/state":
             with STATE.lock:
                 value = {"commands": list(STATE.commands), "connections": STATE.connections}
             return self.reply(value)
+        if not self.authorized():
+            return None
+        routes = {"/calibration/status": "rest_get_calibration_status", "/proposals": "rest_get_proposals",
+                  "/alerts": "rest_get_alerts", "/notifications/count": "rest_get_notifications_count"}
+        if path in routes:
+            return self.reply(sample(routes[path]))
         if path.endswith("/progress"):
-            return self.reply({"patient_id": "demo", "series": []})
+            return self.reply(sample("rest_get_patient_progress"))
         if path.endswith("/frames"):
-            return self.reply([])
+            return self.reply(sample("rest_get_session_frames_lttb"))
         if path.startswith("/prescriptions/"):
-            return self.reply({"patient_id": "demo", "exercises": [{"id": "squat", "sets": 3, "reps": 10}]})
+            return self.reply(sample("rest_get_prescriptions"))
         if path.startswith("/sessions/"):
-            return self.reply({"id": "mock-session", "status": "active"})
-        if path == "/proposals":
-            return self.reply([])
-        self.reply({"error": "No mock route"}, 404)
+            return self.reply(sample("rest_get_session"))
+        self.reply(sample("rest_error_404"), 404)
 
     def do_POST(self):
         size = int(self.headers.get("Content-Length", "0"))
@@ -72,6 +109,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self.reply({"error": "Invalid JSON"}, 400)
         path = urlparse(self.path).path
+        if path != "/test/drop" and not self.authorized():
+            return None
         if path == "/test/drop":
             with STATE.lock:
                 clients = list(STATE.clients)
@@ -81,18 +120,17 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
             return self.reply({"dropped": len(clients)})
-        if path == "/sessions":
-            return self.reply({"id": "mock-session", "status": "active"}, 201)
-        if path == "/copilot/ask":
-            return self.reply({"answer": "Mock answer", "charts": [], "sql": []})
-        if (path.startswith("/sessions/") and path.rsplit("/", 1)[-1] in ("stop", "share", "cue")) or (
-            path.startswith("/proposals/") and path.rsplit("/", 1)[-1] in ("approve", "edit", "dismiss")
-        ):
-            self.send_response(204)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        self.reply({"error": "No mock route", "body": body}, 404)
+        routes = {"/sessions": "rest_post_sessions", "/copilot/ask": "rest_post_copilot_ask"}
+        if path in routes:
+            return self.reply(sample(routes[path]))
+        last = path.rsplit("/", 1)[-1]
+        if path.startswith("/sessions/") and last in ("stop", "share"):
+            return self.reply(sample(f"rest_post_session_{last}"))
+        if path.startswith("/proposals/") and last in ("approve", "edit", "dismiss"):
+            return self.reply(sample("rest_post_proposal_approve"))
+        if path.startswith("/alerts/") and last == "resolve":
+            return self.reply(sample("rest_post_alert_resolve"))
+        self.reply(sample("rest_error_404"), 404)
 
     def websocket(self, path):
         key = self.headers.get("Sec-WebSocket-Key")
@@ -120,21 +158,22 @@ class Handler(BaseHTTPRequestHandler):
             tick = 0
             try:
                 if path == "/ws/events":
-                    send({"type": "greeting", "audio_id": None, "text": "Connected to the development mock"})
+                    send({"type": "greeting", "text": "Connected to the development mock", "audio_url": None})
                 while not stopped.is_set():
                     with STATE.lock:
                         paused, rep = STATE.paused, STATE.rep
                         if path == "/ws/live" and tick % 20 == 0 and not paused:
                             STATE.rep = rep = (rep + 1) % 11
                     if path == "/ws/live":
-                        send({"phase": "active", "exercise_id": "squat", "rep": rep, "reps_target": 10,
-                              "countdown": None, "main_angle": round(65 + 10 * math.sin(tick / 10), 1),
-                              "load_l_pct": 52, "flags": [], "cue_id": None, "paused": paused})
+                        send({"t": time.time(), "phase": "paused" if paused else "active", "exercise_id": "squat",
+                              "rep": rep, "reps_target": 10, "set": 1, "sets_target": 3, "countdown": None,
+                              "main_angle": round(65 + 10 * math.sin(tick / 10), 1), "load_l_pct": 52,
+                              "load_conf": 0.95, "hr": 100, "flags": [], "cue_id": None, "paused": paused})
                     elif path == "/ws/pose":
                         send({"t": time.time(), "joints": [[0, i / 33, 0] for i in range(33)],
                               "confidence": [0.99] * 33, "load_l_pct": 52, "flags": []})
                     elif tick % 20 == 0:
-                        send({"type": "cue", "id": "mock-cue", "text": "Keep your weight balanced"})
+                        send({"type": "cue", "id": "mock-cue", "text": "Keep your weight balanced", "audio_url": None})
                     tick += 1
                     stopped.wait(0.05 if path == "/ws/pose" else 0.1)
             except OSError:
@@ -181,7 +220,8 @@ class Handler(BaseHTTPRequestHandler):
                                 STATE.paused = False
                             elif name == "skip":
                                 STATE.rep = 0
-                    send({"type": "cue", "id": "command-received", "text": "Mock received: " + event.get("name", event.get("type", "unknown"))})
+                    if event.get("type") in ("command", "hr", "wrist", "watch_button", "device_health"):
+                        send({**event, "t": time.time()})  # the server echoes accepted client messages
         except (OSError, EOFError, ValueError):
             pass
         finally:
@@ -196,6 +236,9 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    TOKEN = os.environ.get("MIRA_API_TOKEN", "")
+    if not TOKEN:
+        parser.error("set MIRA_API_TOKEN (the same token the app uses), like the real server")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Mira development mock: http://{args.host}:{args.port}", flush=True)
     try:

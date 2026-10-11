@@ -3,6 +3,11 @@ import Observation
 
 enum ConnectionState: Equatable {
     case disconnected, connecting, connected, reconnecting(attempt: Int)
+    /// No token configured: nothing is attempted (the server would refuse every socket).
+    case notPaired
+    /// The server refused the handshake (wrong token → close 1008 / HTTP 403). Retrying
+    /// with the same token cannot succeed, so the socket stops until the token changes.
+    case rejected
 
     var label: String {
         switch self {
@@ -10,6 +15,8 @@ enum ConnectionState: Equatable {
         case .connecting: return "Connecting to Mira…"
         case .connected: return "Mira server online"
         case .reconnecting: return "Mira server offline · reconnecting…"
+        case .notPaired: return "Not paired · add the Mira server token"
+        case .rejected: return "Token rejected by the Mira server"
         }
     }
 }
@@ -85,8 +92,14 @@ final class LiveSocket {
                     }
                 }
                 heartbeat.cancel()
+                let refused = Self.wasRefused(socket)
                 socket.cancel(with: .goingAway, reason: nil)
                 guard !Task.isCancelled, self.generation == generation else { return }
+                if refused {
+                    self.state = .rejected
+                    self.lastError = APIError.unauthorized.localizedDescription
+                    return
+                }
                 // A flapping connection must not reset the backoff on every handshake.
                 if Date().timeIntervalSince(openedAt) > 30 { attempt = 0 }
                 attempt += 1
@@ -96,6 +109,20 @@ final class LiveSocket {
                 catch { return }
             }
         }
+    }
+
+    /// The server checks `?token=` before accepting; a bad token closes with 1008,
+    /// which a client sees as an HTTP 403 (or 401) handshake response.
+    private static func wasRefused(_ socket: URLSessionWebSocketTask) -> Bool {
+        if socket.closeCode == .policyViolation { return true }
+        let status = (socket.response as? HTTPURLResponse)?.statusCode
+        return status == 401 || status == 403
+    }
+
+    /// Shows the unpaired state without opening a connection.
+    func markNotPaired() {
+        disconnect()
+        state = .notPaired
     }
 
     func disconnect() {
@@ -132,12 +159,18 @@ final class LiveSessionStore {
     private(set) var cue: String?
     private(set) var latestEvent: SocketEvent?
     private(set) var alert: AlertMessage?
+    private(set) var fallStatus: FallStatusMessage?
+    /// The server echoes every accepted client message on /ws/events; a command
+    /// appearing here proves it passed the allow-list (and the rate limit).
+    private(set) var lastCommand: CommandMessage?
     private(set) var decodingError: String?
     private(set) var receivedMessages = 0
 
     var connectionState: ConnectionState {
         let states = [liveSocket.state, eventSocket.state, poseSocket.state]
         if states.allSatisfy({ $0 == .connected }) { return .connected }
+        if states.contains(.rejected) { return .rejected }
+        if states.contains(.notPaired) { return .notPaired }
         if let retry = states.first(where: { if case .reconnecting = $0 { return true }; return false }) { return retry }
         if states.contains(.connecting) { return .connecting }
         return .disconnected
@@ -145,9 +178,11 @@ final class LiveSessionStore {
 
     init() {
         liveSocket.onMessage = { [weak self] data in
+            guard !WireJSON.isPing(data) else { return }
             self?.decode(data, as: LiveMessage.self) { self?.live = $0 }
         }
         poseSocket.onMessage = { [weak self] data in
+            guard !WireJSON.isPing(data) else { return }
             self?.decode(data, as: PoseMessage.self) { pose in
                 guard pose.hasValidDimensions else {
                     self?.decodingError = "Invalid pose: expected 33 three-dimensional joints and 33 confidence values."
@@ -157,12 +192,18 @@ final class LiveSessionStore {
             }
         }
         eventSocket.onMessage = { [weak self] data in
+            guard !WireJSON.isPing(data) else { return }
             self?.decode(data, as: SocketEvent.self) { event in
                 self?.latestEvent = event
                 switch event {
                 case .cue(let cue): self?.cue = cue.text
                 case .greeting(let greeting): self?.cue = greeting.text
-                case .alert(let alert): self?.alert = alert
+                case .summaryReady(let summary): self?.cue = summary.spoken
+                case .alert(let alert):
+                    self?.alert = alert.isOpen ? alert : nil
+                    if !alert.isOpen { self?.fallStatus = nil }
+                case .fallStatus(let status): self?.fallStatus = status
+                case .command(let command): self?.lastCommand = command
                 default: break
                 }
             }
@@ -179,21 +220,31 @@ final class LiveSessionStore {
         }
     }
 
-    func connect(to address: ServerAddress, reset: Bool = false) {
+    func connect(to address: ServerAddress, token: String?, reset: Bool = false) {
         if reset {
-            live = nil; pose = nil; cue = nil; latestEvent = nil; alert = nil
+            live = nil; pose = nil; cue = nil; latestEvent = nil; alert = nil; fallStatus = nil; lastCommand = nil
             receivedMessages = 0; decodingError = nil
         }
-        liveSocket.connect(to: address.endpoint(["ws", "live"], webSocket: true))
-        eventSocket.connect(to: address.endpoint(["ws", "events"], webSocket: true))
-        poseSocket.connect(to: address.endpoint(["ws", "pose"], webSocket: true))
+        guard let token else {
+            liveSocket.markNotPaired(); eventSocket.markNotPaired(); poseSocket.markNotPaired()
+            return
+        }
+        liveSocket.connect(to: address.webSocket(["ws", "live"], token: token))
+        eventSocket.connect(to: address.webSocket(["ws", "events"], token: token))
+        poseSocket.connect(to: address.webSocket(["ws", "pose"], token: token))
     }
 
     func disconnect() {
         liveSocket.disconnect(); eventSocket.disconnect(); poseSocket.disconnect()
     }
 
+    // The server accepts at most 20 client messages per second per socket and drops
+    // the rest silently, so button-driven commands are well within budget.
     func send(_ command: CommandName, payload: JSONValue = .object([:])) async throws {
-        try await eventSocket.send(.command(CommandMessage(name: command, payload: payload)))
+        try await send(CommandMessage(name: command, payload: payload))
+    }
+
+    func send(_ command: CommandMessage) async throws {
+        try await eventSocket.send(.command(command))
     }
 }

@@ -1,0 +1,9 @@
+{
+  "type": "cue",
+  "id": "set_start",
+  "text": "Nice and slow. Let's begin.",
+  "audio_url": "/audio/set_start.mp3",
+  "seq": 99,
+  "t": 1791662242.74,
+  "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"
+}

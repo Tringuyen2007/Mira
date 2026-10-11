@@ -11,6 +11,7 @@ struct LiveView: View {
     @State private var isSending = false
     init(initialScreen: Screen = .live) { _screen = State(initialValue: initialScreen) }
     private var online: Bool { preview || state.liveSession.eventSocket.state == .connected }
+    private var notPaired: Bool { state.liveSession.connectionState == .notPaired || state.liveSession.connectionState == .rejected }
     private var displayed: Screen {
         if screen == .live && state.liveSession.live?.paused == true { return .paused }
         return screen
@@ -25,12 +26,14 @@ struct LiveView: View {
             case .stop: stopScreen
             }
             if let commandError { Text(commandError).font(MiraUI.font(15)).foregroundStyle(MiraUI.alert).accessibilityAddTraits(.updatesFrequently) }
-            if !online { Text("Mira server offline · reconnecting…").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) }
+            if !online {
+                Text(notPaired ? "Mira isn’t paired with this phone yet." : "Mira server offline · reconnecting…").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+            }
             if let alert = state.liveSession.alert {
                 MiraCard {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Mira alert").font(MiraUI.font(20, "SemiBold"))
-                        Text("\(alert.kind): \(alert.step)").font(MiraUI.font(17))
+                        Text(alert.message ?? "\(alert.kind): \(alert.step)").font(MiraUI.font(17))
                         MiraButton(title: "I’m OK") { send(.imOK) }.disabled(!online || isSending)
                     }
                 }
@@ -81,7 +84,7 @@ struct LiveView: View {
                 }
             }
             HStack(spacing: 12) {
-                metric("Reps", preview ? "6" : state.liveSession.live.map { String($0.rep) } ?? "—", preview ? "of 10" : state.liveSession.live.map { "of \($0.repsTarget)" } ?? "Waiting for Mira")
+                metric("Reps", preview ? "6" : state.liveSession.live.map { String($0.rep) } ?? "—", preview ? "of 10" : state.liveSession.live?.repsTarget.map { "of \($0)" } ?? "Waiting for Mira")
                 metric("Knee bend", preview ? "84°" : state.liveSession.live?.mainAngle.map { "\(Int($0.rounded()))°" } ?? "—", preview ? "Goal 90°" : "Live measurement")
             }
             if preview || state.liveSession.live != nil {
@@ -106,10 +109,10 @@ struct LiveView: View {
             FigmaIllustration(name: "paused").padding(.horizontal, -24)
             Text("Paused").font(MiraUI.font(46, "Light")).foregroundStyle(MiraUI.title)
             Text("Take your time.\nMira is here when you’re ready.").font(MiraUI.font(20)).foregroundStyle(MiraUI.soft).multilineTextAlignment(.center)
+            // The server resumes a paused session on `start` (README "Engine reverse channel") and answers with `resumed`.
             MiraButton(title: "Resume") {
-                if preview { screen = .live }
-            }.disabled(!preview) // No resume command has been agreed with the server yet.
-            if !preview { Text("Resume will be available when the server supports it.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft) }
+                if preview { screen = .live } else { send(.start) }
+            }.disabled(!online || isSending)
             MiraButton(title: "Skip this exercise", secondary: true) { if !preview { send(.skip) } }.disabled(!online || isSending)
             MiraButton(title: "End session", secondary: true) { screen = .stop }
             Button("Report pain") { reportPain() }.font(MiraUI.font(17, "Medium")).disabled(!online || isSending)

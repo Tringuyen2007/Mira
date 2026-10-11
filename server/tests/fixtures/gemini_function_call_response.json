@@ -1,0 +1,36 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "function_call": {
+       "id": "call_143720",
+       "args": {
+        "session": "today"
+       },
+       "name": "get_rep_count"
+      },
+      "thought_signature": "EmAKXgFpFH0T6hDii1RSwiqZW4ZqD9ZPxOmCekRf6CCJ1DeXvTNrRMlHNP7hg6FU1E0iOhG-R_2yX7-uWwFEZeRCMrcrSCdvic3-5QbNbp1BLhfVH0vU0S4NRh-qysaDa00="
+     }
+    ],
+    "role": "model"
+   },
+   "finish_reason": "STOP",
+   "index": 0
+  }
+ ],
+ "model_version": "gemini-3.5-flash-lite",
+ "response_id": "S53Kap3RAafoz7IPiqSy0AE",
+ "usage_metadata": {
+  "candidates_token_count": 18,
+  "prompt_token_count": 83,
+  "prompt_tokens_details": [
+   {
+    "modality": "TEXT",
+    "token_count": 83
+   }
+  ],
+  "total_token_count": 101
+ }
+}

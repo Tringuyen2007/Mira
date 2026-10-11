@@ -1,0 +1,18 @@
+{
+  "id": 1,
+  "time": 1791667045.421938,
+  "kind": "alert",
+  "severity": "urgent",
+  "therapist_id": "okafor",
+  "patient_id": "maya",
+  "title": "No response from Maya. Calling the emergency contact.",
+  "body": null,
+  "link": "/dashboard#/replay/fea67dbd-f43f-4803-85d5-5e205100a69b?t=1791664159.239",
+  "source_table": "alerts",
+  "source_id": "31c3430d-b341-4be4-ac3a-da4682bf71cb",
+  "dedupe_key": "alert:31c3430d-b341-4be4-ac3a-da4682bf71cb:escalated",
+  "read_at": 1791667045.431566,
+  "acked_at": 1791667045.432153,
+  "acked_by": "dr_okafor",
+  "push": true
+}

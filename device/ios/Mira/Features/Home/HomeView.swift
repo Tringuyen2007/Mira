@@ -82,7 +82,9 @@ struct HomeView: View {
                     Spacer()
                     Button("Session summary") { flow = .summary }
                 }.font(MiraUI.font(15, "Medium"))
-                if state.connectionEnabled && state.liveSession.connectionState != .connected {
+                if state.connectionEnabled && !state.isPaired {
+                    Text("Mira isn’t paired with this phone yet.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
+                } else if state.connectionEnabled && state.liveSession.connectionState != .connected {
                     Text("Mira is unavailable right now.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
                 }
             }
