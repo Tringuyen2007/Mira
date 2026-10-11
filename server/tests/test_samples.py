@@ -10,6 +10,10 @@ SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdow
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
                  "proposal_created", "coach_adapt", "device_health", "device_status"}
 CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health"}
+REST_SAMPLES_REQUIRED_KEYS = {
+    "rest_get_me.json": {"patient", "therapist", "prescriptions", "lcd", "calibration"},
+    "rest_post_pair.json": {"patient_id", "token", "me"},
+}
 
 
 def _load(name: str) -> dict:
@@ -28,6 +32,11 @@ def test_every_ws_event_type_has_a_sample() -> None:
         assert _load(f"ws_events_{kind}")["type"] == kind
     for kind in CLIENT_EVENTS:
         assert _load(f"ws_events_client_{kind}")["type"] == kind
+
+
+def test_rest_samples_have_required_keys() -> None:
+    for name, keys in REST_SAMPLES_REQUIRED_KEYS.items():
+        assert keys <= set(_load(name.removesuffix(".json")))
 
 
 def test_pose_and_frame_samples_match_contract() -> None:

@@ -10,3 +10,9 @@ the bottom of a squat about 70-90. The vision engine must send the same conventi
 Copilot and proposals: `rest_post_copilot_ask` (chart points trimmed), `rest_get_proposals` and
 `rest_post_proposal_approve` (evidence SQL trimmed), `rest_error_409_proposal`, `ws_events_proposal_created`,
 `ws_events_proposal_decided`, all from the running server in `GEMINI_MODE=fake` on the simulated history.
+
+`rest_post_pair` is the `POST /pair` response for the demo code `K7P4M2`; the `token` field is redacted to a
+fixed placeholder since a real device token is a secret.
+
+`rest_get_me` is the `GET /me?patient_id=maya` response (admin token), matching the `me` object nested in
+`rest_post_pair`: patient profile, therapist, prescriptions, LCD status and calibration.
