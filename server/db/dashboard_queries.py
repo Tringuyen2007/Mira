@@ -154,6 +154,17 @@ ORDER BY time DESC
 LIMIT %(limit)s
 """
 
+# Task 11: the latest `progress_note_approved` agent_actions row for a session (the dashboard's approval
+# of the AI-drafted progress note, optionally edited first). `detail` carries {"text", "edited",
+# "approved_by"} — see server.api.dashboard.approve_progress_note.
+LATEST_PROGRESS_NOTE_SQL = """
+SELECT time, detail
+FROM agent_actions
+WHERE session_id = %(session_id)s AND action = 'progress_note_approved'
+ORDER BY time DESC
+LIMIT 1
+"""
+
 
 async def caseload_signals(db: Database, therapist_id: str) -> list[dict[str, Any]]:
     """One row per patient of `therapist_id`, with everything `dashboard_triage.Signals` needs. Bounded to
@@ -175,3 +186,8 @@ async def sessions_done_today(db: Database, patient_ids: list[str]) -> int:
 async def memory_events(db: Database, patient_id: str, days: int) -> list[dict[str, Any]]:
     """The patient's Therapist Memory list: memory_events from the last `days` days, newest first."""
     return await db.fetch(MEMORY_EVENTS_SQL, {"patient_id": patient_id, "days": days, "limit": MEMORY_EVENTS_LIMIT})
+
+
+async def latest_progress_note(db: Database, session_id: str) -> dict[str, Any] | None:
+    """The most recent progress-note approval for a session, or None if it has never been approved."""
+    return await db.fetchrow(LATEST_PROGRESS_NOTE_SQL, {"session_id": session_id})

@@ -236,6 +236,7 @@ token (prompt, local config) is the dashboard's choice; never commit it.
 | Patients | `GET /patients`, `GET /patients/{id}` (`rest_get_patients`, `rest_get_patient`) |
 | Progress | `GET /patients/{id}/progress?exercise_id=&days=90` (`rest_get_patient_progress`) |
 | Sessions, replay | `GET /sessions/{id}`; `GET /sessions/{id}/frames?downsample=300` (knee curve) or `downsample=0` (full frames, page with `t0=<next_t0>`) (`rest_get_session`, `rest_get_session_frames_*`) |
+| Progress note | `POST /sessions/{id}/progress-note {therapist_id, text}` — approve the session's AI-drafted progress note, optionally edited first (403 if the patient belongs to another therapist); `GET /sessions/{id}/progress-note` reads the latest approval back, with an `edited` flag (`rest_post_progress_note`, `rest_get_progress_note`) |
 | Alerts | `GET /alerts?open=true`, `POST /alerts/{id}/resolve {resolved_by, note?}` (`rest_get_alerts`, `rest_post_alert_resolve`) |
 | Plan proposals | `GET /proposals?status=pending&patient_id=`, `POST /proposals/{id}/approve {therapist_id}`, `/edit {therapist_id, change}`, `/dismiss {therapist_id, reason?}` (409 if already decided) (`rest_get_proposals`, `rest_post_proposal_approve`, `rest_error_409_proposal`) |
 | Caseload | `GET /caseload?therapist_id=` — triaged caseload (needs_you/watch/on_track, with a one-line reason and evidence) plus today's session count and the live session, if any (`rest_get_caseload`) |

@@ -1,17 +1,22 @@
 """Therapist dashboard REST (dashboard spec 2026-10-11, Task 8): `GET /caseload` and
-`GET /patients/{id}/memory` ("Therapist Memory"). Pure triage logic lives in server.dashboard_triage; this
-module only assembles signals from the database and the live session snapshot, and formats the response."""
+`GET /patients/{id}/memory` ("Therapist Memory"). Task 11 adds the progress-note approval routes:
+`POST /sessions/{id}/progress-note` (approve the AI-drafted note, optionally edited) and
+`GET /sessions/{id}/progress-note` (read the latest approval back). Pure triage logic lives in
+server.dashboard_triage; this module only assembles signals from the database and the live session
+snapshot, and formats the response."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from pydantic import BaseModel, Field, field_validator
 
 from server.api.db_dep import require_db
 from server.dashboard_triage import Signals, triage
-from server.db import dashboard_queries, queries
+from server.db import dashboard_queries, queries, writes
 from server.db.pool import Database
 from server.state import get_state
 
@@ -125,3 +130,57 @@ async def patient_memory(patient_id: str = Path(pattern=ID_RE, max_length=64),
         raise HTTPException(status_code=404, detail="patient not found")
     events = await dashboard_queries.memory_events(db, patient_id, days)
     return {"patient_id": patient_id, "days": days, "events": events}
+
+
+# ---- progress-note approval (Task 11) --------------------------------------------------------------------
+
+class ProgressNoteIn(BaseModel):
+    therapist_id: str = Field(pattern=ID_RE, max_length=64)
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def _stripped_1_to_4000(cls, value: str) -> str:
+        stripped = value.strip()
+        if not 1 <= len(stripped) <= 4000:
+            raise ValueError("text must be 1-4000 characters after stripping whitespace")
+        return stripped
+
+
+async def _owned_session(db: Database, session_id: str, therapist_id: str) -> dict[str, Any]:
+    """The session, 404 if unknown, 403 if its patient belongs to a different therapist (proposals.py's
+    pattern: an unassigned patient — therapist_id None — is not a mismatch)."""
+    session = await queries.get_session(db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    patient = await queries.get_patient(db, session["patient_id"])
+    if patient is not None and patient["therapist_id"] not in (None, therapist_id):
+        raise HTTPException(status_code=403, detail="this patient belongs to another therapist")
+    return session
+
+
+@router.post("/sessions/{session_id}/progress-note")
+async def approve_progress_note(session_id: uuid.UUID, body: ProgressNoteIn,
+                                db: Database = Depends(require_db)) -> dict[str, Any]:
+    sid = str(session_id)
+    session = await _owned_session(db, sid, body.therapist_id)
+    edited = body.text != session.get("ai_note")
+    ok = await writes.insert_agent_action(db, "therapist", "progress_note_approved", session["patient_id"], sid,
+                                         {"text": body.text, "edited": edited, "approved_by": body.therapist_id})
+    if not ok:
+        raise HTTPException(status_code=503, detail="database unavailable: could not save the approval")
+    return {"ok": True, "session_id": sid, "approved_by": body.therapist_id,
+            "approved_at": datetime.now(UTC).isoformat().replace("+00:00", "Z")}
+
+
+@router.get("/sessions/{session_id}/progress-note")
+async def get_progress_note(session_id: uuid.UUID, db: Database = Depends(require_db)) -> dict[str, Any]:
+    sid = str(session_id)
+    if await queries.get_session(db, sid) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    row = await dashboard_queries.latest_progress_note(db, sid)
+    if row is None:
+        return {"approved": False, "text": None, "approved_by": None, "approved_at": None, "edited": False}
+    detail = row["detail"]
+    return {"approved": True, "text": detail["text"], "approved_by": detail.get("approved_by"),
+            "approved_at": row["time"].isoformat().replace("+00:00", "Z"), "edited": bool(detail.get("edited"))}

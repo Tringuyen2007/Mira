@@ -15,6 +15,8 @@ from server.tests.conftest import AUTH
 from server.tests.dbutil import fresh_database, prepare, ro_dsn
 
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
+NOTE_SESSION_ID = "11111111-1111-1111-1111-111111111111"
+OTHER_NOTE_SESSION_ID = "22222222-2222-2222-2222-222222222222"
 
 
 def test_dashboard_routes_need_the_token(make_client: Callable[..., TestClient]) -> None:
@@ -136,6 +138,16 @@ def _seed_extra(dsn: str) -> None:
         # an unfinished session today must not reset the missed count.
         conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
                      "VALUES (gen_random_uuid(), 'missed3_pat', 'squat', now(), NULL)")
+
+        # Task 11: a finished session with an AI draft note, for the progress-note approval tests.
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at, ai_note) "
+                     "VALUES (%s, 'maya', 'squat', now() - interval '1 day', "
+                     "now() - interval '1 day' + interval '10 minutes', 'AI draft note for Maya')",
+                     (NOTE_SESSION_ID,))
+        # a session belonging to priya (nguyen's patient), to prove the therapist-ownership check.
+        conn.execute("INSERT INTO sessions (id, patient_id, exercise_id, started_at, ended_at) "
+                     "VALUES (%s, 'priya', 'squat', now() - interval '1 day', "
+                     "now() - interval '1 day' + interval '10 minutes')", (OTHER_NOTE_SESSION_ID,))
 
 
 
@@ -267,3 +279,83 @@ def test_live_now_scoped_to_therapist_caseload(make_client: Callable[..., TestCl
     assert _live_now([{"id": "maya", "name": "Maya Ellis"}]) is not None
     assert _live_now([{"id": "george", "name": "George Alvarez"}]) is None
     assert _live_now([]) is None
+
+
+# ---- progress-note approval (Task 11) --------------------------------------------------------------------
+
+def test_progress_note_routes_need_the_token(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    assert client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                       json={"therapist_id": "okafor", "text": "ok"}).status_code == 401
+    assert client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note").status_code == 401
+
+
+def test_progress_note_routes_503_without_db(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    assert client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                       json={"therapist_id": "okafor", "text": "ok"}, headers=AUTH).status_code == 503
+    assert client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note", headers=AUTH).status_code == 503
+
+
+def test_progress_note_sample_shape() -> None:
+    post = json.loads((SAMPLES / "rest_post_progress_note.json").read_text())
+    assert set(post) == {"ok", "session_id", "approved_by", "approved_at"}
+    get = json.loads((SAMPLES / "rest_get_progress_note.json").read_text())
+    assert set(get) == {"approved", "text", "approved_by", "approved_at", "edited"}
+
+
+def test_progress_note_rejects_empty_or_oversized_text(dash_client: TestClient) -> None:
+    for text in ("", "   "):
+        r = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                             json={"therapist_id": "okafor", "text": text}, headers=AUTH)
+        assert r.status_code == 422
+    r = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                         json={"therapist_id": "okafor", "text": "x" * 4001}, headers=AUTH)
+    assert r.status_code == 422
+    r = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                         json={"therapist_id": "bad id!", "text": "ok"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+def test_progress_note_404_for_unknown_session(dash_client: TestClient) -> None:
+    unknown = str(uuid.uuid4())
+    assert dash_client.post(f"/sessions/{unknown}/progress-note",
+                            json={"therapist_id": "okafor", "text": "ok"}, headers=AUTH).status_code == 404
+    assert dash_client.get(f"/sessions/{unknown}/progress-note", headers=AUTH).status_code == 404
+
+
+def test_progress_note_403_for_another_therapist(dash_client: TestClient) -> None:
+    """OTHER_NOTE_SESSION_ID belongs to priya, who is nguyen's patient, not okafor's."""
+    r = dash_client.post(f"/sessions/{OTHER_NOTE_SESSION_ID}/progress-note",
+                         json={"therapist_id": "okafor", "text": "ok"}, headers=AUTH)
+    assert r.status_code == 403
+
+
+def test_progress_note_approve_then_read_back_and_edited_flag(dash_client: TestClient) -> None:
+    get_before = dash_client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note", headers=AUTH).json()
+    assert get_before == {"approved": False, "text": None, "approved_by": None, "approved_at": None,
+                          "edited": False}
+
+    post = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                            json={"therapist_id": "okafor", "text": "Edited note for Maya"}, headers=AUTH)
+    assert post.status_code == 200
+    body = post.json()
+    assert body["ok"] is True
+    assert body["session_id"] == NOTE_SESSION_ID
+    assert body["approved_by"] == "okafor"
+    assert body["approved_at"]
+
+    get1 = dash_client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note", headers=AUTH).json()
+    assert get1["approved"] is True
+    assert get1["text"] == "Edited note for Maya"
+    assert get1["approved_by"] == "okafor"
+    assert get1["edited"] is True  # differs from the session's ai_note
+
+    # A second approval (this time matching the AI draft verbatim) must overwrite what GET returns.
+    post2 = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                             json={"therapist_id": "okafor", "text": "AI draft note for Maya"}, headers=AUTH)
+    assert post2.status_code == 200
+
+    get2 = dash_client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note", headers=AUTH).json()
+    assert get2["text"] == "AI draft note for Maya"
+    assert get2["edited"] is False
