@@ -44,8 +44,8 @@ behaviour is unchanged.
   40 standing samples. Two cameras keep measuring from every usable frame, as now.
 - Until 40 standing frames have been seen, the pipeline shows the floor-placed body, as it does while
   measuring now. There is no timeout: someone who never stands straight is never measured.
-- `debug_view` (one camera, not measured yet) shows `stand straight to measure... N%` from
-  `ModelTracker.progress`.
+- `debug_view` (not measured yet) shows `stand straight to measure... N%` from the measuring state
+  (section 4).
 - Reset (`FORGET_S`, a new person) starts measuring again.
 
 ### 2. Planted feet no longer pull the one-camera fit (`vision/pipeline.py`)
@@ -75,7 +75,37 @@ behaviour is unchanged.
   targets below. If no setting meets both, implementation stops and the best tradeoffs go to Eric.
   Targets are not loosened silently.
 
-### 4. Stability report (`vision/stability_eval.py`, new)
+### 4. Measuring / ready state for the app (`vision/types.py`, `vision/pipeline.py`)
+
+The rest of Mira needs to know when the body can be trusted, so it can prompt the person ("Stand straight
+on the mat for a moment… ready, let's start") and hold off on reps and form rules until then. The
+interface is two new `FrameResult` fields:
+
+- `body: str`, either `"measuring"` or `"ready"`.
+- `body_progress: float`, from 0 to 1: the share of the 40 standing frames collected (1.0 when ready).
+
+**The model tracker** (one camera, or two-camera `--tracker model`):
+- **`measuring`** until the shape is measured, and again after a reset (`FORGET_S`, a new person).
+  Progress counts standing frames only, so it pauses while the person crouches or moves.
+- **`ready`** once measured. It stays ready through short losses: `tracking == "lost"` for less than
+  `FORGET_S` keeps the shape.
+
+**Triangulation** (two cameras, no model): always `ready`, with progress 1.0. Nothing is measured first.
+
+**`body` and `tracking` are independent.** `tracking` still says whether a person is seen this frame. The
+app combines them: prompt while `body == "measuring"` and a person is tracked; start counting when it
+turns `ready`.
+
+**While measuring, `joints` are the rough floor-placed body.** They're fine for showing that someone is
+there, not for reps, depth or form rules. The `vision/README.md` section on `FrameResult` says so.
+
+**Recordings:**
+- `to_dict` / `from_dict` include both fields.
+- Older recordings without them load as `ready` / 1.0, so replays and tools that read old files behave as
+  before.
+- `debug_view` shows the hint from these fields, so live and replay match.
+
+### 5. Stability report (`vision/stability_eval.py`, new)
 
 `python -m vision.stability_eval <f>... [--height-cm 170]` replays one-camera recordings (B only, the
 recorded selected person) and prints, per file:
@@ -113,8 +143,18 @@ Also:
 - **Synthetic tests** pass with the new gate: depth shake held when still in 2D, real sideways movement
   followed, walking toward B keeps up (0.5 and 1.2 m/s), catching up after a gap, scale the same after a
   reset.
-- **New synthetic tests:** a body that crouches for its first 40 frames, then stands, is measured at the
-  right scale. One-camera anchors never reach the fit. A planted foot still shows as locked.
+- **New synthetic tests:**
+  - a body that crouches for its first 40 frames, then stands, is measured at the right scale;
+  - one-camera anchors never reach the fit;
+  - a planted foot still shows as locked.
+- **State tests:**
+  - `body` is `measuring` with rising progress while standing, and turns `ready` on the frame the shape
+    is measured;
+  - progress does not rise during crouched frames;
+  - it stays `ready` through a loss shorter than `FORGET_S`, and goes back to `measuring` after a longer
+    one;
+  - triangulation is always `ready`;
+  - both fields survive a record/replay round trip, and an old recording loads as `ready`.
 - **Two cameras:** a two-camera recording in triangulation mode gives identical frames before and after.
 - **Full suite:** all tests pass, except the direct `_gate` unit test, which is replaced with a test of the
   in-solver hold.
@@ -131,6 +171,7 @@ Also:
   WHAM / GVHMR (options 2–6 of the research).
 - Filtering the 2D points before the fit (tried; mixed results).
 - Raising camera B.
+- The prompt itself in Mira's app (wording, voice, screen): this work only provides the state.
 - Ground-truth squat depth.
 
 ## Open
