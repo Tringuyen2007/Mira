@@ -196,6 +196,8 @@ class AvatarView:
             self.show_3d = not self.show_3d
         elif c == "b":
             self.rig.reset()
+        elif c == "c":
+            self.rig.constraints = not self.rig.constraints
         else:
             return False
         self._clamp()
@@ -203,7 +205,7 @@ class AvatarView:
 
 
 def legend_lines() -> list[str]:
-    return ["b: re-measure body   v: 3D <-> front view",
+    return ["b: re-measure body   c: body rules on/off   v: 3D <-> front view",
             "drag / j/l: orbit   i/k: tilt   +/-: zoom   0: reset view"]
 
 

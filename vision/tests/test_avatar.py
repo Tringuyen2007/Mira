@@ -81,3 +81,11 @@ def test_b_key_re_measures_the_body():
         v.rig.update(k / 30, X, "3d")
     assert v.rig.progress > 0
     assert v.handle_key(ord("b")) and v.rig.progress == 0
+
+
+def test_c_key_turns_the_body_rules_off_and_on():
+    v = AvatarView()
+    assert v.rig.constraints
+    assert v.handle_key(ord("c")) and not v.rig.constraints
+    assert v.handle_key(ord("c")) and v.rig.constraints
+    assert "c: body rules" in " ".join(legend_lines())

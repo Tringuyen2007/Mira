@@ -7,7 +7,8 @@
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
 Bottom: top-down view of the mat and a low-poly 3D person (v switches to a flat front view);
 orange = person's left, blue = right. Drag in the 3D view to orbit.
-Keys: r record on/off, m markers on/off, q quit; 3D view: j/l orbit, i/k tilt, +/- zoom, 0 reset, v toggle.
+Keys: r record on/off, m markers on/off, q quit; 3D view: j/l orbit, i/k tilt, +/- zoom, 0 reset, v toggle,
+b re-measure the body, c body rules (anatomical constraints) on/off.
 """
 from __future__ import annotations
 
@@ -216,9 +217,12 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     hud.append("keys: r record   m markers   q quit")
     feet = out.feet_locked if out is not None else None
     if view is not None and view.show_3d:
-        body = view.rig.update(frame.t, frame.joints, frame.tracking) if frame is not None else None
+        body = (view.rig.update(frame.t, frame.joints, frame.tracking, frame.conf, feet)
+                if frame is not None else None)
         if view.rig.progress < 1:
             hud = hud + [f"measuring body... {view.rig.progress * 100:.0f}% (stand on the mat)"]
+        if not view.rig.constraints:
+            hud = hud + ["body rules off (c to turn on)"]
         right = render_avatar(body, mat, view, feet_locked=feet, hud=hud)
     else:
         right = render_front(frame, hud)

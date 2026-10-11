@@ -100,3 +100,24 @@ def test_3d_view_uses_the_rig_and_says_when_it_is_measuring():
     out = pipe.process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
     compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
     assert 0 < view.rig.progress < 1
+
+
+def test_3d_view_passes_confidence_and_anchoring_and_says_when_rules_are_off():
+    from vision.avatar import AvatarView
+
+    cams, X = target_cams(), standing_skeleton()
+    view = AvatarView()
+    seen = {}
+    real = view.rig.update
+
+    def spy(t, joints, tracking, conf=None, feet_locked=None):
+        seen.update(conf=conf, feet=feet_locked)
+        return real(t, joints, tracking, conf, feet_locked)
+
+    view.rig.update = spy
+    out = Pipeline(cams).process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+    on = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    assert seen["conf"] is out.frame.conf and seen["feet"] is out.feet_locked
+    view.handle_key(ord("c"))
+    off = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    assert (on[360:, 640:] != off[360:, 640:]).any()  # "body rules off" shown
