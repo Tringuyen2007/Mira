@@ -13,7 +13,8 @@
 </head>
 <body>
 <!-- One 1024×600 stage, laid out with the absolute values of the Figma "LCD Hi-Fi" frames. -->
-<div id="stage" data-screen="none" data-mood="none" data-offline="false">
+<div id="stage" data-screen="none" data-mood="none" data-offline="false" data-speaking="false" data-rep="0"
+     data-tick="">
 
   <!-- Set Done "Completion bloom" (37:305) -->
   <div class="bloom" aria-hidden="true"></div>
@@ -88,7 +89,7 @@
   <section class="screen" data-screen="gesture" aria-label="Ready to start">
     <div class="prompt">
       <p class="eyebrow">WHENEVER YOU’RE READY</p>
-      <h1 class="hero hero-prompt">Ready to start?</h1>
+      <h1 class="hero hero-prompt hero-gesture">Raise your hand to start</h1>
       <div class="gestures">
         <div class="gesture">
           <div class="gesture-halo"><img src="assets/icons/thumbs-up.svg" alt="" width="60" height="60"></div>
@@ -99,7 +100,7 @@
           <p class="gesture-label">Raise hand</p>
         </div>
       </div>
-      <p class="hint">Either one works. Take your time.</p>
+      <p class="hint">A thumbs up works too.</p>
     </div>
   </section>
 
@@ -202,7 +203,10 @@
 
   <!-- Caption bar (24:127): what Mira is saying -->
   <div id="caption-bar" class="caption-bar" hidden>
-    <div class="voice" aria-hidden="true"><img src="assets/icons/voice.svg" alt="" width="28" height="28"></div>
+    <!-- Voice icon: three bars (as assets/icons/voice.svg), animated only while Mira is speaking -->
+    <div class="voice" aria-hidden="true">
+      <span class="voice-bar"></span><span class="voice-bar"></span><span class="voice-bar"></span>
+    </div>
     <p id="caption-text" class="caption-text" aria-live="polite"></p>
   </div>
 

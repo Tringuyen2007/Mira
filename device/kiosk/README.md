@@ -37,8 +37,8 @@ cd device/kiosk && python3 -m http.server 8765
 
 then open `http://127.0.0.1:8765/dev/preview.html?screen=<name>` in Chrome, any window size (the stage scales
 uniformly to fit, letterboxed, so a laptop window looks like the 1024×600 Figma frame). `screen` is one of the
-fixtures in `dev/preview.js`: `greeting`, `gesture`, `countdown`, `cue`, `rep`, `paused`, `setDone`, `fall`,
-`idle`, `unpaired`, `offline`. Add `&actual` to draw the stage at exactly 1024×600 CSS px for a side-by-side
+fixtures in `dev/preview.js`: `greeting`, `gesture`, `countdown`, `cue`, `rep`, `speaking`, `paused`, `setDone`,
+`fall`, `idle`, `unpaired`, `offline`. Add `&actual` to draw the stage at exactly 1024×600 CSS px for a side-by-side
 check against the Figma export. This preview draws the real stage markup from `index.html` through the pure
 reducer (`js/state.js`) with canned fixture input — no sockets, no device token, nothing server-side.
 
@@ -87,7 +87,7 @@ to update itself mid-session.
 | # | Screen | Shown when | Mira mood |
 |---|---|---|---|
 | 1 | Greeting | after `arrived` / `greeting` until `awaiting_gesture` or `countdown` | idle |
-| 2 | Awaiting gesture | `awaiting_gesture` until `gesture` / `countdown` | idle |
+| 2 | Awaiting gesture | `awaiting_gesture` until `gesture` / `countdown`; "Raise your hand to start", hint "A thumbs up works too." (both gesture icons stay); Mira waves | idle |
 | 3 | Countdown | `live.phase == "countdown"` (big `live.countdown`, ring progress n/3) | — (no mascot) |
 | 4 | Cue | `phase == "active"` and a correction cue arrived < 4 s ago, or balance off > 15 % | worried |
 | 5 | Rep | `phase == "active"` otherwise; cheering 1.5 s after a `rep` with `quality == "good"` | cheering → idle |
@@ -103,7 +103,39 @@ Priority when several apply: Not paired > Fall alert > Paused > Countdown > Sess
 Awaiting gesture > Greeting > Cue > Rep > Idle.
 
 The caption bar shows `live.caption.text`; the same text is what the audio plays (greeting/cue/summary_ready/
-session_summary events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
+session_summary/say events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
+
+## Events the LCD uses
+
+| Stream | Event | What the LCD does |
+|---|---|---|
+| `/ws/live` | snapshot (10 Hz) | phase, reps, set, countdown, balance, HR, `caption`, `incident`, `device_prefs` |
+| `/ws/events` | `arrived`, `greeting`, `awaiting_gesture`, `gesture`, `stopped` | greeting / gesture screens (greeting plays its `audio_url`) |
+| `/ws/events` | `cue` | correction window (Cue screen); `check_in` opens the fall screen; plays `audio_url` |
+| `/ws/events` | `rep` | `quality == "good"` → Mira cheers 1.5 s |
+| `/ws/events` | `fall`, `alert` | fall screen (see the screens table) |
+| `/ws/events` | `summary_ready`, `session_summary` | plays `audio_url`; `session_summary` shows Session complete |
+| `/ws/events` | `say` | Mira's trainer line `{id, text, audio_url}` (server `TrainerVoice`): plays `audio_url`; the text reaches the caption through `live.caption` (no screen change) |
+
+## Voice and animation
+
+Every screen is spoken by the server's trainer voice (`say` events: one pre-recorded ElevenLabs voice, counting
+good reps aloud, narrating the emergency call). `AudioPlayer` (`js/audio.js`) reports `onSpeaking(true)` when
+a clip starts playing and `onSpeaking(false)` when it ends, is paused (a newer clip replaced it), errors or is
+blocked by autoplay; events from a superseded clip are ignored. `main.js` dispatches that as
+`{channel: "speaking", msg: {on}}`, the reducer keeps `speaking`, and `view.js` sets `#stage[data-speaking]`.
+
+Motion (CSS only, transform/opacity, all switched off by `prefers-reduced-motion`):
+
+- `talk` (0.35 s bob −6 px + 1.5° tilt) on the `.mascot` wrapper while `data-speaking="true"`; the mood
+  animation stays on `#mira`, so the two compose.
+- `wave` (±4°, 1.2 s) on `.mascot` on the Awaiting gesture screen (talking wins while she speaks).
+- `pop` (scale 1 → 1.18 → 1, 0.3 s) on `#rep-now` and `#countdown-n` each time the shown number changes:
+  `view.js` toggles the `pop` class off and on with a reflow in between, only on a change. `#stage` also
+  carries `data-rep` (current rep) and `data-tick` (countdown value or `""`).
+- The caption bar's voice icon is three `.voice-bar` spans: static, and animated (`bars`, staggered) only while
+  speaking.
+- The rep sparkles (`.s-rep`) twinkle while Mira is cheering.
 
 `live.device_prefs` (set from the phone's Settings, Plan 3 §6.5) is honoured on every `/ws/live` message: the
 caption bar is hidden when `device_prefs.captions === false` (`state.js` `view().captionsOn`), and
