@@ -130,7 +130,7 @@ def test_rejects_garbage_and_empty() -> None:
 
 def test_allow_list_matches_copilot_ro_grants() -> None:
     assert ALLOWED_TABLES == {"progress_v", "sessions", "reps", "form_events", "memory_events", "patients",
-                              "prescriptions"}
+                              "prescriptions", "hr_recovery", "rotation_sets", "tremor_daily"}
 
 
 # ---- review regressions (F4 review): bypasses found adversarially --------------------------------------------

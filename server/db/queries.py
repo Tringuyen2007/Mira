@@ -292,8 +292,15 @@ async def patient_export(db: Database, patient_id: str) -> dict[str, Any]:
                             "ORDER BY time", (patient_id,), timeout_s=10)
     frames = await db.fetchrow("SELECT count(*) AS n FROM pose_frames WHERE session_id = ANY(%s)", (ids,),
                                timeout_s=30) if ids else {"n": 0}
+    hr_recovery = await db.fetch(f"SELECT {HR_RECOVERY_COLUMNS} FROM hr_recovery WHERE patient_id = %s ORDER BY time",
+                                 (patient_id,), timeout_s=10)
+    rotation = await db.fetch(f"SELECT {ROTATION_SET_COLUMNS} FROM rotation_sets WHERE patient_id = %s "
+                              "ORDER BY time", (patient_id,), timeout_s=10)
+    tremor = await db.fetch(f"SELECT {TREMOR_COLUMNS} FROM tremor_daily WHERE patient_id = %s ORDER BY day",
+                            (patient_id,), timeout_s=10)
     return {"sessions": sessions, "reps": reps, "form_events": flags, "alerts": alerts, "memory_events": memory,
-            "pose_frames_count": int(frames["n"]) if frames else 0}
+            "pose_frames_count": int(frames["n"]) if frames else 0,
+            "hr_recovery": hr_recovery, "rotation_sets": rotation, "tremor_daily": tremor}
 
 
 async def ro_prescriptions(db: Database, patient_id: str, timeout_s: float = 1.5) -> list[dict[str, Any]]:
@@ -372,6 +379,67 @@ async def latest_highlights(db: Database, patient_id: str, limit: int = 3) -> li
     return out
 
 
+# ---- Apple Watch (migration 005) ------------------------------------------------------------------------------
+
+HR_RECOVERY_COLUMNS = "session_id, set_index, peak_bpm, bpm_60s, drop_bpm, time"
+ROTATION_SET_COLUMNS = "session_id, exercise_id, set_index, angles, best_deg, avg_deg, goal_deg, time"
+TREMOR_COLUMNS = "day, none_min, slight_min, mild_min, strong_min, unknown_min, dyskinesia, source"
+
+ME_WATCH_SQL = """
+    SELECT p.id, p.name, p.hr_limit, p.hr_limit_set_by, p.tremor_monitoring, p.device_prefs,
+           t.id AS therapist_id, t.name AS therapist_name, sb.name AS hr_limit_set_by_name
+    FROM patients p
+    LEFT JOIN therapists t ON t.id = p.therapist_id
+    LEFT JOIN therapists sb ON sb.id = p.hr_limit_set_by
+    WHERE p.id = %s"""
+
+
+async def me_watch_row(db: Database, patient_id: str) -> dict[str, Any] | None:
+    """What GET /me/watch needs about the patient, their therapist and who set the heart-rate limit."""
+    return await db.fetchrow(ME_WATCH_SQL, (patient_id,))
+
+
+async def therapist_name(db: Database, therapist_id: str) -> str | None:
+    row = await db.fetchrow("SELECT name FROM therapists WHERE id = %s", (therapist_id,))
+    return row["name"] if row else None
+
+
+async def sets_done_today(db: Database, patient_id: str) -> dict[str, int]:
+    """exercise_id → distinct (session, set) pairs with at least one rep, over today's sessions (UTC day)."""
+    rows = await db.fetch(
+        "SELECT s.exercise_id, count(DISTINCT r.session_id::text || ':' || r.set_no) AS done_sets "
+        "FROM sessions s JOIN reps r ON r.session_id = s.id "
+        "WHERE s.patient_id = %s AND r.set_no IS NOT NULL AND s.started_at >= date_trunc('day', now(), 'UTC') "
+        "GROUP BY s.exercise_id", (patient_id,))
+    return {r["exercise_id"]: int(r["done_sets"]) for r in rows}
+
+
+async def patient_hr_recovery(db: Database, patient_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    return await db.fetch(f"SELECT {HR_RECOVERY_COLUMNS} FROM hr_recovery WHERE patient_id = %s "
+                          "ORDER BY time DESC LIMIT %s", (patient_id, limit))
+
+
+async def patient_rotation_sets(db: Database, patient_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    return await db.fetch(f"SELECT {ROTATION_SET_COLUMNS} FROM rotation_sets WHERE patient_id = %s "
+                          "ORDER BY time DESC LIMIT %s", (patient_id, limit))
+
+
+async def patient_tremor_days(db: Database, patient_id: str, days: int = 14) -> list[dict[str, Any]]:
+    """The last `days` calendar days (today included), newest first."""
+    return await db.fetch(f"SELECT {TREMOR_COLUMNS} FROM tremor_daily WHERE patient_id = %s "
+                          "AND day > current_date - %s::int ORDER BY day DESC", (patient_id, days))
+
+
+async def session_hr_recovery(db: Database, session_id: str) -> list[dict[str, Any]]:
+    return await db.fetch(f"SELECT {HR_RECOVERY_COLUMNS} FROM hr_recovery WHERE session_id = %s "
+                          "ORDER BY set_index", (session_id,))
+
+
+async def session_rotation_sets(db: Database, session_id: str) -> list[dict[str, Any]]:
+    return await db.fetch(f"SELECT {ROTATION_SET_COLUMNS} FROM rotation_sets WHERE session_id = %s "
+                          "ORDER BY exercise_id, set_index", (session_id,))
+
+
 # ---- alerts ------------------------------------------------------------------------------------------------
 
 async def alert_steps(db: Database, open_only: bool = True, days: int = 30) -> list[dict[str, Any]]:
@@ -431,7 +499,7 @@ ROLES_FIX = ("re-apply server/db/roles.sql as the owner: make db-setup DSN=\"<ow
              "make db-local (local)")
 # Relations the agents and the Data Guard read as copilot_ro (roles.sql), checked by name.
 RO_TABLES = ("progress_v", "sessions", "reps", "form_events", "memory_events", "prescriptions", "pose_frames",
-             "daily_progress_archive", "data_checks")
+             "daily_progress_archive", "data_checks", "hr_recovery", "rotation_sets", "tremor_daily")
 
 
 async def copilot_ro_grant_problems(db: Database) -> list[str]:

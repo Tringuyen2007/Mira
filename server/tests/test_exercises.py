@@ -23,3 +23,22 @@ def test_live_state_uses_the_catalog() -> None:
     live = LiveState()
     live.on_session_start("Maya", "glute_bridge")
     assert live.exercise_name == exercises.display_name("glute_bridge")
+
+
+def test_watch_exercises() -> None:
+    assert exercises.WATCH_EXERCISES == {"forearm_rotation", "shoulder_rotation", "wrist_flexion"}
+    assert exercises.display_name("forearm_rotation") == "Forearm turns"
+    assert exercises.display_name("shoulder_rotation") == "Shoulder turns"
+    assert exercises.display_name("wrist_flexion") == "Wrist bends"
+    assert exercises.is_watch_exercise("forearm_rotation") and not exercises.is_watch_exercise("squat")
+    assert not exercises.is_watch_exercise(None)
+    assert exercises.describe("forearm_rotation")["target_key"] == "rotation_deg"
+    assert "watch" not in exercises.describe("forearm_rotation")  # describe() keeps its 5-key shape
+
+
+def test_rotation_goal() -> None:
+    assert exercises.rotation_goal_deg({"rotation_deg": 70}) == 70.0
+    assert exercises.rotation_goal_deg({}) == exercises.DEFAULT_ROTATION_GOAL_DEG == 80.0
+    assert exercises.rotation_goal_deg(None) == 80.0
+    for bad in (True, "80", 5, 500):
+        assert exercises.rotation_goal_deg({"rotation_deg": bad}) == 80.0

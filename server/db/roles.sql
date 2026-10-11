@@ -14,6 +14,7 @@ ALTER ROLE copilot_ro WITH LOGIN PASSWORD {{copilot_ro_password}};
 GRANT USAGE ON SCHEMA public TO copilot_ro;
 GRANT SELECT ON progress_v, sessions, reps, form_events, memory_events,
                 prescriptions TO copilot_ro;
+GRANT SELECT ON hr_recovery, rotation_sets, tremor_daily TO copilot_ro;   -- Apple Watch tables (migration 005)
 -- NOT alerts, agent_actions, ai_calls, notifications, therapists.
 -- patients column by column: the emergency contact (name, phone) never reaches the Copilot or Gemini. The
 -- Data Guard finds notification recipients through patients.therapist_id, which stays granted.
