@@ -24,6 +24,7 @@ _FALSE = {"0", "false", "no", "off", ""}
 SECRET_FIELDS = (
     "MIRA_API_TOKEN",
     "MIRA_DEVICE_TOKEN",
+    "LCD_LINK_KEY",
     "TIGER_DSN",
     "COPILOT_DSN",
     "GEMINI_API_KEY",
@@ -43,6 +44,7 @@ MIN_TOKEN_LEN = 24
 class Config:
     MIRA_API_TOKEN: str = ""
     MIRA_DEVICE_TOKEN: str = ""  # optional, least-privilege token for the LCD kiosk (/ws/live + /ws/events only)
+    LCD_LINK_KEY: str = ""  # optional secret for GET /lcd/<key>, a link that opens the kiosk already paired
     MIRA_SOURCE: str = "mock"
     ENGINE_MODE: str = "thread"
     MOCK_PATIENT_ID: str = "maya"
@@ -166,6 +168,20 @@ class Config:
             return f"MIRA_DEVICE_TOKEN is shorter than {MIN_TOKEN_LEN} characters"
         if token == self.MIRA_API_TOKEN:
             return "MIRA_DEVICE_TOKEN must differ from MIRA_API_TOKEN"
+        return None
+
+    def lcd_link_problem(self) -> str | None:
+        """Why LCD_LINK_KEY can't be used (None if unset or fine): long, and neither of the two tokens, since
+        the link hands out the device token to whoever knows it."""
+        key = self.LCD_LINK_KEY
+        if not key:
+            return None
+        if key == PLACEHOLDER_TOKEN:
+            return "LCD_LINK_KEY is still the .env.example placeholder"
+        if len(key) < MIN_TOKEN_LEN:
+            return f"LCD_LINK_KEY is shorter than {MIN_TOKEN_LEN} characters"
+        if key in (self.MIRA_API_TOKEN, self.MIRA_DEVICE_TOKEN):
+            return "LCD_LINK_KEY must differ from MIRA_API_TOKEN and MIRA_DEVICE_TOKEN"
         return None
 
 
