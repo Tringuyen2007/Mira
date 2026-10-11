@@ -107,6 +107,16 @@ command and the publish URL template and it starts/stops that process with each 
 `--whip-url https://45.76.255.253/media/mira/{session_id}/whip --whip-cmd "<publisher> {whip_url}"`.
 Without both flags the dashboard shows the 3D avatar only.
 
+### One-laptop demo (everything on the camera laptop)
+
+`tools/demo_local.sh` runs the whole stack on one machine: the Mira server (`MIRA_SOURCE=remote`, database on, calls
+log-only), MediaMTX if installed (`brew install mediamtx`), the publisher page server and the vision agent, all on
+localhost, and prints the dashboard, LCD and phone addresses on the LAN. It needs the repo `.env` (`TIGER_DSN`,
+`MIRA_API_TOKEN`). Start a session without the phone with `.venv/bin/python tools/demo_session.py start`
+(mints a code, pairs a CLI device, POSTs `/sessions`; prints the id and WHIP URL), `stop` ends it. When a session
+starts, the agent opens the Chrome publisher page with the token and URL filled in; press Publish and the dashboard
+camera tile fills. Ctrl-C stops everything. The Vultr box is not involved.
+
 ### Camera video next to the avatar (MediaMTX, WHIP in / WHEP out)
 
 The pose stream above never carries video. For the therapist dashboard's camera panel, the box runs MediaMTX and the
