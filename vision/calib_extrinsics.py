@@ -56,6 +56,31 @@ def save_problems(results: dict[str, tuple]) -> list[str]:
     return _need_both(results)
 
 
+GREY = (150, 150, 150)
+LEGEND_WIDTH = 66  # characters that fit the status panel
+
+
+def _short(reason: str) -> str:
+    reason = reason.replace(" (it needs to see at least 2 markers)", ": needs 2 markers")
+    return reason if len(reason) <= LEGEND_WIDTH - 14 else reason[:LEGEND_WIDTH - 17] + "..."
+
+
+def legend_lines(save_blockers: list[str], lock_blockers: list[str]) -> list[tuple[str, tuple]]:
+    """What each key does, when to press it, and whether it would work right now."""
+    save_state = ("ready", GREEN) if not save_blockers else ("not yet: " + _short(save_blockers[0]), ORANGE)
+    lock_state = ("ready", GREEN) if not lock_blockers else ("not yet: " + _short(lock_blockers[0]), ORANGE)
+    return [
+        ("KEYS", WHITE),
+        (f"s  save calibration  [{save_state[0]}]", save_state[1]),
+        ("   when both cameras see 2+ markers and their boxes are green", GREY),
+        ("   (orange zoom is fine). Then run: python -m vision.calib_refine", GREY),
+        (f"t  lock these camera spots (optional)  [{lock_state[0]}]", lock_state[1]),
+        ("   once the cameras are where you want them at this location;", GREY),
+        ("   next time the overlay guides you back to exactly these spots", GREY),
+        ("q  quit without saving", WHITE),
+    ]
+
+
 def _status_panel(lines: list[tuple[str, tuple]]) -> np.ndarray:
     img = np.full((TILE[1], TILE[0], 3), 32, np.uint8)
     for k, (text, color) in enumerate(lines):
@@ -167,7 +192,7 @@ def main() -> int:
                 status.append(("locked spots are from another setup: press t to lock these", ORANGE))
             elif not locked:
                 status.append(("no spots locked: press t to remember these spots", WHITE))
-            status += [("", WHITE), ("s save   t lock these spots   q quit", GREEN), note]
+            status += [("", WHITE)] + legend_lines(save_problems(results), lock_problems(results)) + [note]
             bottom = np.hstack([render_map(mat, map_cams, TILE), _status_panel(status)])
 
             if now - last_print > 1.0:
