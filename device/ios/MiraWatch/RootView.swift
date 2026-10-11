@@ -59,7 +59,19 @@ struct RootView: View {
         // 02 Ready & Stop (.ready / .holdingToStop live in ReadyPager)
         case .countdown(let n): CountdownView(count: n)
         case .stopped: StoppedView()
-        // 03 Live, 04 Rotation, 05 More — W6 / W7
+        // 03 Live
+        case .goodRep: GoodRepView()
+        case .fixForm: FixFormView()
+        case .setDone: SetDoneView()
+        case .recovery: RecoveryView()
+        case .breather: BreatherView()
+        // 04 Rotation (Arm Exercises normally lives in ReadyPager)
+        case .armExercises: ArmExercisesView()
+        case .startPosition: StartPositionView()
+        case .liveTurn: LiveTurnView()
+        case .elbowDrift: ElbowDriftView()
+        case .rotationSummary: RotationSummaryView()
+        // 05 More — W7
         default: PendingScreen(route: route)
         }
     }
@@ -96,7 +108,8 @@ struct ReadyPager: View {
     private func pageView(_ page: WatchRoute) -> some View {
         switch page {
         case .ready: ReadyView(holding: route == .holdingToStop)
-        // W6/W7: Arm Exercises, Tremor Today and Settings screens go here.
+        case .armExercises: ArmExercisesView()
+        // W7: Tremor Today and Settings screens go here.
         default: PendingScreen(route: page)
         }
     }

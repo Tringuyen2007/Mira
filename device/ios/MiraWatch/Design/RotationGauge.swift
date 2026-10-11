@@ -63,7 +63,8 @@ struct RotationGauge: View {
                 Text("Up")
             }
             .font(WatchTheme.inter(16)).foregroundStyle(WatchTheme.muted)
-            .padding(.horizontal, -14)
+            // Figma: "Down" at x 4 and "Up" ending at x 193 on the 208 canvas (gauge spans 20…188).
+            .padding(.leading, -16).padding(.trailing, -5)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Forearm turn")

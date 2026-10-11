@@ -24,19 +24,29 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
     private(set) var setup: WatchWire.Setup?
     private(set) var snapshot: WatchWire.LiveSnapshot?
     private(set) var summary: Summary?
-    /// Latest relayed caption (`cue.text` / `greeting.text` / `live.caption`); screens show it when prefs.captions.
+    /// Latest relayed caption (`cue.text` / `greeting.text` / `live.caption`), cleared `captionSeconds` after it
+    /// arrives. Live / Rotation screens show it (as `visibleCaption`) when prefs.captions is on.
     private(set) var caption: String?
+    @ObservationIgnored private var captionAt: Date?
+    static let captionSeconds: TimeInterval = 6
     /// The most recent heart rate measured on this watch (whole bpm); nil without samples ("Not now", simulator).
     private(set) var heartRate: Int?
     private(set) var heartRateStatus: String?
     private(set) var workoutActive = false
     /// Start Position stillness ring (0…1) while MotionService is in rotation mode.
     private(set) var stillness = 0.0
+    /// Live Turn: the latest zeroed forearm twist in degrees (10 Hz from MotionService); nil until zeroed.
+    private(set) var liveAngle: Double?
+    /// Live Turn: reps counted on the watch (`RotationRepMirror`) until the server's `rotation_rep` arrives.
+    private(set) var localRotationReps = 0
+    @ObservationIgnored private var repMirror: RotationRepMirror?
     /// Set when a button tap could not reach the iPhone.
     private(set) var sendError: String?
 
     let motion = MotionService()
     let heartRateSource = WorkoutHeartRate()
+    /// Server haptic patterns with the Taps strength (kept in sync with prefs on every reduce).
+    let haptics = HapticPlayer()
 
     @ObservationIgnored private var session: WCSession?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -59,6 +69,7 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         heartRateSource.onStateChange = { [weak self] in self?.heartRateStateChanged() }
         motion.onWrist = { [weak self] t, quat, accel, deg in
             self?.sendToPhone(.wrist(t: t, quat: quat, accel: accel, deg: deg))
+            self?.wristAngle(deg)
         }
         motion.onSyncWindow = { [weak self] w in
             self?.sendToPhone(.syncWindow(t0: w.t0, dtMs: w.dtMs, mags: w.mags))
@@ -137,20 +148,62 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         send(.heartRateAnswered)
     }
 
-    /// Plays a server haptic pattern with the patient's Taps strength (W6 moves this into `HapticPlayer`).
-    func playHaptic(_ pattern: String) {
-        let strength = TapStrength(rawValue: flow.state.prefs.taps) ?? .normal
-        for step in HapticPlan.steps(for: pattern, strength: strength) {
-            let type = Self.wkType(step.kind)
-            if step.delay <= 0 {
-                WKInterfaceDevice.current().play(type)
-            } else {
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: UInt64(step.delay * 1_000_000_000))
-                    WKInterfaceDevice.current().play(type)
-                }
-            }
-        }
+    /// Rotation 2 Start Position: the stillness ring is full → zero the heading here, mark the start position
+    /// held and tell the server the patient is ready (`ready` = start). Light click on zero. Once per hold.
+    func startPositionHeld() {
+        guard !flow.state.startZeroed else { return }
+        #if DEBUG
+        if isPreview { return }
+        #endif
+        motion.zeroHere()
+        send(.startPositionHeld)
+        resetRepMirror()
+        ready()   // plays the click
+    }
+
+    /// Live 5 Breather "End session": the same as completing hold-to-stop (button `stop`, stop haptic, Stopped).
+    func endSession() {
+        send(.holdCompleted)
+    }
+
+    /// The caption to show on Live / Rotation screens: nil when Settings → Captions is off.
+    var visibleCaption: String? {
+        guard flow.state.prefs.captions, let caption, !caption.isEmpty else { return nil }
+        return caption
+    }
+
+    /// Heart rate for the chips: the server's (snapshot / breather) reading, else this watch's own sample.
+    var displayHeartRate: Int? { flow.state.hr ?? heartRate }
+
+    /// Status-bar title on rotation screens: the first word of the exercise ("Forearm turns" → "Forearm"), so it
+    /// fits next to the system clock.
+    var rotationTitle: String {
+        let st = flow.state
+        let id = st.sessionActive ? (st.exerciseId ?? st.selectedExercise) : (st.selectedExercise ?? st.exerciseId)
+        let name = id.flatMap { id in st.plan.first { $0.id == id }?.name }
+            ?? (st.sessionActive ? snapshot?.exerciseName : nil) ?? ""
+        return name.split(separator: " ").first.map(String.init) ?? "Mira"
+    }
+
+    /// The plan row of the rotation exercise on screen, if known.
+    private var rotationPlanEntry: WatchFlowState.PlanEntry? {
+        let st = flow.state
+        let id = st.exerciseId ?? st.selectedExercise
+        return id.flatMap { id in st.plan.first { $0.id == id } }
+    }
+
+    /// Goal angle: the server's latest rep, else the plan's `goal_deg`, else 80°.
+    var rotationGoal: Double {
+        flow.state.rotationRep?.goal ?? flow.state.rotationSet?.goal ?? rotationPlanEntry?.goalDeg ?? 80
+    }
+
+    /// "REP n OF N": the rep in progress (completed + 1, capped at the target). Completed reps come from the
+    /// server's `rotation_rep` when it has sent one this set, else from the watch's own mirror.
+    var rotationRepProgress: (current: Int, target: Int) {
+        let st = flow.state
+        let target = st.rotationRep?.repsTarget ?? st.repsTarget ?? rotationPlanEntry?.reps ?? 10
+        let done = st.rotationRep?.rep ?? localRotationReps
+        return (min(done + 1, max(target, 1)), target)
     }
 
     var currentPrefs: WatchWire.WatchPrefs {
@@ -168,7 +221,23 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
 
     private func reduce(_ input: WatchFlowInput) {
         flow.reduce(input, now: now)
+        haptics.strength = TapStrength(rawValue: flow.state.prefs.taps) ?? .normal
+        if case .chooseExercise = input { resetRepMirror() }
         updateMotionMode()
+    }
+
+    /// A zeroed wrist sample: update the Live Turn angle and, on Live Turn, the local rep mirror.
+    private func wristAngle(_ deg: Double?) {
+        guard let deg else { return }
+        liveAngle = deg
+        guard route == .liveTurn else { return }
+        if repMirror == nil { repMirror = RotationRepMirror(goal: rotationGoal) }
+        if repMirror?.add(deg) != nil { localRotationReps += 1 }
+    }
+
+    private func resetRepMirror() {
+        repMirror = nil
+        localRotationReps = 0
     }
 
     // MARK: Outgoing
@@ -212,7 +281,7 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
             apply(s)
         case .haptic(let pattern):
             reduce(.haptic(pattern))
-            playHaptic(pattern)
+            haptics.play(pattern)
         case .summary(let formScore, let goodReps, let repsTotal):
             summary = Summary(formScore: formScore, goodReps: goodReps, repsTotal: repsTotal)
             stopWorkout()
@@ -233,6 +302,7 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
             if locked, !wasLocked { WKInterfaceDevice.current().play(.click) }   // light click on lock
         case .caption(let text):
             caption = text
+            captionAt = Date()
         case let .formCue(text, rep):
             reduce(.formCue(text: text, rep: rep))
         }
@@ -251,6 +321,7 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         let previousPhase = snapshot?.phase
         snapshot = new
         if new.phase != previousPhase { sendError = nil }
+        if new.phase == "active", previousPhase != "active" { resetRepMirror() }   // a new set: count from 0
         reduce(.snapshot(phase: new.phase, rep: new.rep, repsTarget: new.repsTarget, set: new.set,
                          setsTarget: new.setsTarget, goodReps: new.goodReps, countdown: new.countdown,
                          restRemaining: new.restRemaining, exerciseId: new.exerciseId,
@@ -297,6 +368,10 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
                 guard let self else { return }
                 self.now = Date().timeIntervalSince1970
                 self.reduce(.tick)
+                if let at = self.captionAt, Date().timeIntervalSince(at) >= Self.captionSeconds {
+                    self.caption = nil
+                    self.captionAt = nil
+                }
             }
         }
     }
@@ -315,7 +390,10 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         default:
             mode = .off
         }
-        if case .rotation = mode {} else if stillness != 0 { stillness = 0 }
+        if case .rotation = mode {} else {
+            if stillness != 0 { stillness = 0 }
+            if liveAngle != nil { liveAngle = nil }
+        }
         motion.setMode(mode)
     }
 
@@ -328,20 +406,6 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
     static func flowPlan(_ p: WatchWire.PlanItem) -> WatchFlowState.PlanEntry {
         WatchFlowState.PlanEntry(id: p.id, name: p.name, sets: p.sets, reps: p.reps, doneSets: p.doneSets,
                                  watch: p.watch, goalDeg: p.goalDeg)
-    }
-
-    static func wkType(_ kind: HapticKind) -> WKHapticType {
-        switch kind {
-        case .click: return .click
-        case .success: return .success
-        case .failure: return .failure
-        case .notification: return .notification
-        case .retry: return .retry
-        case .start: return .start
-        case .stop: return .stop
-        case .directionUp: return .directionUp
-        case .directionDown: return .directionDown
-        }
     }
 
     // MARK: WCSessionDelegate
@@ -396,6 +460,9 @@ extension WatchSessionModel {
         for message in scenario.messages { handle(message) }
         for input in scenario.inputs { reduce(input) }
         heartRate = scenario.heartRate
+        liveAngle = scenario.angle
+        localRotationReps = scenario.localRotationReps
+        if let text = scenario.caption { caption = text }
         previewHoldProgress = scenario.holdProgress
         stillness = scenario.stillness
         return true

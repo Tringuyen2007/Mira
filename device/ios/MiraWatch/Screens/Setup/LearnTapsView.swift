@@ -53,7 +53,7 @@ struct LearnTapsView: View {
         Task { @MainActor in
             for (i, row) in rows.enumerated() {
                 if i > 0 { try? await Task.sleep(for: .seconds(1)) }
-                model.playHaptic(row.pattern)
+                model.haptics.play(row.pattern)
             }
             try? await Task.sleep(for: .seconds(1))
             playing = false

@@ -31,7 +31,8 @@ struct WarningCard: View {
             }
         }
         .padding(13.5)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Fills the frame it is given (Figma's card is a fixed 184×124), content pinned to the top.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(WatchTheme.cardFill, in: RoundedRectangle(cornerRadius: WatchTheme.cornerRadius))
         .overlay(RoundedRectangle(cornerRadius: WatchTheme.cornerRadius).strokeBorder(WatchTheme.danger, lineWidth: 2.5))
         .accessibilityElement(children: .ignore)
