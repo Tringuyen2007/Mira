@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from vision import constraints as C
+
 FRAMES_NEEDED = 40
 FORGET_S = 5.0  # nobody tracked for this long: assume someone new and measure again
 
@@ -62,8 +64,8 @@ def two_bone_ik(root, target, pole, l1: float, l2: float, fallback_bend=None):
 
 
 class BodyRig:
-    def __init__(self, frames_needed: int = FRAMES_NEEDED, forget_s: float = FORGET_S):
-        self.frames_needed, self.forget_s = frames_needed, forget_s
+    def __init__(self, frames_needed: int = FRAMES_NEEDED, forget_s: float = FORGET_S, constraints: bool = True):
+        self.frames_needed, self.forget_s, self.constraints = frames_needed, forget_s, constraints
         self.reset()
 
     def reset(self) -> None:
@@ -74,12 +76,17 @@ class BodyRig:
         self._last_t: float | None = None
         self._last_out: np.ndarray | None = None
         self._held: dict[str, np.ndarray] = {}  # last good offsets for joints that go missing
+        self._foot_yaw: dict[str, float] = {}
+        self._locked_yaw: dict[str, float | None] = {"l": None, "r": None}
+        self._prev_pose_t: float | None = None
+        self._body_yaw: float | None = None
 
     @property
     def progress(self) -> float:
         return 1.0 if self.lengths is not None else min(self._frames / self.frames_needed, 1.0)
 
-    def update(self, t: float, joints, tracking: str) -> np.ndarray | None:
+    def update(self, t: float, joints, tracking: str, conf=None, feet_locked: dict[str, bool] | None = None
+               ) -> np.ndarray | None:
         """Rigged joints (33, 3) for this frame; the raw joints while measuring; None without a body."""
         if self._last_t is not None and t == self._last_t:  # the same frame drawn again
             return self._last_out
@@ -95,9 +102,14 @@ class BodyRig:
         if self.lengths is None:  # measure only from two-camera frames; pose in single-camera mode too
             if tracking == "3d":
                 self._measure(J)
-            self._last_out = J.copy()
-            return self._last_out
-        self._last_out = self._pose(J)
+            if self.lengths is None:
+                self._last_out = J.copy()
+                return self._last_out
+        if self.constraints:
+            self._last_out = self._pose_constrained(J, conf, t, feet_locked or {})
+        else:
+            self._last_out = self._pose(J)
+        self._prev_pose_t = t
         return self._last_out
 
     def _measure(self, J: np.ndarray) -> None:
@@ -120,7 +132,8 @@ class BodyRig:
             return self._held[key]
         return self._held.get(key)
 
-    def _pose(self, J: np.ndarray) -> np.ndarray | None:
+    def _pose_trunk(self, J: np.ndarray) -> np.ndarray | None:
+        """Hips, spine, shoulders and head at the measured lengths (shared by both posing paths)."""
         L = self.lengths
         if not _ok(J[23], J[24]):
             return None
@@ -143,7 +156,14 @@ class BodyRig:
             P[HEAD] = J[HEAD] + (sh_mid + neck * L["neck"] - ears)
         elif tracked_sh is not None:
             P[HEAD] = J[HEAD] + (sh_mid - tracked_sh)
+        return P
 
+    def _pose(self, J: np.ndarray) -> np.ndarray | None:
+        """Fixed lengths, limbs by plain two-bone IK, no anatomical rules (constraints=False)."""
+        P = self._pose_trunk(J)
+        if P is None:
+            return None
+        L = self.lengths
         for side, s in SIDES.items():
             for root, mid, end, l1, l2 in ((s["shoulder"], s["elbow"], s["wrist"], "upper_arm", "forearm"),
                                            (s["hip"], s["knee"], s["ankle"], "thigh", "shin")):
@@ -168,3 +188,104 @@ class BodyRig:
                     P[s["heel"]] = P[s["ankle"]] + to_heel * L["heel"]
                     P[s["toe"]] = P[s["heel"]] + to_toe * L["foot"]
         return P
+
+    def _target(self, J, conf, key: str, end: int, root_pos, hang) -> np.ndarray:
+        """Where a limb end should go: the detection, blended toward the predicted position (last
+        pose carried with its parent) as confidence drops; the prediction when the detection is missing."""
+        held = self._held.get(key)
+        pred = root_pos + (held if held is not None else hang)
+        if not _ok(J[end]):
+            return pred
+        c = 1.0 if conf is None or not np.isfinite(conf[end]) else float(conf[end])
+        w = float(np.clip((c - 0.3) / 0.5, 0.0, 1.0)) if held is not None else 1.0
+        return w * J[end] + (1 - w) * pred
+
+    def _pose_constrained(self, J: np.ndarray, conf, t: float, feet_locked: dict) -> np.ndarray | None:
+        """_pose plus the anatomical rules in vision.constraints."""
+        P = self._pose_trunk(J)
+        if P is None:
+            return None
+        L = self.lengths
+        hip_mid = (P[23] + P[24]) / 2
+        spine = self._held["spine"]
+        pelvis = C.body_frame(hip_mid, P[23] - P[24], spine)
+        chest = C.body_frame(hip_mid, P[11] - P[12], spine)
+        if pelvis is None or chest is None:
+            return self._pose(J)
+        dt = (t - self._prev_pose_t) if self._prev_pose_t is not None else 1 / 30
+        raw_yaw = float(np.arctan2(pelvis.fwd[0], pelvis.fwd[2]))
+        self._body_yaw = C.smooth_angle(self._body_yaw, raw_yaw, C.BODY_YAW_SMOOTH_DEG, C.BODY_YAW_MIN_GAIN)
+        floor_fwd = np.array([np.sin(self._body_yaw), 0.0, np.cos(self._body_yaw)])  # smoothed body facing
+        for side, s in SIDES.items():
+            sign = 1.0 if side == "l" else -1.0
+            # legs: knee bends forward only, at most FLEX_MAX_DEG; thigh not far behind the body
+            hip = P[s["hip"]]
+            l1, l2 = L["thigh"], L["shin"]
+            target = self._target(J, conf, f"{side}{s['ankle']}", s["ankle"], hip, np.array([0.0, -(l1 + l2), 0.0]))
+            target = self._min_reach(hip, target, l1, l2)
+            pole = C.hinge_pole(hip, target, J[s["knee"]] if _ok(J[s["knee"]]) else None, pelvis.fwd)
+            knee, ankle = two_bone_ik(hip, target, pole, l1, l2)
+            thigh = C.limit_thigh(C.unit(knee - hip), pelvis)
+            if not np.allclose(thigh, C.unit(knee - hip)):
+                knee = hip + thigh * l1
+                ankle = knee + C.unit(target - knee) * l2
+            self._held[f"{side}{s['ankle']}"] = ankle - hip
+            P[s["knee"]], P[s["ankle"]] = knee, ankle
+            # arms: elbow bends one way (points back/out), never inside the torso
+            sh = P[s["shoulder"]]
+            l1, l2 = L["upper_arm"], L["forearm"]
+            target = self._target(J, conf, f"{side}{s['wrist']}", s["wrist"], sh, np.array([0.0, -(l1 + l2), 0.0]))
+            target = self._min_reach(sh, target, l1, l2)
+            allowed = C.unit(sign * chest.left - chest.fwd)
+            pole = C.hinge_pole(sh, target, J[s["elbow"]] if _ok(J[s["elbow"]]) else None, allowed)
+            elbow, wrist = two_bone_ik(sh, target, pole, l1, l2)
+            length = float(np.linalg.norm((P[11] + P[12]) / 2 - hip_mid))
+            hw = L["shoulder_width"] / 2
+            for _ in range(3):
+                e2, moved_e = C.push_out_of_torso(elbow, chest, hw, length, sign)
+                w2, moved_w = C.push_out_of_torso(wrist, chest, hw, length, sign)
+                if not (moved_e or moved_w):
+                    break
+                elbow, wrist = two_bone_ik(sh, w2 if moved_w else wrist, e2 if moved_e else elbow, l1, l2)
+            if C.push_out_of_torso(elbow, chest, hw, length, sign)[1]:  # still in: swing the elbow out sideways
+                side_pole = sh + sign * chest.left - 0.3 * chest.fwd
+                elbow, wrist = two_bone_ik(sh, wrist, side_pole, l1, l2)
+                w2, moved_w = C.push_out_of_torso(wrist, chest, hw, length, sign)
+                if moved_w:
+                    elbow, wrist = two_bone_ik(sh, w2, side_pole, l1, l2)
+            self._held[f"{side}{s['wrist']}"] = wrist - sh
+            P[s["elbow"]], P[s["wrist"]] = elbow, wrist
+            for k in s["hand"]:
+                off = self._hold(f"{k}", J[k] - J[s["wrist"]] if _ok(J[k], J[s["wrist"]]) else None)
+                if off is not None:
+                    P[k] = wrist + off
+            # feet: point within FOOT_YAW_LIMIT_DEG of the body's forward, turn at a capped rate,
+            # lie flat near the floor, keep their yaw while anchored
+            if "heel" in L and "foot" in L:
+                heel_j, toe_j = s["heel"], s["toe"]
+                tracked = C.unit(J[toe_j] - J[heel_j]) if _ok(J[toe_j], J[heel_j]) else None
+                confident = conf is None or (np.isfinite(conf[[heel_j, toe_j]]).all() and min(conf[heel_j], conf[toe_j]) >= 0.5)
+                locked = bool(feet_locked.get(side))
+                if locked and self._locked_yaw[side] is None:
+                    self._locked_yaw[side] = self._foot_yaw.get(side)
+                elif not locked:
+                    self._locked_yaw[side] = None
+                yaw = C.foot_yaw(tracked, floor_fwd, self._foot_yaw.get(side), dt, self._locked_yaw[side], confident)
+                self._foot_yaw[side] = yaw
+                flat = locked or P[s["ankle"]][1] < 0.08 + C.FLAT_HEIGHT_M
+                pitch = C.foot_pitch(tracked, flat)
+                fdir = np.array([np.sin(yaw) * np.cos(pitch), np.sin(pitch), np.cos(yaw) * np.cos(pitch)])
+                flat_dir = np.array([np.sin(yaw), 0.0, np.cos(yaw)])
+                heel = ankle + C.unit(-0.7 * flat_dir + np.array([0.0, -0.7, 0.0])) * L["heel"]
+                P[heel_j], P[toe_j] = heel, heel + fdir * L["foot"]
+        return P
+
+    @staticmethod
+    def _min_reach(root, target, l1, l2) -> np.ndarray:
+        d = target - root
+        n = float(np.linalg.norm(d))
+        mn = C.min_reach(l1, l2)
+        if n < mn:
+            u = C.unit(d) if n > 1e-9 else np.array([0.0, -1.0, 0.0])
+            return root + u * mn
+        return target

@@ -134,3 +134,66 @@ def test_single_camera_frames_are_posed_but_not_measured():
     _measure(rig, X, t0=DT)
     P = rig.update(AFTER + DT, X + [0.0, 0.0, 0.01], "single_cam_B")
     assert P is not None and abs(_length(P, 25, 27) - rig.lengths["shin"]) < 1e-9
+
+
+def test_the_frame_that_completes_measuring_is_already_rigged():
+    rng = np.random.default_rng(3)
+    X = standing_skeleton()
+    rig = BodyRig()
+    out = None
+    for k in range(FRAMES_NEEDED):
+        J = X + rng.normal(0, 0.01, X.shape)
+        out = rig.update(k * DT, J, "3d")
+    assert rig.lengths is not None
+    assert abs(_length(out, 25, 27) - rig.lengths["shin"]) < 1e-9  # not the raw, wobbly frame
+
+
+def _rigged(rig, X, J):
+    _measure(rig, X)
+    return rig.update(AFTER, J, "3d")
+
+
+def test_constrained_knee_never_bends_backwards():
+    X = standing_skeleton()
+    J = X.copy()
+    J[23:25, 1] -= 0.15  # slight squat
+    J[25:27, 2] -= 0.12  # but the detected knees point backwards
+    P = _rigged(BodyRig(), X, J)
+    for hip, knee, ankle in ((23, 25, 27), (24, 26, 28)):
+        d = (P[ankle] - P[hip]) / np.linalg.norm(P[ankle] - P[hip])
+        off = (P[knee] - P[hip]) - ((P[knee] - P[hip]) @ d) * d
+        assert off[2] > 0  # knee in front of the hip-ankle line
+    plain = _rigged(BodyRig(constraints=False), X, J)
+    assert plain[25, 2] < P[25, 2]  # the plain rig follows the backwards knee
+
+
+def test_constrained_arm_is_kept_out_of_the_torso():
+    from vision.avatar_eval import inside_torso
+
+    X = standing_skeleton()
+    J = X.copy()
+    J[15] = (X[11] + X[23]) / 2 * [0.2, 1.0, 1.0]  # left wrist detected inside the belly
+    J[13] = (J[11] + J[15]) / 2 + [0.0, 0.0, -0.02]
+    rig = BodyRig()
+    P = _rigged(rig, X, J)
+    assert not inside_torso(P, P[15]) and not inside_torso(P, P[13])
+    assert abs(_length(P, 11, 13) - rig.lengths["upper_arm"]) < 1e-9
+    assert abs(_length(P, 13, 15) - rig.lengths["forearm"]) < 1e-9
+
+
+def test_constrained_feet_point_forward_and_stay_flat():
+    X = standing_skeleton()
+    J = X.copy()
+    J[31] = J[29] + [0.16, 0.0, 0.0]  # left toe detected pointing straight out sideways (90°)
+    P = _rigged(BodyRig(), X, J)
+    v = P[31] - P[29]
+    yaw = np.degrees(np.arctan2(v[0], v[2]))
+    assert yaw <= 35 + 1e-6 and abs(v[1]) < 1e-9  # within toe-out limit, flat on the floor
+
+
+def test_constrained_rig_follows_confident_tracking_closely():
+    X = standing_skeleton()
+    J = X.copy()
+    J[15] = X[15] + [0.05, 0.25, 0.25]  # left hand raised forward, reachable
+    P = _rigged(BodyRig(), X, J)
+    assert np.linalg.norm(P[15] - J[15]) < 0.02
