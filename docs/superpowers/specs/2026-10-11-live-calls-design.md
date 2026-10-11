@@ -78,8 +78,9 @@ never printed.
 within the hour), `retell_llm_dynamic_variables` containing the fixed test opening ("This is a test of Mira's
 alert system for Maya. No action is needed."), no watch, no live updates. In `log_only` mode it logs the same
 warning the simulator uses and returns a `sim_test_…` id. `POST /me/test-alert` keeps its existing gate
-(`CALLS_DISABLED=0 and ALLOW_TEST_CALLS=1 and not locked_demo and contact phone`). The demo phone paired with the
-reusable code is `locked_demo`, so the public demo cannot dial repeatedly; the operator's dashboard token can.
+(`CALLS_DISABLED=0 and ALLOW_TEST_CALLS=1 and not locked_demo and contact phone`). A phone paired with the reusable demo
+code may dial unless the server sets `PAIRING_REUSABLE_UPDATES_PROFILE=0` (`locked_demo`), which the public box
+should once the demo phone has paired; the ledger also allows one test call per contact per hour.
 Tests: `test_retell_client.py` covers both modes; `test_care_api.py` adds the `called: true` case with a fake
 client, and keeps the disabled case.
 

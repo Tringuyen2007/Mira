@@ -187,3 +187,71 @@ def test_per_key_limiter_prunes_and_windows(monkeypatch: pytest.MonkeyPatch) -> 
     now[0] += 61
     assert limiter.allow("a")
     assert "b" not in limiter._hits  # stale keys are pruned
+
+
+# ---- /me/test-alert with calls on -------------------------------------------------------------------------------
+
+@pytest.fixture
+def live_client(make_client: Callable[..., TestClient], dsn: str) -> TestClient:
+    """Calls on, Retell configured, the SDK client replaced by FakeCalls (records create_phone_call)."""
+    from types import SimpleNamespace
+
+    from server.state import get_state
+    from server.tests.test_retell_client import FakeCalls
+
+    security.invalidate_token_cache()
+    client = make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), CALLS_DISABLED="0", ALLOW_TEST_CALLS="1",
+                         RETELL_API_KEY="key_test_not_real_0123456789", RETELL_FROM_NUMBER="+15550100999",
+                         RETELL_AGENT_ID="agent_test")
+    notifier = get_state().notifier
+    assert notifier is not None and notifier.mode == "live"
+    notifier._client_obj = SimpleNamespace(call=FakeCalls({}))
+    return client
+
+
+def _created_calls(client: TestClient) -> list[dict]:
+    from server.state import get_state
+
+    return get_state().notifier._client_obj.call.created
+
+
+def test_test_alert_calls_the_emergency_contact_for_a_phone_paired_with_a_single_use_code(
+        live_client: TestClient) -> None:
+    code = live_client.post("/patients/maya/pairing-code", headers=AUTH).json()["code"]
+    r = live_client.post("/pair", json={"code": code, "profile": PROFILE, "emergency_contact": CONTACT})
+    assert r.status_code == 200, r.text
+    phone = {"Authorization": f"Bearer {r.json()['token']}"}
+
+    r = live_client.post("/me/test-alert", headers=phone)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"logged": True, "called": True, "note": "Calling your emergency contact now."}
+    created = _created_calls(live_client)
+    assert len(created) == 1 and created[0]["to_number"] == CONTACT["phone"]
+    assert created[0]["metadata"]["role"] == "test"
+    assert created[0]["retell_llm_dynamic_variables"]["contact_name"] == "Eric"
+    assert created[0]["retell_llm_dynamic_variables"]["patient_first_name"] == "Maya"
+
+    # A second press in the same hour logs the alert again but does not place a second call.
+    r = live_client.post("/me/test-alert", headers=phone)
+    assert r.status_code == 200 and r.json()["called"] is False
+    assert len(_created_calls(live_client)) == 1
+
+
+def test_test_alert_does_not_call_for_a_locked_demo_phone(make_client: Callable[..., TestClient], dsn: str) -> None:
+    """PAIRING_REUSABLE_UPDATES_PROFILE=0 (the public box once the demo phone has paired): a phone that paired
+    with the reusable demo code may not spend a call, even with calls on."""
+    from types import SimpleNamespace
+
+    from server.state import get_state
+    from server.tests.test_retell_client import FakeCalls
+
+    security.invalidate_token_cache()
+    client = make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), CALLS_DISABLED="0", ALLOW_TEST_CALLS="1",
+                         RETELL_API_KEY="key_test_not_real_0123456789", RETELL_FROM_NUMBER="+15550100999",
+                         RETELL_AGENT_ID="agent_test", PAIRING_REUSABLE_UPDATES_PROFILE="0")
+    get_state().notifier._client_obj = SimpleNamespace(call=FakeCalls({}))
+    r = client.post("/pair", json={"code": "K7P4M2", "profile": PROFILE, "emergency_contact": CONTACT})
+    assert r.status_code == 200, r.text
+    r = client.post("/me/test-alert", headers={"Authorization": f"Bearer {r.json()['token']}"})
+    assert r.status_code == 200 and r.json()["called"] is False
+    assert _created_calls(client) == []

@@ -160,7 +160,11 @@ async def test_alert(principal: security.Principal = Depends(security.require_pr
     test_call = getattr(notifier, "test_call", None) if notifier is not None else None
     may_call = not cfg.CALLS_DISABLED and cfg.ALLOW_TEST_CALLS and not principal.locked_demo
     if may_call and test_call is not None and me_row["emergency_contact_phone"]:
-        await test_call(me_row["emergency_contact_phone"])
-        called = True
-        note = "Calling your emergency contact now."
+        call_id = await test_call(me_row["emergency_contact_phone"], patient_first_name=_first_name(me_row["name"]),
+                                  contact_name=me_row["emergency_contact_name"])
+        called = call_id is not None
+        note = ("Calling your emergency contact now." if called
+                else "Test alert logged. A test call was not placed (one per hour, or the call service refused).")
+    elif may_call and test_call is not None:
+        note = "Test alert logged. Add an emergency contact to test the call."
     return {"logged": True, "called": called, "note": note}
