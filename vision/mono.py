@@ -11,7 +11,7 @@ import numpy as np
 
 from vision.config import CameraConfig
 from vision.frames import world_to_mat
-from vision.select import floor_position
+from vision.select import floor_feet
 from vision.types import LEFT_HIP, RIGHT_HIP, PoseResult
 
 FEET = [27, 28, 29, 30, 31, 32]
@@ -35,16 +35,23 @@ def mono_joints(pose: PoseResult, cam: CameraConfig, scale: float = 1.0, last_xz
     if body is None:
         return None
     body = body * scale
-    feet_xz = floor_position(pose, cam)
-    if feet_xz is None:  # holding: last_xz is the ankle midpoint of the last placed body
+    placed = floor_feet(pose, cam)
+    if placed is None:  # holding: last_xz is the ankle midpoint of the last placed body
         if last_xz is None:
             return None
         feet_xz, used = np.asarray(last_xz, float), [27, 28]
     else:
-        used = [k for k in (27, 28, 29, 30) if pose.vis[k] >= 0.5] or [27, 28]
-    body_feet_xz = body[used][:, [0, 2]].mean(axis=0)
+        feet_xz, used = placed  # aligned by the same foot joints that placed it (one foot in a lunge)
+    body_feet_xz = _side_mean(body, used)
     off_xz = feet_xz - body_feet_xz
     return body + np.array([off_xz[0], -np.min(body[FEET, 1]), off_xz[1]])
+
+
+def _side_mean(body: np.ndarray, used: list[int]) -> np.ndarray:
+    """(x, z) of the body's foot joints `used`, combined as floor_feet combines their floor hits: the median
+    within each foot, the mean of the two feet."""
+    sides = [[j for j in side if j in used] for side in ((27, 29), (28, 30))]
+    return np.mean([np.median(body[side][:, [0, 2]], axis=0) for side in sides if side], axis=0)
 
 
 def stature(shape_rel: np.ndarray) -> float:

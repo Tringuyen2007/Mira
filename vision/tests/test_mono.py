@@ -122,3 +122,33 @@ def test_one_camera_body_scale_is_the_same_after_a_reset():
     (s1, h1), (s2, h2) = sessions
     assert abs(s2 / s1 - 1) < 0.01
     assert abs(h2 / h1 - 1) < 0.01
+
+
+def _lunge():
+    """Left foot 0.7 m in front of the right (towards +z), both planted."""
+    X = standing_skeleton()
+    X[[25, 27, 29, 31], 2] += [0.175, 0.35, 0.35, 0.35]
+    X[[26, 28, 30, 32], 2] -= [0.175, 0.35, 0.35, 0.35]
+    return X
+
+
+def test_mono_joints_in_a_lunge_stand_on_the_foot_that_placed_them():
+    cam = _cam_b()
+    X = _lunge() + [0.1, 0.0, 0.2]
+    J = mono_joints(pose_from_points(cam, X), cam)
+    # the cameras sees the feet 0.7 m apart, so only the one nearer the camera (left, in front) places the body
+    assert np.linalg.norm(J[27, [0, 2]] - X[27, [0, 2]]) < 0.03
+    hip = lambda P: (P[23] + P[24]) / 2
+    assert np.linalg.norm(hip(J)[[0, 2]] - hip(X)[[0, 2]]) < 0.05
+
+
+def test_floor_feet_says_which_joints_placed_the_person():
+    from vision.select import floor_feet, floor_position
+
+    cam = _cam_b()
+    p = pose_from_points(cam, _lunge())
+    xz, used = floor_feet(p, cam)
+    assert sorted(used) == [27, 29]
+    np.testing.assert_allclose(xz, floor_position(p, cam))
+    p = pose_from_points(cam, standing_skeleton())
+    assert sorted(floor_feet(p, cam)[1]) == [27, 28, 29, 30]  # both planted: both feet

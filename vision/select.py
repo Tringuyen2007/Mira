@@ -47,8 +47,9 @@ def mat_distance(mat: MatConfig, xz) -> float:
     return float(np.hypot(dx, dz))
 
 
-def floor_position(person: PoseResult, cam: CameraConfig) -> np.ndarray | None:
-    """(x, z) where the person stands, from one camera: rays through the visible feet meet the floor."""
+def floor_feet(person: PoseResult, cam: CameraConfig) -> tuple[np.ndarray, list[int]] | None:
+    """(x, z) where the person stands, from one camera, and the foot joints that placed it: rays through
+    the visible feet meet the floor."""
     if not person.detected:
         return None
     idx = [j for j in FOOT_HEIGHTS if person.vis[j] >= MIN_VIS]
@@ -66,11 +67,20 @@ def floor_position(person: PoseResult, cam: CameraConfig) -> np.ndarray | None:
         return None
     # each foot on its own: a lifted foot's ray meets the floor far behind it, so trust the foot nearer the
     # camera; average the two when they agree (both planted)
-    feet = [np.median([hits[j] for j in side if j in hits], axis=0) for side in ((27, 29), (28, 30))
-            if any(j in hits for j in side)]
-    if len(feet) == 2 and np.linalg.norm(feet[0] - feet[1]) < FEET_AGREE_M:
-        return (feet[0] + feet[1]) / 2
-    return min(feet, key=lambda f: np.linalg.norm(f - c[[0, 2]]))
+    feet = []
+    for side in ((27, 29), (28, 30)):
+        used = [j for j in side if j in hits]
+        if used:
+            feet.append((np.median([hits[j] for j in used], axis=0), used))
+    if len(feet) == 2 and np.linalg.norm(feet[0][0] - feet[1][0]) < FEET_AGREE_M:
+        return (feet[0][0] + feet[1][0]) / 2, feet[0][1] + feet[1][1]
+    return min(feet, key=lambda f: np.linalg.norm(f[0] - c[[0, 2]]))
+
+
+def floor_position(person: PoseResult, cam: CameraConfig) -> np.ndarray | None:
+    """(x, z) where the person stands, from one camera (see floor_feet)."""
+    r = floor_feet(person, cam)
+    return None if r is None else r[0]
 
 
 def plausible_height(person: PoseResult, cam: CameraConfig, xz) -> bool:
