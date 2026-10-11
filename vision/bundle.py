@@ -16,6 +16,7 @@ from scipy.sparse import coo_matrix
 
 from vision.config import CameraConfig, MatConfig
 from vision.frames import cam_center, rotation_angle_deg
+from vision.markers import MEASURED_FOCAL_STD
 from vision.triangulate import triangulate_points
 
 BA_JOINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
@@ -206,8 +207,15 @@ def refine_extrinsics(cams: dict[str, CameraConfig], mat: MatConfig, pairs, mark
 
     body0, mark0, poses0 = pieces(x0)
     sparsity = _sparsity(n_pts, {n: 2 * len(m[0]) for n, m in markers.items()})
+    # a zoom already measured well (e.g. refined before) is held: a webcam can't zoom, and freeing it lets
+    # "zoom in + move back" fit the body almost as well (the cameras then run away by metres)
+    lower, upper = np.full(len(x0), -np.inf), np.full(len(x0), np.inf)
+    for k, n in enumerate(NAMES):
+        zs = cams[n].zoom_std
+        if zs is not None and zs <= MEASURED_FOCAL_STD:
+            lower[k * N_CAM + 6], upper[k * N_CAM + 6] = 1.0 - 1e-9, 1.0 + 1e-9
     result = least_squares(residuals, x0, jac_sparsity=sparsity, loss="soft_l1", f_scale=2.0,
-                           x_scale="jac", method="trf", max_nfev=200)
+                           x_scale="jac", method="trf", max_nfev=200, bounds=(lower, upper))
     body1, mark1, poses1 = pieces(result.x)
 
     body_before = _rms(np.concatenate([body0["A"], body0["B"]]))

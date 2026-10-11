@@ -103,3 +103,14 @@ def test_focal_guard():
     assert evaluate_guards(5.0, 2.0, {}, {}, {}, {}, {"A": 1.10}) == []
     bad = evaluate_guards(5.0, 2.0, {}, {}, {}, {}, {"A": 1.20})
     assert len(bad) == 1 and "focal" in bad[0]
+
+
+def test_a_measured_zoom_is_kept_fixed():
+    truth, pairs, rng = _scene()
+    start = {n: _perturbed(c, rng, 0.05, 1.5) for n, c in truth.items()}
+    start["A"] = replace(start["A"], zoom_std=0.02)  # A's zoom was refined earlier (and is right)
+    start["B"] = replace(start["B"], K=_with_focal(truth["B"].K, 0.95))  # B's zoom never measured: 5% off
+    report = refine_extrinsics(start, MAT, pairs)
+    assert report.ok, report.reasons
+    assert abs(report.focal_after["A"] - start["A"].K[0, 0]) < 1e-6  # a webcam's zoom doesn't change
+    assert abs(report.focal_after["B"] / truth["B"].K[0, 0] - 1) < 0.02  # B is still refined
