@@ -223,3 +223,15 @@ CREATE TABLE IF NOT EXISTS session_analyses (
   source           text NOT NULL,       -- ai | template
   model            text
 );
+
+-- Plan 3 (2026-10-11): two-way messages. Mirrors db/migrations/003_messages.sql.
+CREATE TABLE IF NOT EXISTS messages (
+  id          bigserial PRIMARY KEY,
+  patient_id  text NOT NULL REFERENCES patients(id),
+  sender      text NOT NULL CHECK (sender IN ('patient','therapist','mira')),
+  kind        text NOT NULL DEFAULT 'message' CHECK (kind IN ('message','note','visit_highlight')),
+  body        text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  read_at     timestamptz
+);
+CREATE INDEX IF NOT EXISTS messages_patient_id_idx ON messages (patient_id, id);

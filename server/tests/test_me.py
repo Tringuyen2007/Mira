@@ -82,10 +82,12 @@ def test_export_and_delete(client: TestClient, phone: dict[str, str], dsn: str) 
 
     with psycopg.connect(dsn) as conn:
         simulated_before = conn.execute("SELECT count(*) FROM sessions WHERE patient_id='maya' AND simulated").fetchone()[0]
+        conn.execute("INSERT INTO messages (patient_id, sender, body) VALUES ('maya', 'patient', 'hi there')")
     r = client.delete("/me", headers=phone)
     assert r.status_code == 200 and r.json()["deleted"] is True
     with psycopg.connect(dsn) as conn:
         assert conn.execute("SELECT count(*) FROM sessions WHERE patient_id='maya' AND NOT simulated").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM messages WHERE patient_id='maya'").fetchone()[0] == 0
         # labeled demo history is not the patient's own data and survives
         assert conn.execute("SELECT count(*) FROM sessions WHERE patient_id='maya' AND simulated").fetchone()[0] == simulated_before
         row = conn.execute("SELECT emergency_contact_name, height_cm FROM patients WHERE id='maya'").fetchone()

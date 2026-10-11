@@ -87,6 +87,7 @@ class Config:
     RETELL_BACKUP_AGENT_VERSION: int | None = None
     CALLS_DISABLED: bool = True
     SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
+    ALLOW_TEST_CALLS: bool = False  # POST /me/test-alert may place a real call (only when CALLS_DISABLED is off too)
 
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None

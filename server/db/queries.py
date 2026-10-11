@@ -309,6 +309,59 @@ async def pending_proposal_ids_named_in(db: Database, text: str) -> list[int]:
     return [int(r["id"]) for r in rows]
 
 
+# ---- messages, notes, highlights, milestones (Plan 3 §6.4) -------------------------------------------------
+
+MESSAGE_COLUMNS = "id, sender, kind, body, created_at, read_at"
+HIGHLIGHT_MEMORY_KINDS = ("insight", "depth_gain", "asymmetry_worse", "compensation", "pain", "missed_days")
+
+
+async def list_messages(db: Database, patient_id: str, kind: str = "message", since_id: int | None = None,
+                        limit: int = 100) -> list[dict[str, Any]]:
+    """Both directions of the thread (patient/therapist/mira), ascending by id."""
+    return await db.fetch(
+        f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE patient_id = %(pid)s AND kind = %(kind)s "
+        "AND (%(since)s::bigint IS NULL OR id > %(since)s) ORDER BY id ASC LIMIT %(limit)s",
+        {"pid": patient_id, "kind": kind, "since": since_id, "limit": limit})
+
+
+async def care_notes(db: Database, patient_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Therapist notes (messages kind='note'), newest first."""
+    return await db.fetch(f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE patient_id = %s AND kind = 'note' "
+                         "ORDER BY id DESC LIMIT %s", (patient_id, limit))
+
+
+async def unread_messages(db: Database, patient_id: str) -> int:
+    """Unread messages sent to the patient (therapist/mira side) in the two-way thread."""
+    row = await db.fetchrow("SELECT count(*) AS n FROM messages WHERE patient_id = %s AND kind = 'message' "
+                            "AND sender != 'patient' AND read_at IS NULL", (patient_id,))
+    return int(row["n"]) if row else 0
+
+
+async def patient_milestones(db: Database, patient_id: str) -> list[dict[str, Any]]:
+    """memory_events kind='milestone' for this patient, newest first."""
+    return await db.fetch("SELECT id, time, message, evidence FROM memory_events WHERE patient_id = %s "
+                         "AND kind = 'milestone' ORDER BY time DESC", (patient_id,))
+
+
+async def latest_highlights(db: Database, patient_id: str, limit: int = 3) -> list[dict[str, Any]]:
+    """The most recent session_analyses.highlights for a non-simulated session of this patient, plus the most
+    recent `limit` memory_events of the AI-draft kinds, newest first within each group, as
+    {kind, text, time, source}. Analysis highlights carry source=None; memory events are labeled "ai"."""
+    analysis = await db.fetchrow(
+        "SELECT sa.highlights, sa.created_at FROM session_analyses sa JOIN sessions s ON s.id = sa.session_id "
+        "WHERE s.patient_id = %s AND NOT s.simulated ORDER BY s.started_at DESC LIMIT 1", (patient_id,))
+    out: list[dict[str, Any]] = []
+    if analysis is not None:
+        for h in analysis["highlights"] or []:
+            out.append({**h, "time": analysis["created_at"], "source": None})
+    rows = await db.fetch(
+        "SELECT kind, message, time FROM memory_events WHERE patient_id = %s AND kind = ANY(%s) "
+        "ORDER BY time DESC LIMIT %s", (patient_id, list(HIGHLIGHT_MEMORY_KINDS), limit))
+    for r in rows:
+        out.append({"kind": r["kind"], "text": r["message"], "time": r["time"], "source": "ai"})
+    return out
+
+
 # ---- alerts ------------------------------------------------------------------------------------------------
 
 async def alert_steps(db: Database, open_only: bool = True, days: int = 30) -> list[dict[str, Any]]:

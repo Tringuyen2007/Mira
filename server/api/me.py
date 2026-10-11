@@ -12,6 +12,7 @@ from server import exercises, security
 from server.api.calibration import placeholder_status
 from server.api.db_dep import require_db
 from server.api.identity_models import MeUpdate
+from server.api.scope import patient_for as _patient_for
 from server.db import queries, writes
 from server.db.pool import Database
 from server.state import get_state
@@ -52,16 +53,6 @@ async def build_me(db: Database, patient_id: str) -> dict[str, Any]:
         "lcd": {"online": bool(lcd.get("online")), "last_seen": lcd.get("last_seen")},
         "calibration": placeholder_status(),
     }
-
-
-def _patient_for(principal: security.Principal, patient_id: str | None) -> str:
-    """Patients act as themselves; the admin token must name a patient with ?patient_id=."""
-    if principal.scope == "patient":
-        assert principal.patient_id is not None
-        return principal.patient_id
-    if not patient_id:
-        raise HTTPException(status_code=400, detail="patient_id is required with the API token")
-    return patient_id
 
 
 @router.get("/me")

@@ -471,7 +471,7 @@ async def update_patient_profile(db: Database | None, patient_id: str, **fields:
 
 async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, int] | None:
     """DELETE /me: the patient's own (non-simulated) sessions and everything hanging off them, their alerts,
-    memory events, notifications, agent actions and phones; profile fields are blanked. Labeled simulated demo
+    memory events, notifications, agent actions, messages and phones; profile fields are blanked. Labeled simulated demo
     history is kept: it is not the patient's data. The patient row and prescriptions stay (the therapist's plan).
     One transaction; None on database failure."""
     if db is None:
@@ -487,7 +487,7 @@ async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, 
                 for table in ("pose_frames", "reps", "form_events", "wrist_motion", "heart_rate"):
                     cur = await conn.execute(f"DELETE FROM {table} WHERE session_id = ANY(%s)", (ids,))  # noqa: S608
                     counts[table] = cur.rowcount
-            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals"):
+            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals", "messages"):
                 cur = await conn.execute(f"DELETE FROM {table} WHERE patient_id = %s", (patient_id,))  # noqa: S608
                 counts[table] = cur.rowcount
             if ids:
@@ -501,6 +501,24 @@ async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, 
             return counts
 
     return await _safe(db, "purge_patient_data", run, None, patient_id=patient_id)
+
+
+# ---- messages (Plan 3 §6.4) -------------------------------------------------------------------------------
+
+async def insert_message(db: Database | None, patient_id: str, sender: str, kind: str,
+                         body: str) -> dict[str, Any] | None:
+    sql = ("INSERT INTO messages (patient_id, sender, kind, body) VALUES (%s, %s, %s, %s) "
+           "RETURNING id, sender, kind, body, created_at, read_at")
+    return await _safe(db, "insert_message", lambda d: d.fetchrow(sql, (patient_id, sender, kind, body)), None,
+                       patient_id=patient_id)
+
+
+async def mark_messages_read(db: Database | None, patient_id: str, sender_not: str) -> int | None:
+    """Marks every unread message of this patient's thread NOT sent by `sender_not` as read (the other side)."""
+    sql = ("UPDATE messages SET read_at = now() WHERE patient_id = %s AND kind = 'message' "
+           "AND sender != %s AND read_at IS NULL")
+    return await _safe(db, "mark_messages_read", lambda d: d.execute(sql, (patient_id, sender_not)), None,
+                       patient_id=patient_id)
 
 
 # ---- helpers ---------------------------------------------------------------------------------------------
