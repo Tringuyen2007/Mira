@@ -25,7 +25,7 @@ echo "$SHA" > "$STAGE/.deployed_ref"
 
 echo "deploying $REF ($SHA) to $HOST"
 rsync -az --delete -e "ssh -i $KEY -o BatchMode=yes" \
-  --exclude=.env --exclude=.venv/ --exclude=logs/ --exclude=.pytest_cache/ \
+  --exclude=.env --exclude=.venv/ --exclude=logs/ --exclude=.pytest_cache/ --exclude=__pycache__/ \
   --exclude=data/audio/ --exclude=data/ai_cache/ --exclude=data/recordings/ \
   "$STAGE/" "$USER_AT:$APP/"
 
