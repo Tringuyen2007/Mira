@@ -57,7 +57,7 @@ export function alertsModel(alertsJson, patientsById) {
 }
 
 // Pure: returns a new array (or the same one, unchanged, for an ignored event) — never mutates `model`.
-export function applyAlertEvent(model, evt) {
+export function applyAlertEvent(model, evt, patientsById = null) {
   if (!evt || !evt.alert_id || !evt.step) return model;
   if (RESOLVED_STEPS.has(evt.step)) {
     const next = model.filter((a) => a.alertId !== evt.alert_id);
@@ -70,7 +70,7 @@ export function applyAlertEvent(model, evt) {
     const fresh = buildAlert({
       alert_id: evt.alert_id, patient_id: evt.patient_id, kind: evt.kind, session_id: evt.session_id,
       steps: [{ step: evt.step, time: evt.t }], open: true,
-    }, null);
+    }, patientsById);
     return [...model, fresh];
   }
   const next = model.slice();

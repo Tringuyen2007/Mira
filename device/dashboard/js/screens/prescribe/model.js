@@ -2,6 +2,8 @@
 // GET /patients/{id}/progress JSON -> the data the cards render, plus diffPrescription for the Save flow.
 // No DOM here, so these are unit-testable without fakedom.
 
+import { exerciseName } from "../../core/exercises.js";
+
 export const DEFAULT_REST_S = 60;
 export const DEFAULT_TEMPO_S = 3;
 export const DEFAULT_WEIGHT_SHIFT_PCT = 15;
@@ -9,24 +11,7 @@ export const DEFAULT_KNEE_CAVE_DEG = 10;
 export const DEFAULT_TRUNK_LEAN_DEG = 20;
 export const DEFAULT_HR_LIMIT = 120;
 
-// Known exercise ids -> display name (decisions: no server/exercises.py catalog on this branch yet). An id
-// with no entry falls back to a humanised reading of the id, so the plan never shows a raw snake_case id.
-const EXERCISE_NAMES = {
-  squat: "Squats",
-  glute_bridge: "Glute bridges",
-  single_leg_stance: "Single-leg stance",
-  heel_slide: "Heel slides",
-  straight_leg_raise: "Straight leg raises",
-  sit_to_stand: "Sit to stand",
-  step_up: "Step-ups",
-};
-
-export function exerciseName(id) {
-  if (EXERCISE_NAMES[id]) return EXERCISE_NAMES[id];
-  const s = String(id || "").trim();
-  if (!s) return "Exercise";
-  return s.split(/[_\s]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
-}
+export { exerciseName } from "../../core/exercises.js";
 
 function num(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -71,9 +56,10 @@ export function prescribeModel(patientJson, prescriptionsJson, progressJson, sel
 
   const exercises = activeRx.map((r) => ({
     id: r.exercise_id,
-    name: exerciseName(r.exercise_id),
+    name: r.display_name ? String(r.display_name) : exerciseName(r.exercise_id),
     dose: `${r.sets} × ${r.reps}`,
     active: true,
+    staged: Boolean(r.staged),
     selected: r.exercise_id === selId,
   }));
 
@@ -104,9 +90,8 @@ export function prescribeModel(patientJson, prescriptionsJson, progressJson, sel
 
   const emergency = {
     name: patient.emergency_contact_name || null,
-    // The server has no emergency-contact relationship field (server/db/schema.sql); always null here so the
-    // view can show "—" rather than inventing a value.
-    relation: patient.emergency_contact_relation || null,
+    // Only wire-tri's schema has this column (emergency_contact_relationship); null hides the row.
+    relation: patient.emergency_contact_relationship || patient.emergency_contact_relation || null,
     phone: patient.emergency_contact_phone || null,
   };
 

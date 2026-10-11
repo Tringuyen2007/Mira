@@ -3,16 +3,32 @@
 // and sliders keep their own element alive — see js/ui/stepper.js / slider.js — so dragging one never gets
 // interrupted by a re-render).
 import { h } from "../../core/dom.js";
+import { icon } from "../../ui/icons.js";
 import { stepper } from "../../ui/stepper.js";
 import { slider } from "../../ui/slider.js";
 
-export function renderHead(patientName) {
-  const titleEl = h("h1", { class: "page-title" }, patientName ? `Prescribe · ${patientName}` : "Prescribe");
-  return { el: h("div", { class: "prescribe__head" }, titleEl), titleEl };
+// Head (Figma): meta line, title, "Changes reach Mira…" subtitle, and Discard / Save at the top right.
+export function renderHead({ onSave, onDiscard }) {
+  const metaEl = h("p", { class: "meta prescribe__meta" });
+  const titleEl = h("h1", { class: "page-title" }, "Prescribe");
+  const subtitleEl = h("p", { class: "prescribe__subtitle" });
+  const saveBtn = h("button", { class: "btn btn--primary", type: "button", disabled: true, onclick: onSave },
+    "Save plan");
+  const discardBtn = h("button", { class: "btn btn--secondary", type: "button", disabled: true, onclick: onDiscard },
+    "Discard changes");
+  const el = h("div", { class: "page-head prescribe__head" },
+    h("div", {}, metaEl, titleEl, subtitleEl),
+    h("div", { class: "prescribe__save-bar" }, discardBtn, saveBtn));
+  return { el, metaEl, titleEl, subtitleEl, saveBtn, discardBtn, setDirty: (dirty) => {
+    saveBtn.toggleAttribute("disabled", !dirty);
+    discardBtn.toggleAttribute("disabled", !dirty);
+  } };
 }
 
 // ---- Exercise plan card -----------------------------------------------------------------------------------
 
+// Each row is one <button> (aria-pressed = selected for editing). The tick is a drawn box, not an <input>, so
+// there's no interactive control nested inside the button; every listed exercise is in the active plan.
 export function renderExerciseList(exercises, { onSelect }) {
   if (exercises.length === 0) {
     return h("p", { class: "meta" }, "No active exercises yet.");
@@ -22,24 +38,35 @@ export function renderExerciseList(exercises, { onSelect }) {
       class: `prescribe__exercise-row${ex.selected ? " is-selected" : ""}`, type: "button",
       "aria-pressed": ex.selected ? "true" : "false", onclick: () => onSelect(ex.id),
     },
-      h("input", { type: "checkbox", checked: true, disabled: true, tabindex: "-1", "aria-hidden": "true" }),
-      h("span", { class: "prescribe__exercise-name" }, ex.name),
+      h("span", { class: "prescribe__check", "aria-hidden": "true" }),
+      h("span", { class: "prescribe__exercise-name" }, ex.name,
+        ex.staged ? h("span", { class: "prescribe__staged meta" }, " · new, not saved yet") : null),
       h("span", { class: "prescribe__exercise-dose" }, ex.dose)))));
 }
 
-export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLibrary }) {
+export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLibrary, summary }) {
   const listHost = h("div", {}, renderExerciseList(exercises, { onSelect }));
   const searchInput = canAddFromLibrary
-    ? h("input", { type: "search", class: "prescribe__search", placeholder: "Add from exercise library…",
+    ? h("input", { type: "search", class: "prescribe__search", placeholder: "Add from exercise library",
         "aria-label": "Add from exercise library", oninput: (e) => onSearch(e.target.value) })
     : null;
   const resultsHost = h("div", { class: "prescribe__search-results" });
   const el = h("section", { class: "card prescribe__card", "aria-label": "Exercise plan" },
     h("h2", { class: "card__title" }, "Exercise plan"),
+    summary ? h("p", { class: "meta" }, summary) : null,
     listHost,
-    canAddFromLibrary ? h("div", { class: "prescribe__search-wrap" }, searchInput, resultsHost) : null);
+    canAddFromLibrary ? h("div", { class: "prescribe__search-wrap" },
+      h("span", { class: "prescribe__search-icon" }, icon("search")), searchInput, resultsHost) : null);
   return { el, listHost, searchInput, resultsHost,
     setExercises: (list) => listHost.replaceChildren(renderExerciseList(list, { onSelect })) };
+}
+
+// Library search results: clicking one only stages it in the plan (Save plan writes it).
+export function renderSearchResults(items, { onAdd }) {
+  if (items.length === 0) return h("p", { class: "meta" }, "No matching exercises.");
+  return h("ul", { class: "prescribe__search-list" }, items.map((x) => h("li", {},
+    h("button", { class: "btn btn--ghost", type: "button", onclick: () => onAdd(x.id) },
+      `Add ${x.name} to the plan`))));
 }
 
 // ---- Editor card ------------------------------------------------------------------------------------------
@@ -47,10 +74,10 @@ export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLi
 const PCT_TEXT = (v) => ({ text: `${v}%`, valueText: `${v} percent` });
 const DEG_TEXT = (v) => ({ text: `${v}°`, valueText: `${v} degrees` });
 
-export function renderEditorCard(editor, limits, { onChange }) {
+export function renderEditorCard(editor, limits, { onChange, title }) {
   if (!editor.exerciseId) {
     return { el: h("section", { class: "card prescribe__card" },
-      h("h2", { class: "card__title" }, "Editor"),
+      h("h2", { class: "card__title" }, "Exercise"),
       h("p", { class: "meta" }, "Select an exercise to edit it.")) };
   }
   const minReps = limits.min_reps ?? 1, maxReps = limits.max_reps ?? 100;
@@ -61,68 +88,88 @@ export function renderEditorCard(editor, limits, { onChange }) {
   const repsStepper = stepper({ label: "reps", min: minReps, max: maxReps, value: editor.reps ?? minReps,
     onChange: (v) => onChange({ reps: v }) });
   const restStepper = stepper({ label: "rest between sets", min: minRest, max: maxRest, step: 15,
-    value: editor.restS, format: (v) => `${v}s`, onChange: (v) => onChange({ restS: v }) });
-  const tempoStepper = stepper({ label: "tempo", min: 1, max: 10, value: editor.tempoS,
-    format: (v) => `${v}s`, onChange: (v) => onChange({ tempoS: v }) });
+    value: editor.restS, format: (v) => `${v} s`, onChange: (v) => onChange({ restS: v }) });
   const hasKnee = editor.kneeTarget != null;
-  const kneeStepper = hasKnee ? stepper({ label: "knee bend target", min: 0, max: 180, value: editor.kneeTarget,
-    format: (v) => `${v}°`, onChange: (v) => onChange({ kneeTarget: v }) }) : null;
+  const kneeSlider = hasKnee ? slider({ label: "Knee bend target", min: 0, max: 150, value: editor.kneeTarget,
+    format: DEG_TEXT, onChange: (v) => onChange({ kneeTarget: v }) }) : null;
+  const tempoSlider = slider({ label: "Speed: seconds down and up", min: 1, max: 10, value: editor.tempoS,
+    format: (v) => ({ text: `${v} s each`, valueText: `${v} seconds each way` }),
+    onChange: (v) => onChange({ tempoS: v }) });
 
   function field(label, control) {
     return h("div", { class: "prescribe__field" }, h("span", { class: "prescribe__field-label" }, label), control.el);
   }
 
-  const el = h("section", { class: "card prescribe__card", "aria-label": "Editor" },
-    h("h2", { class: "card__title" }, "Editor"),
-    editor.lastChanged ? h("p", { class: "meta" }, `Last changed ${editor.lastChanged}`) : null,
-    editor.todayAvg ? h("p", { class: "meta" }, editor.todayAvg) : null,
+  const el = h("section", { class: "card prescribe__card", "aria-label": `${title} settings` },
+    h("div", { class: "prescribe__card-head" },
+      h("h2", { class: "card__title" }, title),
+      editor.lastChanged ? h("p", { class: "meta" }, `Last changed ${editor.lastChanged}`) : null),
     h("div", { class: "prescribe__fields" },
-      field("Sets", setsStepper), field("Reps", repsStepper), field("Rest between sets", restStepper),
-      field("Tempo", tempoStepper),
-      hasKnee ? field("Knee bend target", kneeStepper) : null),
-    h("div", { class: "prescribe__reference-rep" },
-      h("span", { class: "chip chip--stretch" }, "Stretch"),
-      h("button", { class: "btn btn--secondary", type: "button", disabled: true,
-        title: "Coming later" }, "Record reference rep")));
+      field("Sets", setsStepper), field("Reps", repsStepper), field("Rest", restStepper)),
+    kneeSlider ? kneeSlider.el : null,
+    editor.todayAvg ? h("p", { class: "meta prescribe__today" }, editor.todayAvg) : null,
+    tempoSlider.el);
 
-  return { el, setsStepper, repsStepper, restStepper, tempoStepper, kneeStepper };
+  return { el, setsStepper, repsStepper, restStepper, kneeSlider, tempoSlider };
+}
+
+// ---- Reference rep card (right column) ------------------------------------------------------------------------
+
+export function renderReferenceRepCard({ exerciseLabel, firstName }) {
+  return h("section", { class: "card prescribe__card", "aria-label": "Reference rep" },
+    h("div", { class: "prescribe__card-head" },
+      h("h2", { class: "card__title" }, "Reference rep"),
+      h("span", { class: "chip chip--stretch" }, "Stretch")),
+    h("p", { class: "meta" },
+      `Do one ${exerciseLabel} in front of Mira. It plays as a see-through ghost that ${firstName} follows.`),
+    h("button", { class: "btn btn--secondary prescribe__reference-btn", type: "button", disabled: true,
+      title: "Coming later" }, "Record reference rep"));
 }
 
 // ---- "When should Mira flag a rep?" card -----------------------------------------------------------------
 
-export function renderFlagsCard(flags, { onChange }) {
-  const weightShift = slider({ label: "Weight shift", min: 0, max: 50, value: flags.weightShiftPct,
+export function renderFlagsCard(flags, { onChange, firstName }) {
+  const weightShift = slider({ label: "Flag weight shift above", min: 0, max: 50, value: flags.weightShiftPct,
     format: PCT_TEXT, onChange: (v) => onChange({ weightShiftPct: v }) });
-  const kneeCave = slider({ label: "Knee cave", min: 0, max: 45, value: flags.kneeCaveDeg,
+  const kneeCave = slider({ label: "Flag knee drifting inward above", min: 0, max: 45, value: flags.kneeCaveDeg,
     format: DEG_TEXT, onChange: (v) => onChange({ kneeCaveDeg: v }) });
-  const trunkLean = slider({ label: "Trunk lean", min: 0, max: 45, value: flags.trunkLeanDeg,
+  const trunkLean = slider({ label: "Flag trunk leaning forward above", min: 0, max: 45, value: flags.trunkLeanDeg,
     format: DEG_TEXT, onChange: (v) => onChange({ trunkLeanDeg: v }) });
   const el = h("section", { class: "card prescribe__card", "aria-label": "When should Mira flag a rep?" },
     h("h2", { class: "card__title" }, "When should Mira flag a rep?"),
+    h("p", { class: "meta" },
+      `Just for ${firstName}. Flags show red on your timeline and Mira coaches ${firstName} in the moment.`),
     weightShift.el, kneeCave.el, trunkLean.el);
   return { el, weightShift, kneeCave, trunkLean };
 }
 
 // ---- Heart rate limit card --------------------------------------------------------------------------------
 
-export function renderHrLimitCard(hrLimit, { onChange }) {
-  const hr = slider({ label: "Heart rate limit", min: 40, max: 220, value: hrLimit,
+export function renderHrLimitCard(hrLimit, { onChange, firstName }) {
+  const hr = slider({ label: "Pause and check in above", min: 40, max: 220, value: hrLimit,
     format: (v) => ({ text: `${v} bpm`, valueText: `${v} beats per minute` }), onChange: (v) => onChange(v) });
+  hr.el.querySelector("input")?.setAttribute("aria-label", "Heart rate limit: pause and check in above");
   const el = h("section", { class: "card prescribe__card", "aria-label": "Heart rate limit" },
-    h("h2", { class: "card__title" }, "Heart rate limit"),
-    hr.el);
+    h("h2", { class: "card__title prescribe__title-icon" }, icon("heart"), "Heart rate limit"),
+    hr.el,
+    h("p", { class: "meta" }, `From ${firstName}'s Apple Watch. Mira asks ${firstName} to rest and tells you.`));
   return { el, hr };
 }
 
 // ---- Emergency contact card (read-only) --------------------------------------------------------------------
 
-export function renderEmergencyCard(emergency) {
+export function renderEmergencyCard(emergency, { firstName }) {
+  const contactFirst = String(emergency.name || "").trim().split(/\s+/)[0];
   return h("section", { class: "card prescribe__card", "aria-label": "Emergency contact" },
     h("h2", { class: "card__title" }, "Emergency contact"),
-    h("dl", { class: "prescribe__emergency" },
-      h("dt", {}, "Name"), h("dd", {}, emergency.name || "—"),
-      h("dt", {}, "Relationship"), h("dd", {}, emergency.relation || "—"),
-      h("dt", {}, "Phone"), h("dd", {}, emergency.phone || "—")));
+    emergency.name
+      ? h("div", { class: "prescribe__emergency" },
+        h("p", { class: "prescribe__emergency-name" }, emergency.name),
+        emergency.relation ? h("p", { class: "meta" }, emergency.relation) : null,
+        emergency.phone ? h("p", { class: "prescribe__emergency-phone" }, emergency.phone) : null,
+        h("p", { class: "meta" },
+          `Mira calls ${contactFirst} if she sees a fall and ${firstName} does not answer within 30 seconds.`))
+      : h("p", { class: "meta" }, "No emergency contact on file."));
 }
 
 // ---- Mira Assistant proposals rail --------------------------------------------------------------------------
@@ -133,18 +180,6 @@ export function renderProposalsRail() {
     h("h2", { class: "card__title", id: "prescribe-proposals-title" }, "Mira Assistant proposals"),
     listHost);
   return { el, listHost };
-}
-
-// ---- Save / discard bar -------------------------------------------------------------------------------------
-
-export function renderSaveBar({ onSave, onDiscard }) {
-  const saveBtn = h("button", { class: "btn btn--primary", type: "button", disabled: true, onclick: onSave }, "Save plan");
-  const discardBtn = h("button", { class: "btn btn--secondary", type: "button", disabled: true, onclick: onDiscard }, "Discard changes");
-  const el = h("div", { class: "prescribe__save-bar" }, discardBtn, saveBtn);
-  return { el, saveBtn, discardBtn, setDirty: (dirty) => {
-    saveBtn.toggleAttribute("disabled", !dirty);
-    discardBtn.toggleAttribute("disabled", !dirty);
-  } };
 }
 
 // Unsaved-changes guard: an in-page bar (never window.confirm), shown over the main column when the

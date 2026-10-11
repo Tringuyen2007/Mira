@@ -80,7 +80,41 @@ test("#/live/:pid for a patient who isn't live shows their empty state with a li
   const unmount = screen.mount(root, ctx, { name: "live", params: { pid: "maya" }, query: {} });
   await flush();
   assert.match(root.textContent, /Maya isn't in a session right now/);
+  // Only a watcher on /ws/live (to notice a session starting); no pose/events streams.
+  assert.equal(sockets.activeCount("live"), 1);
+  assert.equal(sockets.activeCount("pose"), 0);
+  unmount();
   assert.equal(sockets.activeCount("live"), 0);
+});
+
+test("#/live becomes live without a reload when a session starts after the empty state", async () => {
+  let caseload = CASELOAD;
+  const { ctx, sockets } = makeCtx();
+  ctx.api.caseload = async () => caseload;
+  const subs = [];
+  const realSub = sockets.subscribe;
+  ctx.sockets.subscribe = (channel, fn) => { subs.push([channel, fn]); return realSub(channel, fn); };
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "live", params: {}, query: {} });
+  await flush();
+  assert.match(root.textContent, /No patient is in a live session right now/);
+  caseload = CASELOAD_WITH_LIVE;
+  const watcher = subs.find(([c]) => c === "live")[1];
+  watcher({ phase: "active", first_name: "Maya", t: 1 });
+  await flush();
+  assert.match(root.textContent, /Live session/);
+  assert.ok(sockets.activeCount("pose") > 0);
+  unmount();
+});
+
+test("a boot failure shows an error with Retry, not 'no one is live'", async () => {
+  const { ctx } = makeCtx();
+  ctx.api.caseload = async () => { throw Object.assign(new Error("503"), { status: 503, detail: "database unavailable" }); };
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "live", params: {}, query: {} });
+  await flush();
+  assert.doesNotMatch(root.textContent, /No patient is in a live session/);
+  assert.ok(root.querySelectorAll("button").length > 0);
   unmount();
 });
 

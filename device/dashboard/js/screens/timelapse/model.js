@@ -2,7 +2,7 @@
 // -> the data the two date cards and the shared headline render. No DOM here so these are unit-testable without
 // fakedom (see tests/timelapse-model.test.mjs). Reuses repTimelineModel's tStart/tEnd chaining (patient/model.js)
 // instead of recomputing it.
-import { weeksSince } from "../../core/format.js";
+import { weeksSince, capitalize, loadSplit } from "../../core/format.js";
 import { repTimelineModel } from "../patient/model.js";
 
 const fmtDayShort = (iso) =>
@@ -34,25 +34,44 @@ export function syncClock(durA, durB, t) {
   return { tA: p * (Number(durA) || 0), tB: p * (Number(durB) || 0) };
 }
 
-function sideModel(sessionJson, patientJson) {
+// Deepest knee flexion in a window of frames (mean of both knees, degrees): the depth when the reps carry no
+// peak_angle (the live engine doesn't always store it).
+export function framesDepth(frames) {
+  let best = null;
+  for (const f of frames || []) {
+    const l = num(f.knee_l);
+    const r = num(f.knee_r);
+    const v = l !== null && r !== null ? (l + r) / 2 : (l ?? r);
+    if (v !== null && (best === null || v > best)) best = v;
+  }
+  return best;
+}
+
+// "Week N" counts from the patient's first session (`firstSessionAt`), else from their registration.
+export function weekLabel(startedAt, firstSessionAt, createdAt) {
+  const origin = firstSessionAt || createdAt;
+  if (!origin || !startedAt) return null;
+  return `Week ${Math.max(1, weeksSince(origin, new Date(startedAt)) + 1)}`;
+}
+
+function sideModel(sessionJson, patientJson, { firstSessionAt = null, framesDepthDeg = null } = {}) {
   const session = (sessionJson && sessionJson.session) || {};
   const patient = (patientJson && patientJson.patient) || {};
   const affectedSide = patient.affected_side === "left" ? "left" : "right";
   const rep = bestRep(sessionJson);
   const rawReps = (sessionJson && Array.isArray(sessionJson.reps)) ? sessionJson.reps : [];
   const repRow = rep ? rawReps.find((r) => r.rep === rep.rep) : null;
-  const depth = repRow ? num(repRow.peak_angle) : null;
+  const depth = (repRow ? num(repRow.peak_angle) : null) ?? num(framesDepthDeg);
 
-  const twLoadLeft = num(sessionJson && sessionJson.tw_load_left_pct);
-  const load = twLoadLeft === null ? null : (affectedSide === "left" ? twLoadLeft : 100 - twLoadLeft);
+  const split = loadSplit(sessionJson && sessionJson.tw_load_left_pct);
+  const load = split === null ? null : (affectedSide === "left" ? split.left : split.right);
 
   const startedAt = session.started_at;
-  const weekN = patient.created_at && startedAt
-    ? Math.max(1, weeksSince(patient.created_at, new Date(startedAt)) + 1) : null;
+  const week = weekLabel(startedAt, firstSessionAt, patient.created_at);
 
   return {
     sessionId: session.id || null,
-    label: weekN != null ? `Week ${weekN}` : "—",
+    label: week || "—",
     date: startedAt ? fmtDayShort(startedAt) : "—",
     depth: depth === null ? null : Math.round(depth),
     load, affectedSide, rep,
@@ -69,13 +88,15 @@ function buildHeadline(left, right) {
     const side = left.affectedSide === "left" ? "left" : "right";
     parts.push(`${side}-leg load ${Math.round(left.load)}% → ${Math.round(right.load)}%`);
   }
-  return parts.length ? parts.join(", ") : null;
+  // Figma: "Depth +22°, right-leg load 36% → 47%", a capitalised sentence even when depth is missing.
+  return parts.length ? capitalize(parts.join(", ")) : null;
 }
 
 // timelapseModel(sessA, sessB, patient) -> {left, right, headline} (Figma 208:339). `sessA`/`sessB` are two
 // GET /sessions/{id} JSONs for the same exercise, `patient` is a GET /patients/{id} JSON.
-export function timelapseModel(sessA, sessB, patientJson) {
-  const left = sideModel(sessA, patientJson);
-  const right = sideModel(sessB, patientJson);
+// opts: {firstSessionAt (ISO, for week labels), depthA/depthB (frames-based depth fallbacks, degrees)}.
+export function timelapseModel(sessA, sessB, patientJson, { firstSessionAt = null, depthA = null, depthB = null } = {}) {
+  const left = sideModel(sessA, patientJson, { firstSessionAt, framesDepthDeg: depthA });
+  const right = sideModel(sessB, patientJson, { firstSessionAt, framesDepthDeg: depthB });
   return { left, right, headline: buildHeadline(left, right) };
 }

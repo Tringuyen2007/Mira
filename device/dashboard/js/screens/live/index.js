@@ -5,7 +5,8 @@
 // always closed on unmount (self-review note in the brief: this is the leak class to watch for).
 import { h, clear } from "../../core/dom.js";
 import { href } from "../../core/router.js";
-import { firstName, weeksSince } from "../../core/format.js";
+import { firstName, patientMeta } from "../../core/format.js";
+import { errorState } from "../../ui/states.js";
 import { createAvatarView } from "../../avatar/avatarView.js";
 import { lerpJoints, isValidJoints } from "../../three/joints.js";
 import { liveModel, cueHistoryModel } from "./model.js";
@@ -17,12 +18,8 @@ import {
 const SAY_CAP = "/live/say";
 const POSE_LERP_T = 0.4; // same smoothing budget as the Patient review screen's live mode
 
-function patientMeta(patient) {
-  if (!patient) return "";
-  const parts = [patient.name, patient.age != null ? String(patient.age) : null].filter(Boolean).join(", ");
-  const week = patient.created_at != null ? `week ${Math.max(1, weeksSince(patient.created_at, new Date()) + 1)}` : null;
-  return [parts, patient.condition, week].filter(Boolean).join(" · ");
-}
+const IDLE_PHASES = new Set(["idle", "done"]);
+const RECHECK_MIN_MS = 5000; // /ws/live pushes ~10 Hz: re-check the caseload at most this often while waiting
 
 export const screen = {
   mount(root, ctx, route) {
@@ -32,7 +29,10 @@ export const screen = {
     let unsubEvents = null;
     let cueEvents = [];
     let lastSnapshot = null;
+    let lastReceivedAt = null;
     let lastJoints = null;
+    let unsubWatch = null; // while nobody is live: re-check on the first live snapshot
+    let lastRecheckAt = 0;
 
     const requestedPid = /^[A-Za-z0-9_-]{1,64}$/.test(route.params.pid || "") ? route.params.pid : null;
     const bodyHost = h("div", {});
@@ -40,10 +40,27 @@ export const screen = {
 
     function showEmptyNoOneLive() {
       bodyHost.replaceChildren(emptyNoOneLive(href("caseload")));
+      watchForSession(null);
     }
 
     function showEmptyForPatient(patient) {
       bodyHost.replaceChildren(emptyNoLiveSession(firstName(patient && patient.name), href("patient", { pid: patient.id })));
+      watchForSession(patient);
+    }
+
+    // The empty states promise "they'll show up here the moment a session starts" (final review B, I11): listen
+    // to /ws/live and re-run boot() on the first active snapshot (for the requested patient, if there is one).
+    function watchForSession(waitingFor) {
+      if (unsubWatch) return;
+      const wantFirst = waitingFor ? firstName(waitingFor.name) : null;
+      unsubWatch = ctx.sockets.subscribe("live", (msg) => {
+        if (!alive || !msg || IDLE_PHASES.has(msg.phase)) return;
+        if (wantFirst && msg.first_name && msg.first_name !== wantFirst) return;
+        if (Date.now() - lastRecheckAt < RECHECK_MIN_MS) return;
+        lastRecheckAt = Date.now();
+        unsubWatch?.(); unsubWatch = null;
+        boot();
+      });
     }
 
     let headRefs = null;
@@ -77,12 +94,13 @@ export const screen = {
         mode: "live", affectedSide: (patient && patient.affected_side) || "right", ghost: false,
       });
       renderCueHistoryList(cueHistoryRefs.listHost, cueHistoryModel(cueEvents));
-      applySnapshot(lastSnapshot);
+      applySnapshot(lastSnapshot, lastReceivedAt);
     }
 
-    function applySnapshot(snapshot) {
+    // `receivedAt`: when this snapshot arrived, so the latency is server time vs receive time.
+    function applySnapshot(snapshot, receivedAt) {
       if (!roomRefs) return;
-      const m = liveModel(snapshot, patient, new Date());
+      const m = liveModel(snapshot, patient, receivedAt || new Date());
       roomRefs.latencyEl.textContent = m.latency || "";
       roomRefs.repCardEl.hidden = !m.rep;
       if (m.rep) {
@@ -99,7 +117,8 @@ export const screen = {
         if (!alive || !msg) return;
         if (patient && firstName(patient.name) && msg.first_name && firstName(patient.name) !== msg.first_name) return;
         lastSnapshot = msg;
-        applySnapshot(msg);
+        lastReceivedAt = new Date();
+        applySnapshot(msg, lastReceivedAt);
       });
       unsubPose = ctx.sockets.subscribe("pose", (msg) => {
         if (!alive || !msg) return;
@@ -145,8 +164,8 @@ export const screen = {
         subscribeSockets();
       } catch (err) {
         if (!alive) return;
-        bodyHost.replaceChildren(emptyNoOneLive(href("caseload")));
-        void err;
+        // A real failure (401, 503, offline) is an error with Retry, not "no one is live" (final review B, I11).
+        bodyHost.replaceChildren(h("div", { class: "card" }, errorState(err, () => boot())));
       }
     }
 
@@ -154,6 +173,7 @@ export const screen = {
 
     return () => {
       alive = false;
+      unsubWatch?.(); unsubWatch = null;
       stopSockets();
       avatar?.dispose();
     };

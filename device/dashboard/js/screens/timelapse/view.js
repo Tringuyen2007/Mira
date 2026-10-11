@@ -22,15 +22,20 @@ export function renderHead({ onModeChange, onAddToNote }) {
   return { el, metaEl, titleEl, sideBtn, overlayBtn, addNoteBtn };
 }
 
+// Label tied to its select with for/id, so "First date", "Second date" and "Exercise" are the selects'
+// accessible names (final review B, I12).
 function pickerField(labelText, selectEl) {
   return h("div", { class: "timelapse__field" },
-    h("label", { class: "meta" }, labelText), selectEl);
+    h("label", { class: "meta", for: selectEl.getAttribute("id") }, labelText), selectEl);
 }
 
 export function renderControls({ onDateA, onDateB, onExercise, onView }) {
-  const dateASelect = h("select", { class: "timelapse__select", onchange: (e) => onDateA(e.target.value) });
-  const dateBSelect = h("select", { class: "timelapse__select", onchange: (e) => onDateB(e.target.value) });
-  const exerciseSelect = h("select", { class: "timelapse__select", onchange: (e) => onExercise(e.target.value) });
+  const dateASelect = h("select", { id: "timelapse-date-a", class: "timelapse__select",
+    onchange: (e) => onDateA(e.target.value) });
+  const dateBSelect = h("select", { id: "timelapse-date-b", class: "timelapse__select",
+    onchange: (e) => onDateB(e.target.value) });
+  const exerciseSelect = h("select", { id: "timelapse-exercise", class: "timelapse__select",
+    onchange: (e) => onExercise(e.target.value) });
   const frontBtn = h("button", { type: "button", role: "tab", "aria-selected": "true",
     onclick: () => onView("front") }, "Front");
   const sideViewBtn = h("button", { type: "button", role: "tab", "aria-selected": "false",
@@ -41,7 +46,7 @@ export function renderControls({ onDateA, onDateB, onExercise, onView }) {
     pickerField("First date", dateASelect),
     pickerField("Second date", dateBSelect),
     pickerField("Exercise", exerciseSelect),
-    h("div", { class: "timelapse__field" }, h("label", { class: "meta" }, "View"), viewTabs));
+    h("div", { class: "timelapse__field" }, h("span", { class: "meta", "aria-hidden": "true" }, "View"), viewTabs));
   return { el, dateASelect, dateBSelect, exerciseSelect, frontBtn, sideViewBtn };
 }
 

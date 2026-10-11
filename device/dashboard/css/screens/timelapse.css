@@ -112,16 +112,6 @@
   flex: none;
 }
 
-/* Same dark-stroke-icon-on-ink-filled-circle problem as the sidebar's active nav pill (shell.css): invert in
-   the light theme (dark circle), not in the projector theme (circle flips light, icon is already dark-on-light). */
-.timelapse__play img {
-  filter: invert(1) brightness(2);
-}
-
-:root[data-theme="projector"] .timelapse__play img {
-  filter: none;
-}
-
 .timelapse__transport-text {
   flex: 1;
 }

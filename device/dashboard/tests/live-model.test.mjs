@@ -31,13 +31,21 @@ test("liveModel: hr is null when not provided", () => {
 test("liveModel: latency names the pose rate and an about-N-ms-behind figure", () => {
   const now = new Date((liveSnapshot.t + 0.14) * 1000);
   const m = liveModel(liveSnapshot, patient, now);
-  assert.match(m.latency, /^20 Hz · about \d+ ms behind · smoothed$/);
+  assert.match(m.latency, /^20 Hz · about 140 ms behind · smoothed$/);
+});
+
+test("liveModel: under 50 ms, negative (server clock ahead) or implausibly large reads 'live', never '0 ms'", () => {
+  for (const dt of [0.01, -0.3, 30]) {
+    const m = liveModel(liveSnapshot, patient, new Date((liveSnapshot.t + dt) * 1000));
+    assert.equal(m.latency, "20 Hz · live · smoothed", String(dt));
+  }
 });
 
 test("liveModel: balance uses the patient's affected side (right for Maya) from load_l_pct", () => {
   const m = liveModel(liveSnapshot, patient, new Date(liveSnapshot.t * 1000));
-  const expectedAffected = 100 - liveSnapshot.load_l_pct;
-  assert.ok(Math.abs(m.balance.affected - expectedAffected) < 0.001);
+  // load_l_pct 56.5 -> left 57 (rounded once), right 43: the two labels always add to 100.
+  assert.equal(m.balance.affected, 43);
+  assert.equal(m.balance.other, 57);
   assert.equal(m.balance.affectedSide, "right");
   assert.equal(m.balance.flagged, false);
 });

@@ -1,9 +1,13 @@
 // Pure view-models for the Live session screen: /ws/live snapshots -> the data the head/room/cue cards render.
 // No DOM here so these are unit-testable without fakedom (see tests/live-model.test.mjs, server/samples/ws_live.json
 // and ws_events_cue.json).
-import { fmtDeg } from "../../core/format.js";
+import { fmtDeg, loadSplit } from "../../core/format.js";
 
 const POSE_HZ_LABEL = "20 Hz"; // pose channel's push rate (server/engine_bridge.py), a fixed label, not measured
+// Below this the delay isn't worth a number; above MAX the two clocks clearly disagree (skew), so a number would
+// be wrong either way. Both read "live".
+const LATENCY_MIN_MS = 50;
+const LATENCY_MAX_MS = 5000;
 
 function cap(s) {
   const str = String(s || "");
@@ -16,9 +20,10 @@ function fmtClockShort(epochSeconds) {
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-// liveModel(liveSnapshot, patient, now) -> the Live session screen's head/room text (Figma 210:820). `now` lets
-// the "about N ms behind" latency figure be computed from the snapshot's own `t` (epoch seconds) instead of a
-// hardcoded number, while staying a pure function the tests can drive with a fixed clock.
+// liveModel(liveSnapshot, patient, receivedAt) -> the Live session screen's head/room text (Figma 210:820).
+// `receivedAt` is when the browser received the snapshot; "about N ms behind" is receivedAt minus the server's
+// own `t` (epoch seconds). A tiny, negative or implausibly large gap (clock skew) reads "live" instead of a
+// misleading "about 0 ms behind" (browser bug 11).
 export function liveModel(liveSnapshot, patient, now = new Date()) {
   if (!liveSnapshot) {
     return {
@@ -38,12 +43,14 @@ export function liveModel(liveSnapshot, patient, now = new Date()) {
 
   const nowS = now instanceof Date ? now.getTime() / 1000 : Date.parse(now) / 1000;
   const tS = Number(liveSnapshot.t);
-  const behindMs = Number.isFinite(nowS) && Number.isFinite(tS)
-    ? Math.max(0, Math.round((nowS - tS) * 1000)) : 0;
-  const latency = `${POSE_HZ_LABEL} · about ${behindMs} ms behind · smoothed`;
+  const behindMs = Number.isFinite(nowS) && Number.isFinite(tS) ? Math.round((nowS - tS) * 1000) : null;
+  const latency = behindMs !== null && behindMs >= LATENCY_MIN_MS && behindMs <= LATENCY_MAX_MS
+    ? `${POSE_HZ_LABEL} · about ${behindMs} ms behind · smoothed`
+    : `${POSE_HZ_LABEL} · live · smoothed`;
 
-  const loadL = Number(liveSnapshot.load_l_pct);
-  const affected = Number.isFinite(loadL) ? (affectedSide === "left" ? loadL : 100 - loadL) : null;
+  // One value, two labels that add up to 100 (browser bug 11).
+  const split = loadSplit(liveSnapshot.load_l_pct);
+  const affected = split ? (affectedSide === "left" ? split.left : split.right) : null;
   const other = affected === null ? null : 100 - affected;
   const flagged = Array.isArray(liveSnapshot.flags) && liveSnapshot.flags.length > 0;
   const balance = { affected, other, affectedSide, flagged };

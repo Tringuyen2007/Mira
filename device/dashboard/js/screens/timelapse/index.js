@@ -5,33 +5,27 @@
 // review screen's self-review note).
 import { h } from "../../core/dom.js";
 import { href } from "../../core/router.js";
-import { weeksSince } from "../../core/format.js";
+import { patientMeta } from "../../core/format.js";
+import { exerciseName } from "../../core/exercises.js";
 import { createAvatarView } from "../../avatar/avatarView.js";
 import { loadSessionFrames } from "../patient/player.js";
-import { bestRep, timelapseModel, syncClock } from "./model.js";
+import { bestRep, timelapseModel, syncClock, framesDepth, weekLabel } from "./model.js";
 import {
   renderHead, renderControls, fillDateOptions, fillExerciseOptions, renderSideCard, renderOverlayCard,
   renderTransport, noExerciseSessions,
 } from "./view.js";
-import { loading, errorState } from "../../ui/states.js";
+import { loading, errorState, empty } from "../../ui/states.js";
 
 const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-function cap(s) {
-  const str = String(s || "").replace(/_/g, " ");
-  return str ? str[0].toUpperCase() + str.slice(1) : str;
-}
 
 const fmtDayShort = (iso) =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(iso));
 
-// `patientJson` is the full GET /patients/{id} response ({patient, prescriptions, recent_sessions}).
-function sessionLabel(patientJson, s) {
-  const createdAt = patientJson.patient && patientJson.patient.created_at;
-  const weekN = createdAt && s.started_at
-    ? Math.max(1, weeksSince(createdAt, new Date(s.started_at)) + 1) : null;
+// "Week 1 · Jul 23": weeks count from the patient's first session.
+function sessionLabel(s, firstSessionAt, createdAt) {
+  const week = weekLabel(s.started_at, firstSessionAt, createdAt);
   const date = s.started_at ? fmtDayShort(s.started_at) : "—";
-  return weekN != null ? `Week ${weekN} · ${date}` : date;
+  return week ? `${week} · ${date}` : date;
 }
 
 // Nearest frame at or before `t` (ms), linear-scan: a bestRep window is a handful of seconds of frames, so
@@ -65,7 +59,12 @@ export const screen = {
       view: "front", // "front" | "side"
       speed: 1,
       playing: false,
+      history: [], // finished sessions (GET /patients/{id}/session-history), all exercises
+      firstSessionAt: null,
+      depthA: null, // frames-based depth fallbacks for the headline
+      depthB: null,
     };
+    let sessionsSeq = 0;
 
     let framesAbortA = null;
     let framesAbortB = null;
@@ -88,20 +87,37 @@ export const screen = {
     let avatarB = null;
     let avatarOverlay = null;
 
-    function exercisesFor(patient) {
+    function exercisesFor() {
       const seen = new Map();
-      for (const s of patient.recent_sessions || []) {
-        if (!seen.has(s.exercise_id)) seen.set(s.exercise_id, { id: s.exercise_id, label: `${cap(s.exercise_id)} · best rep` });
+      for (const s of state.history) {
+        if (!seen.has(s.exercise_id)) {
+          seen.set(s.exercise_id, { id: s.exercise_id, label: `${exerciseName(s.exercise_id)} · best rep` });
+        }
       }
       return [...seen.values()];
     }
 
-    function sessionsForExercise(patientJson, exerciseId) {
-      return (patientJson.recent_sessions || [])
+    function sessionsForExercise(exerciseId) {
+      const createdAt = state.patientJson.patient && state.patientJson.patient.created_at;
+      return state.history
         .filter((s) => s.exercise_id === exerciseId)
         .slice()
         .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
-        .map((s) => ({ id: s.id, label: sessionLabel(patientJson, s), startedAt: s.started_at }));
+        .map((s) => ({ id: s.id, label: sessionLabel(s, state.firstSessionAt, createdAt), startedAt: s.started_at }));
+    }
+
+    // The full finished-session history (bug 12: the 10 recent sessions made both defaults the same week).
+    // Falls back to GET /patients/{id}'s recent_sessions if the history route isn't there.
+    async function loadHistory() {
+      let list = null;
+      try {
+        const res = await ctx.api.sessionHistory(pid, { limit: 200 });
+        list = (res && Array.isArray(res.sessions)) ? res.sessions : null;
+      } catch { /* older server: use recent_sessions below */ }
+      if (!list) list = (state.patientJson.recent_sessions || []).filter((s) => s.ended_at !== null);
+      state.history = list.filter((s) => s && s.id && s.exercise_id && s.started_at);
+      const times = state.history.map((s) => Date.parse(s.started_at)).filter(Number.isFinite);
+      state.firstSessionAt = times.length ? new Date(Math.min(...times)).toISOString() : null;
     }
 
     function disposeAvatars() {
@@ -170,10 +186,11 @@ export const screen = {
       if (state.mode === "side") {
         cardA.avatarHost.replaceChildren();
         cardB.avatarHost.replaceChildren();
-        avatarA = createAvatarView(cardA.avatarHost, { mode: "replay", affectedSide, ghost: false });
-        avatarB = createAvatarView(cardB.avatarHost, { mode: "replay", affectedSide, ghost: false });
+        avatarA = createAvatarView(cardA.avatarHost, { mode: "replay", affectedSide, ghost: false, viewControls: false });
+        avatarB = createAvatarView(cardB.avatarHost, { mode: "replay", affectedSide, ghost: false, viewControls: false });
       } else {
-        avatarOverlay = createAvatarView(overlayRefs.avatarHost, { mode: "replay", affectedSide, ghost: true });
+        avatarOverlay = createAvatarView(overlayRefs.avatarHost, { mode: "replay", affectedSide, ghost: true,
+          viewControls: false });
       }
       avatarA?.setView(state.view);
       avatarB?.setView(state.view);
@@ -188,7 +205,8 @@ export const screen = {
     }
 
     function updateCardHeads() {
-      const m = timelapseModel(state.sessA, state.sessB, state.patientJson);
+      const m = timelapseModel(state.sessA, state.sessB, state.patientJson,
+        { firstSessionAt: state.firstSessionAt, depthA: state.depthA, depthB: state.depthB });
       cardA.labelEl.textContent = m.left.label;
       cardA.dateEl.textContent = m.left.date;
       cardB.labelEl.textContent = m.right.label;
@@ -199,7 +217,7 @@ export const screen = {
       return m;
     }
 
-    async function loadFrames() {
+    async function loadFrames(mySeq) {
       framesAbortA?.abort(); framesAbortB?.abort();
       framesAbortA = new AbortController();
       framesAbortB = new AbortController();
@@ -209,13 +227,16 @@ export const screen = {
         loadSessionFrames(ctx.api.framesPage, state.sidA, state.sessA.session.started_at, { signal: framesAbortA.signal }),
         loadSessionFrames(ctx.api.framesPage, state.sidB, state.sessB.session.started_at, { signal: framesAbortB.signal }),
       ]);
-      if (!alive) return;
+      if (!alive || mySeq !== sessionsSeq) return;
       framesA = repA ? allA.filter((f) => f.time >= repA.tStart && f.time <= repA.tEnd)
         .map((f) => ({ ...f, time: f.time - repA.tStart })) : [];
       framesB = repB ? allB.filter((f) => f.time >= repB.tStart && f.time <= repB.tEnd)
         .map((f) => ({ ...f, time: f.time - repB.tStart })) : [];
       durA = framesA.length ? framesA[framesA.length - 1].time : 0;
       durB = framesB.length ? framesB[framesB.length - 1].time : 0;
+      state.depthA = framesDepth(framesA);
+      state.depthB = framesDepth(framesB);
+      updateCardHeads(); // the headline's depth can come from the frames when reps carry no peak angle
       clockT = 0;
       applyClock();
     }
@@ -223,15 +244,19 @@ export const screen = {
     function buildScreen() {
       headRefs = renderHead({
         onModeChange: (mode) => { state.mode = mode; headRefs.sideBtn.setAttribute("aria-selected", mode === "side" ? "true" : "false"); headRefs.overlayBtn.setAttribute("aria-selected", mode === "overlay" ? "true" : "false"); mountAvatarsForMode(); renderLayout(); },
+        // Hands the headline to Patient review in memory (never in the URL: clinical text would land in
+        // history and a link could inject it); Patient review consumes it once and still needs Approve.
         onAddToNote: () => {
           const m = updateCardHeads();
           if (!m.headline) return;
-          ctx.navigate(href("patient", { pid: state.patientJson.patient.id }, { note: m.headline }));
+          const patientId = state.patientJson.patient.id;
+          ctx.store.set({ noteDraft: { patientId, text: m.headline } });
+          ctx.navigate(href("patient", { pid: patientId }));
         },
       });
       controlsRefs = renderControls({
-        onDateA: (sid) => { state.sidA = sid; reloadBothSessions(); },
-        onDateB: (sid) => { state.sidB = sid; reloadBothSessions(); },
+        onDateA: (sid) => { state.sidA = sid; stopClock(); reloadBothSessions(); },
+        onDateB: (sid) => { state.sidB = sid; stopClock(); reloadBothSessions(); },
         onExercise: (exId) => { state.exerciseId = exId; reloadExercise(); },
         onView: (v) => {
           state.view = v;
@@ -262,53 +287,61 @@ export const screen = {
 
     async function reloadExercise() {
       stopClock();
-      const sessions = sessionsForExercise(state.patientJson, state.exerciseId);
+      const sessions = sessionsForExercise(state.exerciseId);
       if (sessions.length < 2) {
         bodyHost.replaceChildren(headRefs.el, controlsRefs.el, noExerciseSessions());
         return;
       }
-      fillDateOptions(controlsRefs.dateASelect, sessions, state.sidA);
-      fillDateOptions(controlsRefs.dateBSelect, sessions, state.sidB);
+      // Defaults: first = the earliest session, second = the latest (bug 12).
       state.sidA = sessions[0].id;
       state.sidB = sessions[sessions.length - 1].id;
+      fillDateOptions(controlsRefs.dateASelect, sessions, state.sidA);
+      fillDateOptions(controlsRefs.dateBSelect, sessions, state.sidB);
       controlsRefs.dateASelect.value = state.sidA;
       controlsRefs.dateBSelect.value = state.sidB;
       await reloadBothSessions();
     }
 
+    // Sequenced: a slower, older date pick never overwrites a newer one (final review B, Minor 5).
     async function reloadBothSessions() {
+      const mySeq = ++sessionsSeq;
       bodyHost.replaceChildren(headRefs.el, controlsRefs.el, loading("Loading sessions…"));
       try {
         const [sessA, sessB] = await Promise.all([
           ctx.api.session(state.sidA), ctx.api.session(state.sidB),
         ]);
-        if (!alive) return;
+        if (!alive || mySeq !== sessionsSeq) return;
         state.sessA = sessA;
         state.sessB = sessB;
+        state.depthA = null;
+        state.depthB = null;
         updateCardHeads();
         mountAvatarsForMode();
         renderLayout();
-        await loadFrames();
+        await loadFrames(mySeq);
       } catch (err) {
-        if (!alive) return;
+        if (!alive || mySeq !== sessionsSeq) return;
         bodyHost.replaceChildren(headRefs.el, controlsRefs.el, errorState(err, reloadBothSessions));
       }
     }
 
     async function boot() {
-      if (!pid) { bodyHost.replaceChildren(errorState({ status: 0 })); return; }
+      if (!pid) { bodyHost.replaceChildren(h("div", { class: "card" }, empty("No patient selected", ""))); return; }
       try {
         const patientRes = await ctx.api.patient(pid);
         if (!alive) return;
         state.patientJson = patientRes;
         ctx.store.set({ selectedPatientId: pid });
+        await loadHistory();
+        if (!alive) return;
         buildScreen();
-        const exercises = exercisesFor(patientRes);
+        headRefs.metaEl.textContent = patientMeta(patientRes.patient);
+        const exercises = exercisesFor();
         if (exercises.length === 0) {
           bodyHost.replaceChildren(headRefs.el, noExerciseSessions());
           return;
         }
-        state.exerciseId = (patientRes.recent_sessions[0] && patientRes.recent_sessions[0].exercise_id) || exercises[0].id;
+        state.exerciseId = (state.history[0] && state.history[0].exercise_id) || exercises[0].id;
         fillExerciseOptions(controlsRefs.exerciseSelect, exercises, state.exerciseId);
         await reloadExercise();
       } catch (err) {

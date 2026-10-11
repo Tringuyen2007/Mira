@@ -4,15 +4,23 @@
 // data reload, never while a stepper/slider is mid-interaction (js/ui/stepper.js and slider.js keep their own
 // element alive across value changes).
 import { h, clear } from "../../core/dom.js";
+import { patientMeta, firstName } from "../../core/format.js";
+import { exerciseName } from "../../core/exercises.js";
+import { errorState } from "../../ui/states.js";
 import { proposalCard } from "../../ui/proposalCard.js";
+import { decideProposal } from "../../ui/proposalDecision.js";
 import { prescribeModel, diffPrescription, buildPutBody, hrLimitChanged } from "./model.js";
 import {
-  renderHead, renderExerciseCard, renderEditorCard, renderFlagsCard, renderHrLimitCard, renderEmergencyCard,
-  renderProposalsRail, renderSaveBar, renderUnsavedBar,
+  renderHead, renderExerciseCard, renderSearchResults, renderEditorCard, renderReferenceRepCard, renderFlagsCard,
+  renderHrLimitCard, renderEmergencyCard, renderProposalsRail, renderUnsavedBar,
 } from "./view.js";
 
 const EXERCISES_CAP = "/exercises";
 const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const SEARCH_DEBOUNCE_MS = 250;
+const PROPOSAL_EVENTS = new Set(["proposal_created", "proposal_decided"]);
+// A library pick is staged with these defaults; nothing is written until "Save plan".
+const STAGED_DEFAULTS = { sets: 3, reps: 10 };
 
 // The editor/flags fields the therapist can actually touch (keys this screen's `edits` map stores per
 // exercise id — a subset merged on top of prescribeModel()'s computed defaults for that exercise).
@@ -28,11 +36,17 @@ function editorValuesFor(patientJson, prescriptionsJson, progressJson, exerciseI
 
 function originalRxFor(prescriptionsJson, exerciseId) {
   const list = (prescriptionsJson && prescriptionsJson.prescriptions) || [];
-  return list.find((r) => r.exercise_id === exerciseId && r.active !== false) || null;
+  return list.find((r) => r.exercise_id === exerciseId && r.active !== false && !r.staged) || null;
 }
 
 function firstNameOf(name) {
-  return String(name || "").trim().split(/\s+/)[0] || "your patient";
+  return firstName(name) || "your patient";
+}
+
+// "Squats" -> "squat" for "Do one squat in front of Mira" (good enough for the known exercise names).
+function singular(name) {
+  const lower = String(name || "rep").toLowerCase();
+  return lower.endsWith("s") && !lower.endsWith("ss") ? lower.slice(0, -1) : lower;
 }
 
 export const screen = {
@@ -54,29 +68,52 @@ export const screen = {
       hrLimitEdit: null, // number once touched, else null (untouched)
       proposals: [],
       pendingHref: null,
+      staged: new Map(), // exerciseId -> staged library pick (not written until Save plan)
+      loadError: null, // set when the patient or prescriptions can't be loaded: no editing, no Save
     };
     const proposalCards = new Map();
+    let searchTimer = null;
+    let searchSeq = 0;
+    let proposalsTimer = null;
 
     // ---- persistent regions ----
-    const head = renderHead(null);
+    const head = renderHead({ onSave: () => save(), onDiscard: () => discard() });
+    const saveBar = head; // Save / Discard live in the page head (Figma: top right)
     const exerciseHost = h("div", {});
     const editorHost = h("div", {});
+    const referenceHost = h("div", {});
     const flagsHost = h("div", {});
     const limitHost = h("div", {});
     const emergencyHost = h("div", {});
     const rail = renderProposalsRail();
-    const saveBar = renderSaveBar({ onSave: () => save(), onDiscard: () => discard() });
     const unsavedHost = h("div", {});
-    const mainCol = h("div", { class: "prescribe__main" },
-      exerciseHost, editorHost, flagsHost, limitHost, emergencyHost, saveBar.el);
-    root.append(head.el, unsavedHost, h("div", { class: "prescribe__grid" }, mainCol, rail.el));
+    // Three columns (Figma): plan + emergency | editor + flags + heart rate | reference rep + proposals.
+    const gridEl = h("div", { class: "prescribe__grid" },
+      h("div", { class: "prescribe__col" }, exerciseHost, emergencyHost),
+      h("div", { class: "prescribe__col" }, editorHost, flagsHost, limitHost),
+      h("div", { class: "prescribe__col" }, referenceHost, rail.el));
+    const bodyHost = h("div", {}, gridEl);
+    root.append(head.el, unsavedHost, bodyHost);
+
+    // GET /prescriptions plus any staged library picks, as one list for the model.
+    function effectiveRxJson() {
+      const base = (state.prescriptionsJson && state.prescriptionsJson.prescriptions) || [];
+      if (state.staged.size === 0) return state.prescriptionsJson;
+      return { ...(state.prescriptionsJson || {}), prescriptions: [...base, ...state.staged.values()] };
+    }
+
+    function firstNameHere() {
+      return firstNameOf(state.patientJson && state.patientJson.patient && state.patientJson.patient.name);
+    }
 
     function isDirty() {
+      if (state.loadError) return false;
+      if (state.staged.size > 0) return true;
       if (hrLimitChanged(baseHrLimit(), state.hrLimitEdit)) return true;
       for (const [exerciseId] of state.edits) {
         const original = originalRxFor(state.prescriptionsJson, exerciseId);
         if (!original) continue;
-        const vals = editorValuesFor(state.patientJson, state.prescriptionsJson, state.progressJson,
+        const vals = editorValuesFor(state.patientJson, effectiveRxJson(), state.progressJson,
           exerciseId, state.edits);
         if (diffPrescription(original, { ...vals.editor, ...vals.flags }) != null) return true;
       }
@@ -95,69 +132,91 @@ export const screen = {
 
     // ---- exercise plan card ----
     function buildExerciseCard() {
-      const m = prescribeModel(state.patientJson, state.prescriptionsJson, state.progressJson,
+      const m = prescribeModel(state.patientJson, effectiveRxJson(), state.progressJson,
         state.selectedExerciseId);
       const canAdd = Boolean(ctx.caps && ctx.caps.has && ctx.caps.has(EXERCISES_CAP));
+      const n = m.exercises.length;
       const card = renderExerciseCard(m.exercises, {
         onSelect: (id) => { state.selectedExerciseId = id; buildEditorFlagsLimit(); },
-        onSearch: (q) => searchLibrary(q),
+        onSearch: (q) => onSearchInput(q),
         canAddFromLibrary: canAdd,
+        summary: n ? `${n} ${n === 1 ? "exercise" : "exercises"}` : null,
       });
       exerciseHost.replaceChildren(card.el);
     }
 
-    async function searchLibrary(q) {
-      if (!q || !q.trim()) return;
-      try {
-        const res = await ctx.api.exercises(q.trim());
-        if (!alive) return;
-        const items = (res && Array.isArray(res.exercises)) ? res.exercises : [];
-        // Minimal "add" affordance: picking a result prescribes it with sensible defaults, then reloads.
-        const list = h("ul", { class: "prescribe__search-list" }, items.slice(0, 8).map((x) => h("li", {},
-          h("button", { class: "btn btn--ghost", type: "button",
-            onclick: () => addFromLibrary(x.id || x) }, String(x.name || x.id || x)))));
-        exerciseHost.querySelector?.(".prescribe__search-results")?.replaceChildren(list);
-      } catch { /* search is a convenience; a failed lookup just shows nothing */ }
+    // Debounced, and sequenced so a slow older response never replaces newer results (final review B, I7).
+    function onSearchInput(q) {
+      clearTimeout(searchTimer);
+      const mySeq = ++searchSeq;
+      searchTimer = setTimeout(() => searchLibrary(q, mySeq), SEARCH_DEBOUNCE_MS);
     }
 
-    async function addFromLibrary(exerciseId) {
+    async function searchLibrary(q, mySeq) {
+      const resultsHost = exerciseHost.querySelector?.(".prescribe__search-results");
+      if (!q || !q.trim()) { resultsHost?.replaceChildren(); return; }
+      let items = [];
       try {
-        await ctx.api.putPrescription(pid, { exercise_id: exerciseId, sets: 3, reps: 10 });
-      } catch {
-        if (alive) ctx.toast({ kind: "error", text: "Couldn't add that exercise. Try again." });
-        return;
+        const res = await ctx.api.exercises(q.trim());
+        items = (res && Array.isArray(res.exercises)) ? res.exercises : [];
+      } catch { /* search is a convenience; a failed lookup just shows nothing */ }
+      if (!alive || mySeq !== searchSeq) return;
+      const list = items.slice(0, 8)
+        .map((x) => (typeof x === "string" ? { id: x } : x))
+        .filter((x) => x && PID_RE.test(String(x.id || "")))
+        .map((x) => ({ id: String(x.id), name: x.name ? String(x.name) : exerciseName(x.id) }));
+      exerciseHost.querySelector?.(".prescribe__search-results")
+        ?.replaceChildren(renderSearchResults(list, { onAdd: (id) => stageFromLibrary(id, list) }));
+    }
+
+    // A library pick only stages the exercise (dirty state); "Save plan" writes it, "Discard changes" drops it.
+    function stageFromLibrary(exerciseId, list) {
+      const already = originalRxFor(state.prescriptionsJson, exerciseId) || state.staged.has(exerciseId);
+      if (!already) {
+        const hit = (list || []).find((x) => x.id === exerciseId);
+        state.staged.set(exerciseId, { exercise_id: exerciseId, ...STAGED_DEFAULTS, targets: {}, limits: {},
+          rule_overrides: {}, active: true, staged: true, display_name: hit ? hit.name : null });
       }
-      if (!alive) return;
       state.selectedExerciseId = exerciseId;
-      await reloadPrescriptions();
+      buildEditorFlagsLimit();
     }
 
     // ---- editor / flags / limit cards ----
     function buildEditorFlagsLimit() {
-      const vals = editorValuesFor(state.patientJson, state.prescriptionsJson, state.progressJson,
+      const rxJson = effectiveRxJson();
+      const vals = editorValuesFor(state.patientJson, rxJson, state.progressJson,
         state.selectedExerciseId, state.edits);
+      const name = firstNameHere();
+      const selected = vals.editor.exerciseId;
+      const stagedName = selected && state.staged.get(selected) && state.staged.get(selected).display_name;
+      const title = selected ? (stagedName || exerciseName(selected)) : "Exercise";
       const editorCard = renderEditorCard(vals.editor, vals.limits, {
+        title,
         onChange: (partial) => {
-          const cur = state.edits.get(state.selectedExerciseId) || {};
-          state.edits.set(state.selectedExerciseId, { ...cur, ...partial });
+          const id = vals.editor.exerciseId;
+          const cur = state.edits.get(id) || {};
+          state.edits.set(id, { ...cur, ...partial });
           refreshDirty();
         },
       });
       editorHost.replaceChildren(editorCard.el);
+      referenceHost.replaceChildren(renderReferenceRepCard({ exerciseLabel: singular(title), firstName: name }));
 
       const flagsCard = renderFlagsCard(vals.flags, {
+        firstName: name,
         onChange: (partial) => {
-          const cur = state.edits.get(state.selectedExerciseId) || {};
-          state.edits.set(state.selectedExerciseId, { ...cur, ...partial });
+          const id = vals.editor.exerciseId;
+          const cur = state.edits.get(id) || {};
+          state.edits.set(id, { ...cur, ...partial });
           refreshDirty();
         },
       });
       flagsHost.replaceChildren(flagsCard.el);
 
-      const m = prescribeModel(state.patientJson, state.prescriptionsJson, state.progressJson,
-        state.selectedExerciseId);
+      const m = prescribeModel(state.patientJson, rxJson, state.progressJson, state.selectedExerciseId);
       const hrValue = state.hrLimitEdit != null ? state.hrLimitEdit : m.hrLimit;
       const limitCard = renderHrLimitCard(hrValue, {
+        firstName: name,
         onChange: (v) => { state.hrLimitEdit = v; refreshDirty(); },
       });
       limitHost.replaceChildren(limitCard.el);
@@ -167,11 +226,24 @@ export const screen = {
     }
 
     // ---- save / discard ----
+    // The PUT body for a staged library pick: sets/reps as shown in the editor, plus any edited targets/flags.
+    function stagedPutBody(exerciseId) {
+      const row = state.staged.get(exerciseId);
+      const vals = editorValuesFor(state.patientJson, effectiveRxJson(), state.progressJson, exerciseId, state.edits);
+      const diff = diffPrescription(row, { ...vals.editor, ...vals.flags }) || { exercise_id: exerciseId };
+      return { ...buildPutBody(row, diff), sets: diff.sets ?? row.sets, reps: diff.reps ?? row.reps };
+    }
+
     async function save() {
       if (!isDirty()) return;
       saveBar.saveBtn.setAttribute("disabled", "");
       saveBar.discardBtn.setAttribute("disabled", "");
       try {
+        for (const exerciseId of [...state.staged.keys()]) {
+          await ctx.api.putPrescription(pid, stagedPutBody(exerciseId));
+          state.staged.delete(exerciseId);
+          state.edits.delete(exerciseId);
+        }
         for (const [exerciseId] of state.edits) {
           const original = originalRxFor(state.prescriptionsJson, exerciseId);
           if (!original) continue;
@@ -192,8 +264,9 @@ export const screen = {
       }
       if (!alive) return;
       state.edits.clear();
+      state.staged.clear();
       state.hrLimitEdit = null;
-      const name = firstNameOf(state.patientJson && state.patientJson.patient && state.patientJson.patient.name);
+      const name = firstNameHere();
       await reloadAll();
       if (!alive) return;
       ctx.toast({ kind: "success", text: `Saved. Changes reach Mira the next time ${name} starts a session.` });
@@ -201,6 +274,7 @@ export const screen = {
 
     function discard() {
       state.edits.clear();
+      state.staged.clear();
       state.hrLimitEdit = null;
       buildEditorFlagsLimit();
     }
@@ -214,20 +288,38 @@ export const screen = {
       buildEditorFlagsLimit();
     }
 
+    // The patient and the prescriptions are required: if either fails (401/403/404/503/offline) the screen
+    // shows an error with Retry instead of editable defaults, and Save stays disabled (final review B, I8).
+    // Progress only feeds "Today's average", so its failure is tolerated.
     async function reloadAll() {
       const [patientRes, rxRes, progressRes] = await Promise.allSettled([
         ctx.api.patient(pid), ctx.api.prescriptions(pid), ctx.api.progress(pid, {}),
       ]);
       if (!alive) return;
-      if (patientRes.status === "fulfilled") state.patientJson = patientRes.value;
-      if (rxRes.status === "fulfilled") state.prescriptionsJson = rxRes.value;
+      const failed = [patientRes, rxRes].find((r) => r.status !== "fulfilled");
+      if (failed) {
+        state.loadError = failed.reason || new Error("load failed");
+        refreshDirty();
+        bodyHost.replaceChildren(h("section", { class: "card" }, errorState(state.loadError, () => retryLoad())));
+        return;
+      }
+      state.loadError = null;
+      if (gridEl.parentNode !== bodyHost) bodyHost.replaceChildren(gridEl);
+      state.patientJson = patientRes.value;
+      state.prescriptionsJson = rxRes.value;
       if (progressRes.status === "fulfilled") state.progressJson = progressRes.value;
-      head.titleEl.textContent = state.patientJson && state.patientJson.patient
-        ? `Prescribe · ${state.patientJson.patient.name}` : "Prescribe";
+      const patient = state.patientJson && state.patientJson.patient;
+      head.metaEl.textContent = patientMeta(patient);
+      head.subtitleEl.textContent = `Changes reach Mira the next time ${firstNameHere()} starts a session.`;
       emergencyHost.replaceChildren(renderEmergencyCard(
         prescribeModel(state.patientJson, state.prescriptionsJson, state.progressJson,
-          state.selectedExerciseId).emergency));
+          state.selectedExerciseId).emergency, { firstName: firstNameHere() }));
       buildEditorFlagsLimit();
+    }
+
+    async function retryLoad() {
+      await reloadAll();
+      if (alive && !state.loadError) loadProposals();
     }
 
     // ---- Mira Assistant proposals rail ----
@@ -242,26 +334,19 @@ export const screen = {
       if (existing && existing.key === key) return existing.el;
       const el = proposalCard(p, {
         current, patientStatus: "watch",
-        onApprove: (prop) => decideProposal(prop, () => ctx.api.approveProposal(prop.id), "Approved."),
-        onEdit: (prop, change) => decideProposal(prop, () => ctx.api.editProposal(prop.id, change),
-          "Approved with your changes."),
-        onDismiss: (prop) => decideProposal(prop, () => ctx.api.dismissProposal(prop.id, null), "Dismissed."),
+        onApprove: (prop) => decide(() => ctx.api.approveProposal(prop.id), "Approved."),
+        onEdit: (prop, change) => decide(() => ctx.api.editProposal(prop.id, change), "Approved with your changes."),
+        onDismiss: (prop) => decide(() => ctx.api.dismissProposal(prop.id, null), "Dismissed."),
       });
       proposalCards.set(p.id, { el, key });
       return el;
     }
 
-    async function decideProposal(p, call, successText) {
-      try {
-        await call();
-      } catch (err) {
-        if (!alive) return false;
-        ctx.toast({ kind: "error", text: (err && err.status === 403)
-          ? "Only this patient's therapist can decide this." : "Couldn't save the decision. Try again." });
-        return false;
-      }
-      if (!alive) return true;
-      ctx.toast({ kind: "success", text: successText });
+    // Same error mapping as the Assistant (409 reloads instead of letting the therapist retry forever).
+    async function decide(call, successText) {
+      const ok = await decideProposal(ctx, call, { successText, isAlive: () => alive,
+        onConflict: () => loadProposals() });
+      if (!ok || !alive) return ok;
       await reloadAll();
       if (!alive) return true;
       await loadProposals();
@@ -269,6 +354,7 @@ export const screen = {
     }
 
     async function loadProposals() {
+      if (state.loadError) return;
       try {
         const res = await ctx.api.proposals({ status: "pending", patientId: pid });
         if (!alive) return;
@@ -293,6 +379,7 @@ export const screen = {
         onDiscardAndLeave: () => {
           const href = state.pendingHref;
           state.edits.clear();
+          state.staged.clear();
           state.hrLimitEdit = null;
           state.pendingHref = null;
           clear(unsavedHost);
@@ -335,6 +422,13 @@ export const screen = {
     const hasWindowEvents = typeof globalThis.addEventListener === "function";
     if (hasWindowEvents) globalThis.addEventListener("beforeunload", onBeforeUnload);
 
+    // Proposals for this patient can be created or decided elsewhere (the Assistant, another tab): refresh.
+    const unsubEvents = ctx.sockets.subscribe("events", (msg) => {
+      if (!msg || !PROPOSAL_EVENTS.has(msg.type)) return;
+      clearTimeout(proposalsTimer);
+      proposalsTimer = setTimeout(() => { if (alive) loadProposals(); }, 800);
+    });
+
     // ---- boot ----
     async function boot() {
       ctx.store.set({ selectedPatientId: pid });
@@ -346,6 +440,9 @@ export const screen = {
 
     return () => {
       alive = false;
+      clearTimeout(searchTimer);
+      clearTimeout(proposalsTimer);
+      unsubEvents?.();
       document.removeEventListener("click", onDocClick, true);
       if (hasWindowEvents) globalThis.removeEventListener("beforeunload", onBeforeUnload);
     };

@@ -97,3 +97,11 @@ test("an event for an unknown alert id with an unknown step is dropped, not fabr
   const next = applyAlertEvent(model, evt);
   assert.deepEqual(next, model);
 });
+
+test("a brand-new alert over the socket is titled with the patient's name when patientsById is passed", () => {
+  const next = applyAlertEvent([], { type: "alert", alert_id: "new-1", patient_id: "maya", kind: "fall",
+    step: "detected", t: 1 }, { maya: { id: "maya", name: "Maya Ruiz" } });
+  assert.equal(next.length, 1);
+  assert.match(next[0].title, /Maya/);
+  assert.doesNotMatch(next[0].title, /— maya$/);
+});

@@ -71,3 +71,16 @@ test("timelapseModel: left/right labels, dates and the depth/load headline", () 
   assert.equal(Math.round(m.right.load), 47);
   assert.equal(m.headline, "Depth +22°, right-leg load 36% → 47%");
 });
+
+test("framesDepth, weekLabel and a capitalised headline when depth comes only from the frames", async () => {
+  const { framesDepth, weekLabel } = await import("../js/screens/timelapse/model.js");
+  assert.equal(framesDepth([{ knee_l: 60, knee_r: 70 }, { knee_l: 90, knee_r: 94 }, { knee_l: null, knee_r: 80 }]), 92);
+  assert.equal(framesDepth([]), null);
+  assert.equal(weekLabel("2026-10-11T10:00:00Z", "2026-07-23T10:00:00Z", "2026-01-01T00:00:00Z"), "Week 12");
+  assert.equal(weekLabel("2026-07-23T10:00:00Z", "2026-07-23T10:00:00Z", null), "Week 1");
+  const noPeak = (s, load) => ({ ...s, reps: s.reps.map((r) => ({ ...r, peak_angle: null })), tw_load_left_pct: load });
+  const m = timelapseModel(noPeak(session, 64), noPeak(session, 53), patientJson, { depthA: 70, depthB: 92 });
+  assert.equal(m.headline, "Depth +22°, right-leg load 36% → 47%");
+  const loadOnly = timelapseModel(noPeak(session, 64), noPeak(session, 53), patientJson);
+  assert.equal(loadOnly.headline, "Right-leg load 36% → 47%");
+});

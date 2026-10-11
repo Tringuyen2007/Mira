@@ -45,7 +45,9 @@ export function createNotificationsBell({ panelEl, api, navigate, toast, onChang
   function desktopNotify(n) {
     if (desktopPermission !== "granted" || !canUseDesktopNotifications()) return;
     const win = globalThis.window;
-    const dn = new win.Notification(n.title, { body: n.body || undefined });
+    // Generic text: OS notification centres keep these after sign-out on a shared workstation, so no patient
+    // name or detail goes there (final review B, Minor 10).
+    const dn = new win.Notification("Mira: urgent alert", { body: "Open Mira to see the details." });
     dn.onclick = () => {
       win.focus?.();
       const href = linkFor(n);
@@ -112,8 +114,9 @@ export function createNotificationsBell({ panelEl, api, navigate, toast, onChang
 
   function notifItem(n) {
     const href = linkFor(n);
-    const row = h("div", { class: `notif-item__row${n.read_at == null ? " notif-item__row--unread" : ""}`,
-      role: "button", tabindex: "0", onclick: () => openItem(n) },
+    // A real <button>, so Enter and Space open it (final review B, I5); Acknowledge stays a sibling button.
+    const row = h("button", { class: `notif-item__row${n.read_at == null ? " notif-item__row--unread" : ""}`,
+      type: "button", onclick: () => openItem(n) },
       h("p", { class: "notif-item__title" }, n.title),
       href ? h("span", { class: "notif-item__has-link" }, "Open") : null);
     const ackBtn = (isUrgent(n) && isUnacked(n))

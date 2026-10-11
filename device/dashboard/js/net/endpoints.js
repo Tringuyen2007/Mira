@@ -14,6 +14,9 @@ export function createEndpoints(api, therapistId) {
     progress: (pid, { exerciseId, days } = {}) =>
       api.get(`/patients/${enc(pid)}/progress`, { exercise_id: exerciseId, days }),
     memory: (pid, days = 21) => api.get(`/patients/${enc(pid)}/memory`, { days }),
+    // Finished sessions, newest first (Time-lapse date pickers; up to 200).
+    sessionHistory: (pid, { exerciseId, limit = 200 } = {}) =>
+      api.get(`/patients/${enc(pid)}/session-history`, { exercise_id: exerciseId, limit }),
 
     session: (sid) => api.get(`/sessions/${enc(sid)}`),
     framesLttb: (sid) => api.get(`/sessions/${enc(sid)}/frames`, { downsample: 300 }),

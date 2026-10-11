@@ -68,17 +68,51 @@ test("mounts from #/patients/:pid/timelapse, defaults to the earliest/latest ses
   unmount();
 });
 
-test("Add to progress note navigates to the patient screen with ?note=<headline>", async () => {
+test("Add to progress note hands the headline over in memory and navigates without it in the URL", async () => {
   const ctx = makeCtx();
   let navigated = null;
+  let stored = null;
   ctx.navigate = (hash) => { navigated = hash; };
+  ctx.store.set = (patch) => { if ("noteDraft" in patch) stored = patch.noteDraft; };
   const root = document.createElement("div");
   const unmount = screen.mount(root, ctx, { name: "timelapse", params: { pid: "maya" }, query: {} });
   await flush();
   const addBtn = root.querySelectorAll("button").find((b) => b.textContent === "Add to progress note");
   addBtn.dispatch("click");
-  assert.ok(navigated);
-  assert.match(navigated, /#\/patients\/maya\?note=/);
+  assert.equal(navigated, "#/patients/maya");
+  assert.deepEqual(stored, { patientId: "maya", text: "Depth +22°, right-leg load 36% → 47%" });
+  unmount();
+});
+
+test("dates come from the session-history route: defaults are the earliest and latest, weeks from the first session", async () => {
+  const ctx = makeCtx();
+  const history = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(Date.UTC(2026, 6, 23 + i * 7, 10));
+    history.push({ id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`, exercise_id: "squat",
+      started_at: d.toISOString(), reps_done: 10 });
+  }
+  history.reverse(); // newest first, as the server sends it
+  const asked = [];
+  ctx.api.sessionHistory = async (pid, opts) => { asked.push([pid, opts]); return { sessions: history }; };
+  const seen = [];
+  ctx.api.session = async (sid) => { seen.push(sid); return sid === history[history.length - 1].id ? sessA() : sessB(); };
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "timelapse", params: { pid: "maya" }, query: {} });
+  await flush();
+  assert.deepEqual(asked, [["maya", { limit: 200 }]]);
+  assert.deepEqual(seen.slice(0, 2), [history[history.length - 1].id, history[0].id]);
+  const first = root.querySelector("#timelapse-date-a");
+  const second = root.querySelector("#timelapse-date-b");
+  assert.match(first.childNodes[0].textContent, /^Week 1 · Jul 23$/);
+  assert.match(second.childNodes[second.childNodes.length - 1].textContent, /^Week 12 · /);
+  // Accessible names: every select has a <label for>.
+  for (const id of ["timelapse-date-a", "timelapse-date-b", "timelapse-exercise"]) {
+    assert.ok(root.querySelector(`[for="${id}"]`), id);
+  }
+  // One View control for the screen, none inside the cards.
+  assert.equal(root.querySelectorAll(".avatar-placeholder__segmented").length, 0);
+  assert.match(root.querySelector(".patient__meta").textContent, /Right knee replacement/);
   unmount();
 });
 

@@ -24,8 +24,8 @@ test("exerciseName: known ids map to the Figma display name", () => {
   assert.equal(exerciseName("step_up"), "Step-ups");
 });
 
-test("exerciseName: unknown id falls back to a humanised reading", () => {
-  assert.equal(exerciseName("wall_slide"), "Wall Slide");
+test("exerciseName: unknown id falls back to a humanised, sentence-case reading", () => {
+  assert.equal(exerciseName("wall_slide"), "Wall slide");
   assert.equal(exerciseName(""), "Exercise");
 });
 

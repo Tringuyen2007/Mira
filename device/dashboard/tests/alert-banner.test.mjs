@@ -94,3 +94,29 @@ test("a failed resolve re-enables the button and shows an inline error instead o
   assert.equal(button.hasAttribute("disabled"), false);
   assert.match(resolveBox.querySelector(".alert-banner__error").textContent, /Couldn't/);
 });
+
+test("a step event keeps the typed resolution note, its focus and the same element (keyed update in place)", () => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  const banner = createAlertBanner(root, { resolveAlert: async () => {} });
+  banner.render([makeAlert("a1"), makeAlert("a2")]);
+  const item = root.querySelector('[data-alert-id="a1"]');
+  const note = item.querySelector(".alert-banner__note");
+  note.value = "Called Maya, she is OK";
+  note.focus();
+  const ticked = makeAlert("a1");
+  ticked.steps[3] = { step: "resolved", label: "Resolved", time: "t4", done: true };
+  banner.render([makeAlert("a0"), ticked, makeAlert("a2")]);
+  assert.equal(root.querySelector('[data-alert-id="a1"]'), item);
+  assert.equal(item.querySelector(".alert-banner__note"), note);
+  assert.equal(note.value, "Called Maya, she is OK");
+  assert.equal(document.activeElement, note);
+  assert.ok(note.isConnected);
+  assert.deepEqual(root.querySelectorAll(".alert-banner__item").map((el) => el.getAttribute("data-alert-id")),
+    ["a0", "a1", "a2"]);
+  assert.ok(item.querySelectorAll(".alert-banner__step--done").length === 4);
+  banner.render([ticked]);
+  assert.deepEqual(root.querySelectorAll(".alert-banner__item").map((el) => el.getAttribute("data-alert-id")), ["a1"]);
+  assert.equal(note.value, "Called Maya, she is OK");
+  root.remove();
+});

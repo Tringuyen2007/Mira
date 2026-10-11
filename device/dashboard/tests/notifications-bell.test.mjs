@@ -113,3 +113,26 @@ test("markAllRead clears the unread badge", async () => {
   assert.equal(bell.getState().unread, 0);
   bell.destroy();
 });
+
+test("rows are real buttons, and closing returns focus to the live sidebar bell even after sidebar updates", async () => {
+  const { createSidebarView } = await import("../js/ui/sidebar.js");
+  const panelEl = document.createElement("div");
+  let view = null;
+  let bell = null;
+  const state = () => ({ route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null,
+    therapist: { name: "Dr. Sam Lee" }, live: null, unreadCount: bell.getState().unread,
+    bellOpen: bell.getState().open, onBellToggle: (btn) => bell.toggle(btn) });
+  bell = createNotificationsBell({ panelEl, api: fakeApi(), navigate: () => {}, toast: () => {},
+    onChange: () => view?.update(state()) });
+  view = createSidebarView(state());
+  document.body.append(view.el);
+  await bell.init();
+  view.bellEl.dispatch("click");
+  assert.equal(view.bellEl.getAttribute("aria-expanded"), "true");
+  assert.equal(panelEl.querySelector(".notif-item__row").tagName, "BUTTON");
+  bell.close();
+  assert.equal(document.activeElement, view.bellEl);
+  assert.equal(view.bellEl.getAttribute("aria-expanded"), "false");
+  view.el.remove();
+  bell.destroy();
+});
