@@ -86,6 +86,10 @@ final class ContractFixtureTests: XCTestCase {
         guard case .deviceHealth(let health) = try event("ws_events_device_health") else { return XCTFail("health") }
         XCTAssertEqual(health.cameras, 2)
         guard case .ping = try event("ws_ping") else { return XCTFail("ping") }
+        guard case .sessionSummary(let summary) = try event("ws_events_session_summary") else { return XCTFail("session_summary") }
+        XCTAssertEqual(summary.formScore, 100)
+        guard case .deviceStatus(let status) = try event("ws_events_device_status") else { return XCTFail("device_status") }
+        XCTAssertTrue(status.online)
     }
 
     /// What the app sends must be in the server's allow-list and match its samples.
@@ -113,6 +117,14 @@ final class ContractFixtureTests: XCTestCase {
         let detail = try decode(SessionDetail.self, "rest_get_session")
         XCTAssertFalse(detail.reps.isEmpty)
         XCTAssertEqual(detail.summary?.repsTotal, 4)
+        XCTAssertEqual(detail.exerciseName, "Mini squats")
+        XCTAssertNotNil(detail.analysis)
+        XCTAssertFalse(detail.analysis?.highlights.isEmpty ?? true)
+        let sessions = try decode(SessionList.self, "rest_get_patient_sessions")
+        XCTAssertEqual(sessions.patientId, "maya")
+        XCTAssertEqual(sessions.sessions.first?.formScore, 100)
+        let checkin = try decode(CheckinResponse.self, "rest_post_session_checkin")
+        XCTAssertTrue(checkin.noteSaved)
         XCTAssertEqual(try decode(SessionFrames.self, "rest_get_session_frames_lttb").points?.isEmpty, false)
         let full = try decode(SessionFrames.self, "rest_get_session_frames_full")
         XCTAssertEqual(full.mode, "full")

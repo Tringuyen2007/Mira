@@ -78,6 +78,7 @@ struct LiveMessage: Codable, Sendable {
     var t: Double?
     let phase: String  // idle | countdown | active | rest | paused | incident
     let exerciseId: String?
+    var exerciseName: String?
     let rep: Int
     let repsTarget: Int?
     var set: Int?
@@ -140,6 +141,36 @@ struct SummaryReadyMessage: Codable, Sendable {
     let therapistNote: String?
     let audioUrl: String?
 }
+/// A whole-session AI analysis, voiced once at session end (`SessionAnalyst`).
+struct Highlight: Codable, Sendable { let kind: String?; let text: String }
+struct FlaggedMoment: Codable, Sendable {
+    let set: Int?
+    let rep: Int?
+    let ruleId: String
+    let label: String?
+    let severity: String?
+    let t: Double?
+}
+struct SessionSummaryMessage: Codable, Sendable {
+    let sessionId: String?
+    let patientId: String?
+    let exerciseId: String?
+    let exerciseName: String?
+    let formScore: Int?
+    let repsTotal: Int?
+    let goodReps: Int?
+    let setsDone: Int?
+    let spoken: String
+    let note: String?
+    let highlights: [Highlight]
+    let nextFocus: String?
+    let flaggedMoments: [FlaggedMoment]
+    let comparison: JSONValue?
+    let audioUrl: String?
+    let source: String?
+}
+/// device_status: a device (lcd, watch…) reporting online/offline on /ws/events.
+struct DeviceStatusMessage: Codable, Sendable { let device: String?; let online: Bool }
 struct CoachAdaptMessage: Codable, Sendable { let action: String; let detail: JSONValue? }
 struct ProposalCreatedMessage: Codable, Sendable { let proposalId: Int; let patientId: String; let agent: String? }
 struct ProposalDecidedMessage: Codable, Sendable {
@@ -192,6 +223,7 @@ enum SocketEvent: Codable, Sendable {
     case proposalCreated(ProposalCreatedMessage), proposalDecided(ProposalDecidedMessage)
     case command(CommandMessage), hr(HeartRateMessage), wrist(WristMessage)
     case watchButton(WatchButtonMessage), deviceHealth(DeviceHealthMessage)
+    case sessionSummary(SessionSummaryMessage), deviceStatus(DeviceStatusMessage)
     case unknown(type: String, body: JSONValue)
 
     var type: String {
@@ -221,6 +253,8 @@ enum SocketEvent: Codable, Sendable {
         case .wrist: return "wrist"
         case .watchButton: return "watch_button"
         case .deviceHealth: return "device_health"
+        case .sessionSummary: return "session_summary"
+        case .deviceStatus: return "device_status"
         case .unknown(let type, _): return type
         }
     }
@@ -255,6 +289,8 @@ enum SocketEvent: Codable, Sendable {
         case "wrist": self = .wrist(try WristMessage(from: decoder))
         case "watch_button": self = .watchButton(try WatchButtonMessage(from: decoder))
         case "device_health": self = .deviceHealth(try DeviceHealthMessage(from: decoder))
+        case "session_summary": self = .sessionSummary(try SessionSummaryMessage(from: decoder))
+        case "device_status": self = .deviceStatus(try DeviceStatusMessage(from: decoder))
         default: self = .unknown(type: type, body: try JSONValue(from: decoder))
         }
     }
@@ -285,6 +321,8 @@ enum SocketEvent: Codable, Sendable {
         case .wrist(let v): try v.encode(to: encoder)
         case .watchButton(let v): try v.encode(to: encoder)
         case .deviceHealth(let v): try v.encode(to: encoder)
+        case .sessionSummary(let v): try v.encode(to: encoder)
+        case .deviceStatus(let v): try v.encode(to: encoder)
         case .unknown(_, let v): try v.encode(to: encoder)
         }
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -345,13 +383,56 @@ struct SessionSummary: Codable, Sendable {
     let aiSummary: String?, aiNote: String?, aiNoteLabel: String?
 }
 struct SetSummary: Codable, Sendable { let setNo: Int; let twLoadLeftPct: Double?; let reps: Int; let goodReps: Int }
+
+/// The whole-session AI analysis as stored (same shape as `SessionSummaryMessage`
+/// minus `t`, plus `createdAt`).
+struct SessionAnalysis: Codable, Sendable {
+    let sessionId: String?
+    let createdAt: String?
+    let formScore: Int?
+    let repsTotal: Int?
+    let goodReps: Int?
+    let setsDone: Int?
+    let spoken: String
+    let note: String?
+    let highlights: [Highlight]
+    let nextFocus: String?
+    let flaggedMoments: [FlaggedMoment]
+    let comparison: JSONValue?
+    let audioUrl: String?
+    let source: String?
+}
 struct SessionDetail: Codable, Sendable {
     let session: SessionRecord
+    let exerciseName: String?
+    let analysis: SessionAnalysis?
     let reps: [RepRecord]
     let summary: SessionSummary?
     let twLoadLeftPct: Double?
     let perSet: [SetSummary]?
 }
+
+/// GET /patients/{id}/sessions — a lightweight session list for the Progress/Care screens.
+struct SessionListItem: Codable, Sendable {
+    let id: String
+    let exerciseId: String
+    let exerciseName: String?
+    let startedAt: String
+    let endedAt: String?
+    let repsDone: Int?
+    let painPost: Int?
+    let effort: Int?
+    let shared: Bool
+    let formScore: Int?
+    let goodReps: Int?
+    let repsTotal: Int?
+    let spokenPreview: String?
+}
+struct SessionList: Codable, Sendable { let patientId: String; let sessions: [SessionListItem] }
+
+/// POST /sessions/{id}/checkin — pain/effort/note collected on the Summary screen.
+struct CheckinRequest: Codable, Sendable { var painPost: Int?; var effort: Int?; var note: String? }
+struct CheckinResponse: Codable, Sendable { let sessionId: String; let painPost: Int?; let effort: Int?; let noteSaved: Bool }
 
 /// `downsample > 0`: `mode = "lttb"` with `points`; `downsample = 0`: `mode = "full"`
 /// with `frames` and `next_t0` (request again with `t0 = next_t0` until it is null).

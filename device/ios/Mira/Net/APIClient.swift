@@ -122,6 +122,16 @@ struct APIClient {
     }
     func stopSession(id: String) async throws -> SessionStopped { try await request("POST", path: ["sessions", id, "stop"]) }
     func shareSession(id: String) async throws -> SessionShared { try await request("POST", path: ["sessions", id, "share"]) }
+    /// A patient's session history for the Progress/Care screens.
+    func sessions(patientID: String, limit: Int? = nil) async throws -> SessionList {
+        var query: [URLQueryItem] = []
+        if let limit { query.append(URLQueryItem(name: "limit", value: String(limit))) }
+        return try await request(path: ["patients", patientID, "sessions"], query: query)
+    }
+    /// Records pain/effort/note after a session ends (the Summary screen's check-in).
+    func checkin(sessionID: String, _ body: CheckinRequest) async throws -> CheckinResponse {
+        try await request("POST", path: ["sessions", sessionID, "checkin"], body: json(body))
+    }
     func askCopilot(question: String, patientID: String? = nil) async throws -> CopilotResponse {
         try await request("POST", path: ["copilot", "ask"], body: json(CopilotRequest(question: question, patientId: patientID)))
     }

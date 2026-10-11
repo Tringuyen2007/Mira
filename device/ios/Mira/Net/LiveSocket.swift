@@ -148,6 +148,11 @@ final class LiveSocket {
     }
 }
 
+/// Every /ws/events message carries `session_id`; decoded alongside the typed
+/// `SocketEvent` so `currentSessionID` tracks it even for event types this app
+/// version does not model.
+private struct SessionStamp: Codable { let sessionId: String? }
+
 @MainActor
 @Observable
 final class LiveSessionStore {
@@ -160,6 +165,12 @@ final class LiveSessionStore {
     private(set) var latestEvent: SocketEvent?
     private(set) var alert: AlertMessage?
     private(set) var fallStatus: FallStatusMessage?
+    /// The session currently in progress, from any /ws/events message's `session_id`.
+    private(set) var currentSessionID: String?
+    /// The whole-session AI analysis, delivered once at session end.
+    private(set) var sessionSummary: SessionSummaryMessage?
+    /// Whether the LCD kiosk is currently online (from `device_status`, `device == "lcd"`).
+    private(set) var lcdOnline: Bool?
     /// The server echoes every accepted client message on /ws/events; a command
     /// appearing here proves it passed the allow-list (and the rate limit).
     private(set) var lastCommand: CommandMessage?
@@ -193,12 +204,21 @@ final class LiveSessionStore {
         }
         eventSocket.onMessage = { [weak self] data in
             guard !WireJSON.isPing(data) else { return }
+            if let stamp = try? WireJSON.decoder().decode(SessionStamp.self, from: data), let sessionId = stamp.sessionId {
+                self?.currentSessionID = sessionId
+            }
             self?.decode(data, as: SocketEvent.self) { event in
                 self?.latestEvent = event
                 switch event {
+                case .arrived: self?.sessionSummary = nil
                 case .cue(let cue): self?.cue = cue.text
                 case .greeting(let greeting): self?.cue = greeting.text
                 case .summaryReady(let summary): self?.cue = summary.spoken
+                case .sessionSummary(let summary):
+                    self?.sessionSummary = summary
+                    self?.cue = summary.spoken
+                case .deviceStatus(let status):
+                    if status.device == nil || status.device == "lcd" { self?.lcdOnline = status.online }
                 case .alert(let alert):
                     self?.alert = alert.isOpen ? alert : nil
                     if !alert.isOpen { self?.fallStatus = nil }
@@ -224,6 +244,7 @@ final class LiveSessionStore {
         if reset {
             live = nil; pose = nil; cue = nil; latestEvent = nil; alert = nil; fallStatus = nil; lastCommand = nil
             receivedMessages = 0; decodingError = nil
+            currentSessionID = nil; sessionSummary = nil; lcdOnline = nil
         }
         guard let token else {
             liveSocket.markNotPaired(); eventSocket.markNotPaired(); poseSocket.markNotPaired()
