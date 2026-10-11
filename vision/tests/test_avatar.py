@@ -70,5 +70,14 @@ def test_mouse_drag_orbits():
 
 def test_legend_lists_every_key():
     text = " ".join(legend_lines())
-    for key in ("drag", "j/l", "i/k", "+/-", "0", "v"):
+    for key in ("drag", "j/l", "i/k", "+/-", "0", "v", "b"):
         assert key in text
+
+
+def test_b_key_re_measures_the_body():
+    v = AvatarView()
+    X = standing_skeleton()
+    for k in range(5):
+        v.rig.update(k / 30, X, "3d")
+    assert v.rig.progress > 0
+    assert v.handle_key(ord("b")) and v.rig.progress == 0

@@ -89,3 +89,14 @@ def test_view_mouse_drag_in_3d_panel_only():
     mouse(1, 900, 500, 0, None)  # press inside the bottom-right panel, then drag
     mouse(0, 960, 500, 1, None)
     assert view.yaw_deg != yaw
+
+
+def test_3d_view_uses_the_rig_and_says_when_it_is_measuring():
+    from vision.avatar import AvatarView
+
+    cams, X = target_cams(), standing_skeleton()
+    view = AvatarView()
+    pipe = Pipeline(cams)
+    out = pipe.process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+    compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    assert 0 < view.rig.progress < 1

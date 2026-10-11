@@ -216,7 +216,10 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     hud.append("keys: r record   m markers   q quit")
     feet = out.feet_locked if out is not None else None
     if view is not None and view.show_3d:
-        right = render_avatar(frame.joints if frame is not None else None, mat, view, feet_locked=feet, hud=hud)
+        body = view.rig.update(frame.t, frame.joints, frame.tracking) if frame is not None else None
+        if view.rig.progress < 1:
+            hud = hud + [f"measuring body... {view.rig.progress * 100:.0f}% (stand on the mat)"]
+        right = render_avatar(body, mat, view, feet_locked=feet, hud=hud)
     else:
         right = render_front(frame, hud)
     bottom = np.hstack([render_topdown(frame, mat, cams, feet), right])

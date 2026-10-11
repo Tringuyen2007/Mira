@@ -16,6 +16,7 @@ import numpy as np
 from vision.config import MatConfig
 from vision.draw import GREEN, RED, WHITE, draw_text
 from vision.frames import look_at_pose
+from vision.rig import BodyRig
 
 SIZE = (640, 360)
 HFOV_DEG = 60.0
@@ -147,6 +148,7 @@ class AvatarView:
     dist_m: float = 4.6
     target: tuple = (0.0, 0.95, 0.0)
     show_3d: bool = True
+    rig: BodyRig = field(default_factory=BodyRig)  # fixed body proportions for the drawn person
     _defaults: tuple = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -192,6 +194,8 @@ class AvatarView:
             self.yaw_deg, self.pitch_deg, self.dist_m = self._defaults
         elif c == "v":
             self.show_3d = not self.show_3d
+        elif c == "b":
+            self.rig.reset()
         else:
             return False
         self._clamp()
@@ -199,7 +203,8 @@ class AvatarView:
 
 
 def legend_lines() -> list[str]:
-    return ["drag / j/l: orbit   i/k: tilt   +/-: zoom   0: reset view   v: 3D <-> front view"]
+    return ["b: re-measure body   v: 3D <-> front view",
+            "drag / j/l: orbit   i/k: tilt   +/-: zoom   0: reset view"]
 
 
 def _project(X, K, R, t):

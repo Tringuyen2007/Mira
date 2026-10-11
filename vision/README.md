@@ -64,8 +64,15 @@ If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on 
 
 The debug view's bottom-right panel shows a low-poly 3D person rebuilt every frame from the joints
 (left side orange, right side blue, a shadow on the floor, anchored feet outlined white). Drag in it
-to orbit; keys: j/l orbit, i/k tilt, +/- zoom, 0 reset, v switch to the flat front view. Works on
-replays too.
+to orbit; keys: j/l orbit, i/k tilt, +/- zoom, 0 reset, v switch to the flat front view, b re-measure
+the body. Works on replays too.
+
+The 3D person is a rig with fixed proportions (`vision/rig.py`): for the first ~40 frames of two-camera
+tracking it measures each bone (median, left and right averaged; the panel says "measuring body"),
+then only rotates joints: the torso and head follow the tracked directions at the measured lengths,
+and arms and legs use two-bone IK to reach the tracked wrists/ankles (so anchored feet stay put),
+bending toward the tracked elbows/knees. It re-measures after 5 s with nobody tracked, or on b. Only
+the 3D view is rigged; FrameResult.joints, recordings and checks stay as measured.
 
 ### Who gets tracked
 
