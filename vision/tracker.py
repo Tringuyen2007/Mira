@@ -286,12 +286,12 @@ class ModelTracker:
         self.cfgs = cams
         self.single = len(self.cams) == 1
         self.height_m = height_m
-        self.world_scale = 1.0
         self.frames_needed, self.max_nfev = frames_needed, max_nfev
         self.reset()
 
     def reset(self) -> None:
         self.shape: BodyShape | None = None
+        self.world_scale = 1.0  # a new person or session is measured afresh, at MediaPipe's own scale
         self._samples: list[np.ndarray] = []
         self._p: np.ndarray | None = None
         self._last_seen: float | None = None
@@ -409,6 +409,7 @@ class ModelTracker:
 
         joints: the triangulated/cleaned joints (for measuring and initialisation); views: the selected,
         correctly labelled person per camera; anchors: side -> planted ankle position."""
+        produced_at = self.world_scale  # the scale the pipeline built this frame's one-camera joints at
         if self._last_seen is not None and t - self._last_seen > FORGET_S:
             self.reset()
         if tracking == "lost" or joints is None:
@@ -417,7 +418,8 @@ class ModelTracker:
         if self.shape is None:
             usable = tracking == "3d" or (self.single and tracking.startswith("single_cam"))
             if usable and joints is not None and np.isfinite(joints[NEEDED]).all():
-                self._samples.append(np.array(joints, float))
+                # measured at scale 1: one-camera joints come scaled by world_scale (1 until measured)
+                self._samples.append(np.array(joints, float) / (produced_at if self.single else 1.0))
                 if len(self._samples) >= self.frames_needed:
                     self.shape = measure(self._samples)
                     if self.shape is not None and self.single and self.height_m:

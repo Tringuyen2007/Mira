@@ -103,3 +103,22 @@ def test_one_camera_hold_with_feet_hidden_does_not_drift():
     held = np.array([_hip_xz(o) for o in outs[30:]])
     start = _hip_xz(outs[29])
     assert np.max(np.linalg.norm(held - start, axis=1)) < 0.01
+
+
+def test_one_camera_body_scale_is_the_same_after_a_reset():
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=1.90)
+    t, sessions = 0.0, []
+    for _ in range(2):
+        for _ in range(60):
+            out = pipe.process(t, None, [pose_from_points(cam, X, t=t)])
+            t += 1 / 30
+        assert out.tracker == "model"
+        J = out.frame.joints
+        sessions.append((pipe._model.world_scale, stature(J - (J[23] + J[24]) / 2)))
+        for _ in range(180):  # 6 s with nobody: the body is forgotten
+            pipe.process(t, None, [])
+            t += 1 / 30
+    (s1, h1), (s2, h2) = sessions
+    assert abs(s2 / s1 - 1) < 0.01
+    assert abs(h2 / h1 - 1) < 0.01
