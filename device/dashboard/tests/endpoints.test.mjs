@@ -16,6 +16,7 @@ test("paths, encoding and therapist id injection", async () => {
   await ep.setLimits("maya", { hrLimit: 120 });
   await ep.approveProgressNote("s1", "Week 3 …");
   await ep.caseload();
+  await ep.sayLive("maya", "Slow down");
   assert.deepEqual(api.calls, [
     ["GET", "/patients/a%2Fb", undefined],
     ["POST", "/proposals/7/approve", { therapist_id: "okafor" }],
@@ -25,6 +26,7 @@ test("paths, encoding and therapist id injection", async () => {
     ["PATCH", "/patients/maya/limits", { therapist_id: "okafor", hr_limit: 120 }],
     ["POST", "/sessions/s1/progress-note", { therapist_id: "okafor", text: "Week 3 …" }],
     ["GET", "/caseload", { therapist_id: "okafor" }],
+    ["POST", "/live/say", { patient_id: "maya", therapist_id: "okafor", text: "Slow down" }],
   ]);
 });
 

@@ -120,3 +120,17 @@ test("a failed progress fetch doesn't block the rest of the screen (Promise.allS
   assert.match(root.textContent, /Therapist Memory/);
   unmount();
 });
+
+test("?note=<headline> from the time-lapse screen prefills the progress-note draft, unapproved", async () => {
+  const { ctx } = makeCtx();
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, {
+    name: "patient", params: { pid: "maya" }, query: { note: "Depth +22°, right-leg load 36% → 47%" },
+  });
+  await flush();
+  assert.match(root.textContent, /Depth \+22°, right-leg load 36% → 47%/);
+  // Still an AI draft — the therapist must click Approve, same as any other AI-authored note.
+  assert.match(root.textContent, /AI draft/);
+  assert.match(root.textContent, /Approve/);
+  unmount();
+});

@@ -68,6 +68,38 @@ test("registerAvatarRenderer: createAvatarView delegates to a registered rendere
   }
 });
 
+test("ghost option: setFrame(frame, ghostFrame) renders a second, muted pill row for the earlier frame", () => {
+  const container = document.createElement("div");
+  const view = createAvatarView(container, { mode: "replay", affectedSide: "right", ghost: true });
+  const laterJoints = pose.joints;
+  const earlierJoints = pose.joints.map((p) => [p[0], p[1] + 0.01, p[2]]);
+  view.setFrame(
+    { joints: laterJoints, load_l_pct: pose.load_l_pct, flags: [], t: pose.t },
+    { joints: earlierJoints, load_l_pct: pose.load_l_pct, flags: [], t: pose.t - 10 },
+  );
+
+  const ghostHost = container.querySelector(".avatar-placeholder__pills--ghost");
+  assert.ok(ghostHost, "a muted ghost pill row exists");
+  const ghostRKnee = ghostHost.querySelector(".avatar-pill--rknee").querySelector(".avatar-pill__value").textContent;
+  const liveHosts = container.querySelectorAll(".avatar-placeholder__pills")
+    .filter((el) => !el.classList.contains("avatar-placeholder__pills--ghost"));
+  const liveRKnee = liveHosts[0].querySelector(".avatar-pill--rknee").querySelector(".avatar-pill__value").textContent;
+  const expectEarlier = `${Math.round(kneeFlexion(earlierJoints, "right"))}°`;
+  const expectLater = `${Math.round(kneeFlexion(laterJoints, "right"))}°`;
+  assert.equal(ghostRKnee, expectEarlier);
+  assert.equal(liveRKnee, expectLater);
+  view.dispose();
+});
+
+test("without the ghost option, a second setFrame argument is simply ignored (no ghost row)", () => {
+  const container = document.createElement("div");
+  const view = createAvatarView(container, { mode: "replay", affectedSide: "right" });
+  view.setFrame({ joints: pose.joints, load_l_pct: pose.load_l_pct, flags: [], t: pose.t },
+    { joints: pose.joints, load_l_pct: pose.load_l_pct, flags: [], t: pose.t });
+  assert.equal(container.querySelector(".avatar-placeholder__pills--ghost"), null);
+  view.dispose();
+});
+
 test("dispose removes the placeholder's DOM from the container", () => {
   const container = document.createElement("div");
   const view = createAvatarView(container, { mode: "replay", affectedSide: "right" });

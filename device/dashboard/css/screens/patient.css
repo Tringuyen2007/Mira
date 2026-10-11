@@ -183,6 +183,12 @@
   color: var(--color-alert-text);
 }
 
+/* Overlay mode's earlier-date row (createAvatarView's { ghost: true } option): muted, see-through. */
+.avatar-placeholder__pills--ghost {
+  opacity: 0.5;
+  margin-top: calc(-1 * var(--space-1));
+}
+
 .avatar-placeholder__balance {
   margin-top: var(--space-2);
 }

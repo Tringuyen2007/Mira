@@ -20,6 +20,10 @@ export function createEndpoints(api, therapistId) {
     approveProgressNote: (sid, text) =>
       api.post(`/sessions/${enc(sid)}/progress-note`, { therapist_id: therapistId, text }),
 
+    // Planned route (decisions): the Live session screen's "Send a cue" panel only calls this (and only
+    // renders at all) when caps.has("/live/say") — the device-bridge endpoint that says a cue through Mira.
+    sayLive: (pid, text) => api.post("/live/say", { patient_id: pid, therapist_id: therapistId, text }),
+
     alerts: () => api.get("/alerts"),
     resolveAlert: (alertId, note) =>
       api.post(`/alerts/${enc(alertId)}/resolve`, { resolved_by: therapistId, note }),

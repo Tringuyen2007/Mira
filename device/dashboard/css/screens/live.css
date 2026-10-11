@@ -1,0 +1,153 @@
+/* Live session screen (Figma 210:820): head, live 3D twin room, Send-a-cue panel, Said-this-session list. */
+
+.live__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.live__subtitle {
+  margin-top: var(--space-1);
+  max-width: 56ch;
+}
+
+.live__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.live__mode button {
+  min-width: 64px;
+}
+
+.live__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 1279px) {
+  .live__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.live__room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.live__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-ink);
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.live__badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-alert-strong, #e34850);
+  display: inline-block;
+}
+
+.live__room-body {
+  position: relative;
+}
+
+.live__rep-card {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  text-align: right;
+}
+
+.live__rep-big {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.live__hr-chip {
+  position: absolute;
+  top: calc(var(--space-3) + 88px);
+  right: var(--space-3);
+}
+
+.live__paused-banner {
+  position: absolute;
+  bottom: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-ink);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-weight: 600;
+}
+
+.live__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.live__cue-textarea {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  font: inherit;
+  color: var(--color-ink);
+  background: var(--color-card);
+  resize: vertical;
+  margin: var(--space-3) 0;
+}
+
+.live__cue-send {
+  width: 100%;
+}
+
+.live__quick-cues-label {
+  margin-top: var(--space-4);
+}
+
+.live__quick-cues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.live__quick-cue {
+  cursor: pointer;
+  border: 1.5px solid var(--color-line);
+  background: var(--color-card);
+}
+
+.live__cue-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.live__cue-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.live__cue-time {
+  min-width: 40px;
+}

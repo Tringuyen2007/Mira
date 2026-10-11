@@ -12,7 +12,7 @@ never knows whether it's talking to the placeholder or the real renderer.
 import { createAvatarView, registerAvatarRenderer } from "../avatar/avatarView.js";
 
 createAvatarView(container, { mode: "replay" | "live", affectedSide: "left" | "right", ghost: false })
-  // -> { setFrame(frame), setView(view), setLabelsVisible(bool), dispose() }
+  // -> { setFrame(frame, ghostFrame?), setView(view), setLabelsVisible(bool), dispose() }
 
 registerAvatarRenderer(factory);
   // factory(container, opts) -> same shape as createAvatarView's return value.
@@ -33,6 +33,13 @@ frame = {
 
 Called up to ~30 Hz during replay/live playback. The placeholder throttles its own DOM writes to ~10 Hz
 (`THROTTLE_MS` in `avatarView.js`); a canvas/WebGL renderer has no such limit and can render every frame.
+
+### `setFrame(frame, ghostFrame)` — Overlay mode only
+
+Only meaningful when `{ ghost: true }` was passed to `createAvatarView`. `ghostFrame` is the *earlier* date's
+frame in the Recovery time-lapse screen's Overlay toggle (same shape as `frame`); the placeholder renders it as
+a second, muted pill row underneath the live one. Ignored (and safe to omit) when `ghost` wasn't set — the
+screen can always pass a second argument without checking which mode it's in.
 
 ### `setView(view)`
 

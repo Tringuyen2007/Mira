@@ -19,10 +19,13 @@ import { screen as caseloadScreen } from "./screens/caseload/index.js";
 import { screen as assistantScreen } from "./screens/assistant/index.js";
 import { screen as patientScreen } from "./screens/patient/index.js";
 import { screen as prescribeScreen } from "./screens/prescribe/index.js";
+import { screen as liveScreen } from "./screens/live/index.js";
+import { screen as timelapseScreen } from "./screens/timelapse/index.js";
 
 // Screens land here in later milestones; a route that resolves but has no entry shows "Coming soon".
 const SCREENS = {
   caseload: caseloadScreen, assistant: assistantScreen, patient: patientScreen, prescribe: prescribeScreen,
+  live: liveScreen, timelapse: timelapseScreen,
 };
 const SCREEN_ALIAS = { replay: "patient", proposal: "assistant" };
 // Events that mean the pending-proposals count (sidebar's Mira Assistant badge) may have changed.

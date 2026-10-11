@@ -48,6 +48,7 @@ export const screen = {
       mode: "replay",
       currentRep: null,
       noSessions: false,
+      noteOverride: typeof route.query.note === "string" && route.query.note.trim() ? route.query.note.trim() : null,
     };
     let frames = [];
     let framesAbort = null;
@@ -320,7 +321,14 @@ export const screen = {
     }
 
     function buildNoteCard(approval) {
-      const m = noteModel(state.sessionJson, approval);
+      let m = noteModel(state.sessionJson, approval);
+      // Recovery time-lapse's "Add to progress note" navigates here with ?note=<headline>; prefilled into the
+      // AI draft (still unapproved — the therapist still has to click Approve, decisions: "the therapist still
+      // approves it"). Never applied on top of an already-approved note.
+      if (state.noteOverride && !(approval && approval.approved)) {
+        const text = [m.text, state.noteOverride].filter((s) => s && s.trim()).join("\n\n");
+        m = { ...m, text, canApprove: text.trim().length > 0 };
+      }
       const refs = renderNoteCard(m, {
         onEdit: () => {},
         onApprove: async (text) => {
