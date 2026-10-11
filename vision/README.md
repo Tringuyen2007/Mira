@@ -116,15 +116,18 @@ Pose cost grows with the number of people it looks for. `--poses N` (debug view 
 
 ### Foot anchoring
 
-A planted foot (heel and toe within 12 cm of the floor, barely moving for 0.2 s) is held still at its
-average position (it is not snapped down to the mat surface, so a floor error stays visible), so
-MediaPipe's wobble doesn't make the feet jitter while standing or squatting. It releases on a real step or lift (the detected foot more
-than 5 cm away, or the heel off the floor, for 2 frames) and fades back to the live position over
-0.1 s. The debug view's top view draws a white square under an anchored foot.
+A planted foot (heel and toe within 12 cm of the floor, barely moving for 0.2 s) is softly anchored:
+it starts at its average position (not snapped down to the mat surface, so a floor error stays
+visible) and drifts toward the detections at about half a second to settle, so MediaPipe's wobble is
+removed but weight shifts still show; one-frame jumps (junk triangulations) are not followed. It
+releases on a real step or lift (the detected foot more than 3 cm away, or the heel off the floor,
+for 2 frames) and fades back to the live position over 0.1 s. The debug view's top view draws a white square under an anchored foot.
 `Pipeline(..., anchor_feet=False)` (and `replay_outputs(..., anchor_feet=False)`) turns it off. `checks`
 measures unanchored joints: it reports "feet anchored while standing" (how often both feet would
 anchor) and "foot height above mat" (median height of the lowest heel/toe, target -1 to 5 cm; off
-means the floor or calibration is off).
+means the floor or calibration is off), plus "standing straight" (median tilt of the ankles-to-
+shoulders line while the knees are straight, target ≤ 3°; more means the calibration is tilted —
+run `calib_refine`).
 
 ### Left/right flips
 

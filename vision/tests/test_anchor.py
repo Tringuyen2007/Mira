@@ -23,12 +23,12 @@ def test_jittery_planted_foot_is_held_still():
     outs, locks = _run(frames)
     assert all(lk["l"] and lk["r"] for lk in locks[10:])
     for side, idx in FEET.items():
-        assert outs[10:, list(idx)].std(axis=0).max() < 0.002  # raw jitter was 1 cm
+        assert outs[10:, list(idx)].std(axis=0).max() < 0.003  # raw jitter was 1 cm; the soft anchor lets ~2 mm through
     k0 = next(k for k, lk in enumerate(locks) if lk["l"])  # planted here, held ever since
     assert all(lk["l"] for lk in locks[k0:])
-    j = max(i for i in range(k0 + 1) if k0 * DT - i * DT >= 0.2)  # the stillness window it averaged
-    raw_mean = np.mean([f[list(FEET["l"])] for f in frames[j:k0 + 1]], axis=0)
-    assert np.abs(outs[-1, list(FEET["l"])] - raw_mean).max() < 0.002  # held where it was, not snapped down
+    held = outs[-1, list(FEET["l"])]  # soft anchor: stays near the true spot, drifting within the noise
+    assert np.abs(held - X[list(FEET["l"])]).max() < 0.01
+    assert (held[:, 1] > X[list(FEET["l"]), 1] - 0.01).all()  # the 3 cm floor error stays visible: not snapped down
     assert outs[10:, 0].std(axis=0).max() > 0.005  # the rest of the body is untouched
 
 
@@ -94,3 +94,34 @@ def test_pipeline_anchors_feet_and_can_be_turned_off():
         locked.append(o1.feet_locked)
     assert locked[-1] == {"l": True, "r": True} and off.process(2.0, a, b).feet_locked is None
     assert np.std(heels_on[15:], axis=0).max() < 0.3 * np.std(heels_off[15:], axis=0).max()
+
+
+def test_soft_anchor_follows_a_small_real_shift_but_not_junk():
+    from vision.anchor import RELEASE_M
+
+    X = standing_skeleton()
+    frames = [X.copy() for _ in range(15)]
+    shifted = X.copy()
+    shifted[[27, 29, 31], 2] += 0.02  # weight shift: the foot settles 2 cm forward (under the release distance)
+    frames += [shifted.copy() for _ in range(45)]
+    outs, locks = _run(frames)
+    assert RELEASE_M <= 0.03 and all(lk["l"] for lk in locks[15:])  # stays anchored...
+    assert outs[-1, 29, 2] - X[29, 2] > 0.018  # ...but follows the 2 cm shift within 1.5 s
+    assert abs(outs[16, 29, 2] - outs[15, 29, 2]) < 0.005  # gradually, not in one jump
+
+    junk = [X.copy() for _ in range(15)]
+    spike = X.copy()
+    spike[[27, 29, 31], 2] -= 0.6  # a one-frame junk triangulation
+    junk += [spike] + [X.copy() for _ in range(5)]
+    outs, locks = _run(junk)
+    assert locks[16]["l"] and np.abs(outs[15:, 29] - outs[14, 29]).max() < 0.001  # ignored
+
+
+def test_anchor_releases_at_three_centimetres():
+    X = standing_skeleton()
+    frames = [X.copy() for _ in range(15)]
+    moved = X.copy()
+    moved[[27, 29, 31], 0] += 0.04
+    frames += [moved.copy() for _ in range(3)]
+    _, locks = _run(frames)
+    assert not locks[-1]["l"]

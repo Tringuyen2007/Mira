@@ -2,7 +2,8 @@
 
 A foot (ankle, heel, toe) is planted when its heel and toe are near the floor and it has barely
 moved for a moment; it is then held at its average position over that moment (no vertical snap, so
-a floor error stays visible). It is released by a real step or lift (the raw foot moves away from the anchor, or the
+a floor error stays visible), drifting slowly toward small real shifts (a soft anchor: jitter is removed,
+weight shifts still show). It is released by a real step or lift (the raw foot moves away from the anchor, or the
 heel leaves the floor, for a couple of frames) and blends back to the live position so it never jumps.
 The rest of the body is untouched: a squat with planted feet keeps the feet locked while hips drop.
 """
@@ -16,9 +17,10 @@ FEET = {"l": (27, 29, 31), "r": (28, 30, 32)}  # ankle, heel, toe (foot index)
 CONTACT_HEIGHT_M = 0.12  # heel and toe below this: touching the floor
 STILL_SPEED_MPS = 0.15  # slower than this over STILL_S: not moving
 STILL_S = 0.2
-RELEASE_M = 0.05  # raw foot this far from the anchor ...
+RELEASE_M = 0.03  # raw foot this far from the anchor ...
 RELEASE_FRAMES = 2  # ... for this many frames in a row: a real step
 BLEND_S = 0.1
+FOLLOW_PER_S = 2.0  # a planted foot drifts toward the detections at this rate (soft anchor: ~0.5 s to settle)
 
 
 class _Foot:
@@ -28,6 +30,7 @@ class _Foot:
         self.anchor_raw: np.ndarray | None = None  # what the detections said when it planted
         self.away = 0
         self.blend: tuple[float, np.ndarray] | None = None  # (release time, held - live offset) fading out
+        self.last_t: float | None = None
 
     def reset(self):
         self.__init__()
@@ -67,9 +70,14 @@ class FootAnchor:
     @staticmethod
     def _step(foot: _Foot, t: float, pts: np.ndarray) -> bool:
         on_floor = pts[1, 1] <= CONTACT_HEIGHT_M and pts[2, 1] <= CONTACT_HEIGHT_M
+        dt = (t - foot.last_t) if foot.last_t is not None else 0.0
+        foot.last_t = t
         if foot.anchor is not None:
             moved = float(np.max(np.linalg.norm(pts - foot.anchor_raw, axis=1))) > RELEASE_M
             foot.away = foot.away + 1 if (moved or not on_floor) else 0
+            if foot.away == 0:  # soft anchor: drift toward small real shifts; jumps (junk or a step) aren't followed
+                foot.anchor_raw = foot.anchor_raw + (1 - np.exp(-FOLLOW_PER_S * max(dt, 0.0))) * (pts - foot.anchor_raw)
+                foot.anchor = foot.anchor_raw.copy()
             if foot.away < RELEASE_FRAMES:
                 return True
             foot.blend = (t, foot.anchor - pts)
