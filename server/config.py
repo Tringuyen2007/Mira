@@ -85,6 +85,9 @@ class Config:
     ELEVEN_VOICE_ID: str | None = None
     ELEVEN_MODEL: str = "eleven_flash_v2_5"
     ELEVEN_DISABLED: bool = False
+    ELEVEN_RUNTIME_TTS: bool = False  # free tier: the running server never synthesizes unless this is on
+    ELEVEN_STABILITY: float = 0.45
+    ELEVEN_STYLE: float = 0.35
 
     RETELL_API_KEY: str | None = None
     RETELL_FROM_NUMBER: str | None = None

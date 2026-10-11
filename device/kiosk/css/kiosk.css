@@ -78,7 +78,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 
 /* ---------- Mira ---------- */
 
-.mascot { left: 25px; top: 40px; width: 360px; height: 400px; }
+.mascot { left: 25px; top: 40px; width: 360px; height: 400px; transform-origin: 50% 90%; }
 #mira { display: block; width: 360px; height: 400px; will-change: transform; }
 
 /* ---------- Sparkles ---------- */
@@ -254,6 +254,9 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 }
 .prompt .eyebrow { margin-right: -4.4px; } /* CSS tracks after the last letter, Figma does not */
 .prompt .gestures { margin-top: 30px; }
+/* "Raise your hand to start" is longer than the Figma line ("Ready to start?"), so it is set smaller to stay
+   on one line inside the 534px prompt column */
+.hero-gesture { font-size: 46px; letter-spacing: -0.24px; }
 .hint {
   margin-top: 26px;
   font-size: 28px;
@@ -344,6 +347,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   white-space: pre;
 }
 .count-target { font-weight: 300; color: var(--color-ink-soft); }
+#rep-now { display: inline-block; } /* so the `pop` scale applies to the number (a transform needs a box) */
 .rep-label { margin-top: 10px; }
 
 .balance {
@@ -539,6 +543,28 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   box-shadow: var(--shadow-call);
 }
 .call img { display: block; width: 56px; height: 56px; }
+/* Live call status: one line under the gestures; the gaps around it tighten so the CALL 911 pill still clears
+   the 20px border */
+.call-status {
+  margin-top: 8px;
+  max-width: 860px;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-alert-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#stage:not([data-call="none"]) .alert .gestures { margin-top: 12px; }
+#stage:not([data-call="none"]) .bystander { margin-top: 10px; }
+#stage:not([data-call="none"]) .call { margin-top: 8px; }
+/* Emphasised when the server asks bystanders to call 911 or the call failed: slightly larger, brighter */
+.call.call-emphasis {
+  transform: scale(1.05);
+  background: #f03a2c;
+  box-shadow: 0 8px 40px rgba(240, 58, 44, 0.45);
+}
 .call-text {
   font-size: 76px;
   font-weight: 700;
@@ -588,7 +614,18 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   border-radius: 32px;
   background: var(--color-voice);
 }
-.voice img { display: block; width: 28px; height: 28px; }
+.voice { gap: 4px; }
+/* Three white bars drawn like assets/icons/voice.svg (3.5px wide, rounded); scaled by `bars` while speaking */
+.voice-bar {
+  display: block;
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--color-surface);
+  transform-origin: 50% 50%;
+}
+.voice-bar:nth-child(2) { height: 22px; }
+.voice-bar:nth-child(3) { height: 16px; }
 .caption-text {
   flex: 1 0 0;
   min-width: 1px;
@@ -633,12 +670,25 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 @keyframes twinkle   { 0%, 100% { opacity: var(--o, 1); transform: scale(1); } 50% { opacity: calc(var(--o, 1) * 0.35); transform: scale(0.7); } }
 @keyframes orbit     { to { transform: rotate(360deg); } }
 @keyframes pulse     { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes talk      { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-6px) rotate(1.5deg); } }
+@keyframes wave      { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes pop       { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes bars      { 0%, 100% { transform: scaleY(0.45); } 50% { transform: scaleY(1.15); } }
 
 #stage[data-mood="idle"] #mira        { animation: float 4s ease-in-out infinite; }
 #stage[data-mood="cheering"] #mira    { animation: bounce 0.6s ease-in-out infinite; }
 #stage[data-mood="worried"] #mira     { animation: droop 3s ease-in-out infinite; transform-origin: 50% 90%; }
 #stage[data-mood="sleeping"] #mira    { animation: breathe 5s ease-in-out infinite; transform-origin: 50% 85%; }
 #stage[data-mood="celebrating"] #mira { animation: celebrate 0.9s ease-in-out infinite; }
+/* Speaking, waving and popping move the .mascot wrapper / the numbers, so they layer with the mood animation
+   on #mira instead of replacing it. Talking wins over the gesture wave (same specificity, later rule). */
+#stage[data-screen="gesture"] .mascot { animation: wave 1.2s ease-in-out infinite; }
+#stage[data-speaking="true"] .mascot  { animation: talk 0.35s ease-in-out infinite; }
+#rep-now.pop, #countdown-n.pop        { animation: pop 0.3s ease-out; }
+#stage[data-speaking="true"] .voice-bar { animation: bars 0.6s ease-in-out infinite; }
+#stage[data-speaking="true"] .voice-bar:nth-child(2) { animation-delay: -0.2s; }
+#stage[data-speaking="true"] .voice-bar:nth-child(3) { animation-delay: -0.4s; }
+#stage[data-mood="cheering"] .s-rep   { animation: twinkle 1.2s ease-in-out infinite; }
 #stage[data-screen="setDone"] .s-done,
 #stage[data-screen="sessionDone"] .s-done { animation: twinkle 1.8s ease-in-out infinite; }
 #stage[data-screen="setDone"] .d2,
@@ -651,6 +701,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 #stage[data-screen="sessionDone"] .d5 { animation-delay: -1.5s; }
 .orbit { animation: orbit 60s linear infinite; }
 .fall-border { animation: pulse 2s ease-in-out infinite; }
+#stage[data-call="calling"] .call img { animation: pulse 1s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   #stage *, #stage *::after { animation: none !important; }

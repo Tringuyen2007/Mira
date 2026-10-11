@@ -252,5 +252,201 @@
    "text": "Thanks for letting me know you're okay.",
    "file": "im_ok_thanks_1.mp3"
   }
+ ],
+ "raise_hand": [
+  {
+   "text": "Raise your hand when you're ready to start!",
+   "file": "raise_hand_1.mp3"
+  },
+  {
+   "text": "Whenever you're ready, just raise your hand!",
+   "file": "raise_hand_2.mp3"
+  },
+  {
+   "text": "Ready? Raise your hand and we'll begin!",
+   "file": "raise_hand_3.mp3"
+  }
+ ],
+ "lets_go": [
+  {
+   "text": "Perfect! Let's get started.",
+   "file": "lets_go_1.mp3"
+  },
+  {
+   "text": "Great, here we go!",
+   "file": "lets_go_2.mp3"
+  },
+  {
+   "text": "Awesome! Let's do this.",
+   "file": "lets_go_3.mp3"
+  }
+ ],
+ "count_1": [
+  {
+   "text": "One!",
+   "file": "count_1_1.mp3"
+  }
+ ],
+ "count_2": [
+  {
+   "text": "Two!",
+   "file": "count_2_1.mp3"
+  }
+ ],
+ "count_3": [
+  {
+   "text": "Three!",
+   "file": "count_3_1.mp3"
+  }
+ ],
+ "count_4": [
+  {
+   "text": "Four!",
+   "file": "count_4_1.mp3"
+  }
+ ],
+ "count_5": [
+  {
+   "text": "Five!",
+   "file": "count_5_1.mp3"
+  }
+ ],
+ "count_6": [
+  {
+   "text": "Six!",
+   "file": "count_6_1.mp3"
+  }
+ ],
+ "count_7": [
+  {
+   "text": "Seven!",
+   "file": "count_7_1.mp3"
+  }
+ ],
+ "count_8": [
+  {
+   "text": "Eight!",
+   "file": "count_8_1.mp3"
+  }
+ ],
+ "count_9": [
+  {
+   "text": "Nine!",
+   "file": "count_9_1.mp3"
+  }
+ ],
+ "count_10": [
+  {
+   "text": "Ten!",
+   "file": "count_10_1.mp3"
+  }
+ ],
+ "count_11": [
+  {
+   "text": "Eleven!",
+   "file": "count_11_1.mp3"
+  }
+ ],
+ "count_12": [
+  {
+   "text": "Twelve!",
+   "file": "count_12_1.mp3"
+  }
+ ],
+ "count_13": [
+  {
+   "text": "Thirteen!",
+   "file": "count_13_1.mp3"
+  }
+ ],
+ "count_14": [
+  {
+   "text": "Fourteen!",
+   "file": "count_14_1.mp3"
+  }
+ ],
+ "count_15": [
+  {
+   "text": "Fifteen!",
+   "file": "count_15_1.mp3"
+  }
+ ],
+ "count_16": [
+  {
+   "text": "Sixteen!",
+   "file": "count_16_1.mp3"
+  }
+ ],
+ "count_17": [
+  {
+   "text": "Seventeen!",
+   "file": "count_17_1.mp3"
+  }
+ ],
+ "count_18": [
+  {
+   "text": "Eighteen!",
+   "file": "count_18_1.mp3"
+  }
+ ],
+ "count_19": [
+  {
+   "text": "Nineteen!",
+   "file": "count_19_1.mp3"
+  }
+ ],
+ "count_20": [
+  {
+   "text": "Twenty!",
+   "file": "count_20_1.mp3"
+  }
+ ],
+ "halfway": [
+  {
+   "text": "Halfway there, you're doing great!",
+   "file": "halfway_1.mp3"
+  },
+  {
+   "text": "You're halfway, keep it up!",
+   "file": "halfway_2.mp3"
+  }
+ ],
+ "last_rep": [
+  {
+   "text": "Last one, make it count!",
+   "file": "last_rep_1.mp3"
+  },
+  {
+   "text": "One more, you've got this!",
+   "file": "last_rep_2.mp3"
+  }
+ ],
+ "session_done": [
+  {
+   "text": "That's your whole session. Amazing work today!",
+   "file": "session_done_1.mp3"
+  },
+  {
+   "text": "All done for today. You did amazing!",
+   "file": "session_done_2.mp3"
+  }
+ ],
+ "calling_contact": [
+  {
+   "text": "I'm calling your emergency contact now. Stay still, help is on the way.",
+   "file": "calling_contact_1.mp3"
+  }
+ ],
+ "contact_on_call": [
+  {
+   "text": "Your emergency contact is on the line. I'm staying right here with you.",
+   "file": "contact_on_call_1.mp3"
+  }
+ ],
+ "call_failed": [
+  {
+   "text": "I couldn't reach your contact. If anyone is nearby, please call 911.",
+   "file": "call_failed_1.mp3"
+  }
  ]
 }

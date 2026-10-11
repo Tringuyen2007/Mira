@@ -678,7 +678,7 @@ class LagMonitor:
 
 # Display names for the LCD and the app ("REPS · MINI SQUATS"); unknown ids are title-cased.
 EXERCISE_NAMES = {e.exercise_id: e.exercise_name for e in exercises.EXERCISES.values()}  # kept for callers
-CAPTION_SOURCES = {"greeting": "text", "cue": "text", "summary_ready": "spoken"}
+CAPTION_SOURCES = {"greeting": "text", "cue": "text", "summary_ready": "spoken", "say": "text"}
 CLOSED_ALERT_STEPS = frozenset({"resolved", "closed", "resolved_by_therapist"})
 
 

@@ -447,6 +447,13 @@ no new engine API — but it depends on these specifically:
 - frames with `load_l_pct` (drives the L/R balance bar) and `hr` when available (drives the heart-rate chip;
   hidden when null).
 
+The server adds one event of its own for the LCD's trainer voice (`server/agents/trainer_voice.py`, no AI, pre-recorded
+lines only):
+
+| `type` | Fields | Sent by | Meaning |
+|---|---|---|---|
+| `say` | `session_id`, `t`, `id`, `text`, `audio_url` | TrainerVoice | a scripted trainer line for the kiosk to play (`audio_url`, same-origin `/audio/*.mp3`, may be null) and caption (`text`); also becomes `/ws/live` `caption` (sample `ws_events_say.json`) |
+
 ## Engine reverse channel
 
 The server sends these messages to the engine with `bridge.send_to_engine(msg)` (the mock source handles
