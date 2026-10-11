@@ -124,6 +124,11 @@ async def require_principal(request: Request) -> Principal:
     return principal
 
 
+def full_only(principal: Principal) -> None:
+    if principal.scope != "full":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
 async def require_token(request: Request) -> None:
     """FastAPI dependency: `Authorization: Bearer <MIRA_API_TOKEN>` or 401 (unchanged: full scope only)."""
     if not _token_matches(_bearer(request), cfg.MIRA_API_TOKEN):

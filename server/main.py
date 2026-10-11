@@ -47,7 +47,7 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import Principal, TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
+from server.security import Principal, TunnelFilterMiddleware, require_principal, require_token, ws_scope, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -353,7 +353,9 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(demo.router)
-    for module in (sessions_api, patients, prescriptions, calibration, alerts, notifications_api, insight_api):
+    for module in (sessions_api, patients, prescriptions):  # patients may call these with their own token
+        app.include_router(module.router, dependencies=[Depends(require_principal)])
+    for module in (calibration, alerts, notifications_api, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     for module in (copilot_api, proposals):
         app.include_router(module.router, dependencies=[Depends(require_token)])

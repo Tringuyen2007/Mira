@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from server import security
 from server.ai.validators import AI_DRAFT_LABEL
 from server.api.db_dep import require_db
 from server.config import cfg
@@ -27,10 +28,27 @@ class SessionIn(BaseModel):
     exercise_id: str = Field(default="squat", min_length=1, max_length=64)
 
 
+async def _owned_session(db: Database, sid: str, principal: security.Principal) -> dict[str, Any]:
+    session = await queries.get_session(db, sid)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    principal.require(session["patient_id"])
+    return session
+
+
 @router.post("/sessions")
-async def start_session(body: SessionIn | None = None) -> dict[str, Any]:
+async def start_session(body: SessionIn | None = None,
+                        principal: security.Principal = Depends(security.require_principal)) -> dict[str, Any]:
     body = body or SessionIn()
-    registry = get_state().sessions
+    state = get_state()
+    if principal.scope == "patient":
+        assert principal.patient_id is not None
+        body.patient_id = principal.patient_id
+        if state.db is not None:  # a phone may only start exercises on its plan
+            active = {rx["exercise_id"] for rx in await queries.prescriptions(state.db, body.patient_id)}
+            if body.exercise_id not in active:
+                raise HTTPException(status_code=422, detail=f"{body.exercise_id!r} is not in your plan")
+    registry = state.sessions
     if registry.current is not None:
         await registry.stop(registry.current.session_id)
     session = await registry.start(body.patient_id, body.exercise_id)
@@ -40,26 +58,28 @@ async def start_session(body: SessionIn | None = None) -> dict[str, Any]:
 
 
 @router.post("/sessions/{session_id}/stop")
-async def stop_session(session_id: uuid.UUID) -> dict[str, Any]:
+async def stop_session(session_id: uuid.UUID,
+                       principal: security.Principal = Depends(security.require_principal)) -> dict[str, Any]:
     sid = str(session_id)
     state = get_state()
-    if state.sessions.get(sid) is not None:
+    live = state.sessions.get(sid)
+    if live is not None:
+        principal.require(live.patient_id)
         await state.sessions.stop(sid)
         return {"session_id": sid, "stopped": True}
     db = require_db()
-    if await queries.get_session(db, sid) is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(db, sid, principal)
     if not await writes.end_session(db, sid, None):
         raise HTTPException(status_code=503, detail="database unavailable: could not stop the session")
     return {"session_id": sid, "stopped": True}
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db)) -> dict[str, Any]:
+async def get_session(session_id: uuid.UUID,
+                      principal: security.Principal = Depends(security.require_principal),
+                      db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
-    session = await queries.get_session(db, sid)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    session = await _owned_session(db, sid, principal)
     reps, flags, tw, per_set_tw = await asyncio.gather(
         queries.session_reps(db, sid), queries.session_form_events(db, sid),
         queries.session_tw_load(db, sid), queries.session_tw_load_per_set(db, sid))
@@ -90,10 +110,12 @@ async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db))
 @router.get("/sessions/{session_id}/frames", response_model=None)
 async def get_frames(session_id: uuid.UUID, downsample: int = Query(default=300, ge=0, le=5000),
                      t0: datetime | None = None, t1: datetime | None = None,
+                     principal: security.Principal = Depends(security.require_principal),
                      db: Database = Depends(require_db)) -> dict[str, Any] | Response:
     """downsample > 0: knee curve with lttb (charts); downsample=0: one page of full-rate frames between t0 and t1
     (replay). A full page has `next_t0`: request again with t0=next_t0 for the rest."""
     sid = str(session_id)
+    await _owned_session(db, sid, principal)
     if downsample > 0:
         points = await queries.session_knee_lttb(db, sid, downsample)
         return {"session_id": sid, "mode": "lttb", "series": "knee_r", "points": points}
@@ -111,10 +133,11 @@ def render_frames(session_id: str, page: dict[str, Any]) -> bytes:
 
 
 @router.post("/sessions/{session_id}/share")
-async def share_session(session_id: uuid.UUID, db: Database = Depends(require_db)) -> dict[str, Any]:
+async def share_session(session_id: uuid.UUID,
+                        principal: security.Principal = Depends(security.require_principal),
+                        db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
-    if await queries.get_session(db, sid) is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(db, sid, principal)
     if not await writes.set_session_shared(db, sid, True):
         raise HTTPException(status_code=503, detail="database unavailable: could not share the session")
     return {"session_id": sid, "shared": True}
