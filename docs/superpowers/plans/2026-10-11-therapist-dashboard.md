@@ -74,6 +74,41 @@ server/
 Makefile                           add `test-dashboard` and include it in `test`
 ```
 
+
+## Re-scope (2026-10-11, Tri) — supersedes the task order and gates below
+
+- **No more milestone gates.** Tasks 15, 18, 21 are dropped; one whole-branch review + debug pass runs at the end (R7).
+- **3D room → placeholder.** Eric is building the 3D render. Task 12 becomes R2: a placeholder `AvatarView` with a stable
+  interface for Eric's renderer to plug into; no Three.js scene work. (`vendor/three` stays vendored for him.)
+- **Care Copilot → "Mira Assistant"** in everything the therapist sees (nav, titles, chips, copy, route `#/assistant`
+  with `#/copilot` kept as an alias). Server module/route names (`/copilot/ask`, `server/agents/copilot.py`) stay, so
+  nothing else breaks. It is the top priority and comes next.
+- New order: **R1a** Assistant server additions → **R1b** Mira Assistant screen + shared proposal cards (from Tasks 17/19)
+  → **R2** avatar placeholder + Patient review (Tasks 12–14) → **R3** Prescribe (Tasks 16–17) → **R4** alerts +
+  notifications (Task 20) → **R5** Live session + Time-lapse with the placeholder (Tasks 22–23) → **R6** projector,
+  a11y, README (Task 24) → **R7** final whole-branch review and fixes (Task 25).
+
+### R1a — Assistant server additions (small, additive; `server/agents/copilot.py`, `server/api/copilot.py`)
+- `POST /copilot/ask` accepts optional `context: [{question ≤500, answer ≤1200}]` (max 3 turns) for follow-ups. It is
+  added to the user message as one clearly labelled block ("EARLIER IN THIS CONVERSATION (context, not data)"),
+  whitespace-collapsed like the question so it can't inject `PATIENT_ID:`/`MODE:` lines. Numbers in earlier answers do
+  NOT count as evidence (the agent must re-query), so the number check stays strict.
+- The answer carries `drafts: [{patient_id, text}]` — the `draft_message` results of this run (still never sent).
+- `POST /copilot/review/{patient_id}` runs `Copilot.review_patient` (one patient's last week vs before; may leave one
+  proposal) and returns the same answer shape. 404 unknown patient, 503 without DB/RO pool.
+- Samples + tests updated; existing copilot tests unchanged and passing.
+
+### R1b — Mira Assistant screen (`js/screens/assistant/`, `js/ui/proposalCard.js`)
+Figma `209:490` with the rename. Chat (therapist bubbles right; "Mira Assistant ✦ AI draft" bubbles left), text split
+into paragraphs/lists, evidence chips, charts via `ui/lineChart.js` (pure SVG), collapsible "Show the query", fallback
+notice, suggested questions ("Summarise today", "Who missed sessions?", "Which of my patients are compensating?",
+"Draft progress notes"), patient picker ("All patients" + caseload list) that scopes questions and enables **"Review
+this patient"** (R1a route) and **"Add to progress note"** on an answer (inline editor → explicit "Approve as progress
+note" → `POST /sessions/{latest session}/progress-note`). Drafts show "Copy text" (or "Approve and send" only if the
+messages capability exists). Follow-ups send the last 3 turns as `context`. Proposals rail: Waiting / Approved /
+Dismissed tabs with `proposalCard` (approve / edit / dismiss, 409 → refresh). `#/proposals/:id` highlights a card.
+Conversation lives in memory only (patient data never stored). 30 s timeout with a "Thinking…" indicator.
+
 ---
 
 # M1 — Foundation
