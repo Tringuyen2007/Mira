@@ -273,29 +273,40 @@ heart-rate sample is indistinguishable from one the phone sent itself.
 - **iPhone-side relay:** `Mira/Watch/WatchBridge.swift` (`@MainActor @Observable final class WatchBridge:
   NSObject, WCSessionDelegate`), excluded from the `MiraNetworking` SwiftPM package so it's free to import
   `WatchConnectivity` (unavailable in the plain-macOS `swift test` build, which uses a same-shaped stub in
-  `AppState`). It exposes `isPaired`, `isWatchAppInstalled`, `isReachable`, `lastWatchHR`.
+  `AppState`). It exposes `isPaired`, `isWatchAppInstalled`, `isReachable`, `lastWatchHR` and
+  `workoutActive` (the watch's `.status(workoutActive:)`, stored for a future Settings row; nothing reads it
+  yet). Delegate callbacks copy the `WCSession` values they need before hopping to the main actor.
   - **Phone → watch:** `push(_ live: LiveMessage?)` sends the live snapshot via `updateApplicationContext`
-    (delivered even while the watch app isn't foregrounded), throttled to at least 0.5 s between pushes and
-    skipped when the encoded snapshot hasn't changed. `forward(haptic:)` and `forward(summary:)` use
+    (delivered even while the watch app isn't foregrounded), skipped when the encoded snapshot hasn't changed
+    and throttled by `PushThrottle` (in `WatchWire.swift`, unit-tested): the first change in a quiet 0.5 s
+    window goes out at once, later ones wait for the window to close and the latest is sent then (a trailing
+    push), so the final state is never dropped. `push(nil)` sends `LiveSnapshot.idle`. `AppState` pushes idle
+    when `/ws/live` reports `done` or disappears — the server clears the session right after `done`, after
+    which this patient's `/ws/live` goes quiet — and again when `sessionSummary` arrives (unless a new session
+    is already live), so the watch always ends its workout. `forward(haptic:)` and `forward(summary:)` use
     `sendMessage` instead — best-effort, silently dropped when the watch isn't reachable or the send errors,
     since a missed haptic or summary isn't worth retrying.
   - **Watch → phone:** incoming `didReceiveMessage` is decoded with `WatchWire.decodeToPhone`. `.heartRate`
     updates `lastWatchHR` and calls `liveSession.send(.hr(HeartRateMessage(t:bpm:)))`; `.button(name)` calls
     `liveSession.send(.watchButton(WatchButtonMessage(name:)))`. Both then flow into `/ws/events` exactly like
-    any other client-originated event (see `watch_button`/`hr` in the table above).
-  - `AppState.watch: WatchBridge` is created with the app's `LiveSessionStore` and activated at launch (a
-    no-op when `WCSession.isSupported()` is false, e.g. no Watch paired or an iPad); `AppState.watchPaired`
+    any other client-originated event (see `watch_button`/`hr` in the table above). The server forwards
+    `watch_button` `ready`/`stop` as `command start`/`stop` with `payload.source = "watch"` and also broadcasts
+    the raw `watch_button`. The watch sends heart rate only while the phone is reachable.
+  - `AppState.watch: WatchBridge` is created with the app's `LiveSessionStore` and activated at launch.
+    `WCSession.isSupported()` is true on every iPhone; the bridge is simply inert when no watch is paired or
+    the watch app isn't installed. `AppState.watchPaired`
     (`watch.isPaired && watch.isWatchAppInstalled`) gates the Settings "Apple Watch tap" toggle.
 - **The `haptic` event:** `{"type": "haptic", "pattern": "good_rep" | "fix_form" | "set_done" |
   "check_in", "session_id", "t"}` on `/ws/events` (server → app, already listed in the events table above).
   `LiveSessionStore` decodes it into `haptic: HapticMessage?` plus a `hapticSeq: Int` that increments on every
   occurrence — including a repeated pattern — so `AppState` can forward each one to the watch even when two
   consecutive patterns are identical (the watch just replays the same haptic rather than deduping). The watch
-  app maps each pattern to a `WKInterfaceDevice` haptic type (`good_rep → .success`, `fix_form → .retry`,
-  `set_done → .notification`, `check_in → .directionUp`).
-- **Not covered here:** `device/ios/MiraWatch/` (the watch app's own UI and `HKWorkoutSession` heart-rate
-  capture) — see the README "Apple Watch companion" section and, once written, `device/ios/MiraWatch/`'s own
-  sources.
+  app maps each pattern to a `WKInterfaceDevice` haptic type (`good_rep → .success`, `fix_form → .retry`
+  played twice 150 ms apart, `set_done → .notification`, `check_in` and any unknown pattern →
+  `.directionUp`); its own Ready/Stop buttons play `.click`/`.stop`.
+- **Not covered here:** `device/ios/MiraWatch/` (the watch app's own UI — live/paused/done screens, Stop as
+  tap-to-confirm or 1 s hold — and `HKWorkoutSession` heart-rate capture) — see the README "Apple Watch
+  companion" section and the sources in `device/ios/MiraWatch/`.
 
 ## Open items
 

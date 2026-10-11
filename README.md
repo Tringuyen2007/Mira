@@ -695,11 +695,23 @@ messages, JSON-safe scalars only); the iPhone-side relay is `device/ios/Mira/Wat
 watch.isWatchAppInstalled`) gates the "Apple Watch tap" toggle in Settings.
 
 **`watch_button` mapping** (server, `server/main.py::_on_client_event`, `WATCH_BUTTON_COMMANDS`): the watch's
-**Ready** tap and **Stop** (hold) arrive as `{"type": "watch_button", "name": "ready" | "stop"}` on
+**Ready** tap and **Stop** (tap, then confirm — or hold for 1 s) arrive as `{"type": "watch_button", "name": "ready" | "stop"}` on
 `/ws/events` and are forwarded as session commands exactly like a phone tap — `ready → command start`,
-`stop → command stop` (`payload: {"source": "watch"}`) — and go through the same `_forward_session_command`
+`stop → command stop`, the forwarded command carrying `payload.source = "watch"` — and go through the same `_forward_session_command`
 path, so a Safety Guardian hold blocks a watch `ready` exactly like it blocks a phone `start`. The raw
-`watch_button` event is still broadcast to every connected client either way.
+`watch_button` event is also broadcast to every connected `/ws/events` client either way.
+
+**On the watch** (`device/ios/MiraWatch/`): one screen driven by the phone's snapshot. `countdown`, `active`
+and `rest` show the live rep ring (rest stays on the live screen with "Rest a moment."); `paused`/`incident`
+show the paused screen (Resume is hidden during an `incident`, which reads "Mira is checking on you"
+instead); the end of a session shows the done screen (reps, good-form reps and form score once the summary
+arrives) until **Back to Mira**. Ready plays `.click`, Stop plays `.stop`. The `HKWorkoutSession` runs from
+`countdown`/`active` until the session ends — a `done`/`idle` snapshot, the summary, or a local Stop. Because
+the server clears the session right after `done` and the phone's `/ws/live` then goes quiet, the phone
+pushes an idle snapshot itself when `/ws/live` reports `done` or disappears, and again with the summary;
+snapshot pushes are throttled to one per 0.5 s with a trailing push, so the final state is never dropped.
+The watch's `.status(workoutActive:)` is stored on the phone as `WatchBridge.workoutActive` (nothing reads
+it yet). Heart rate is sent to the phone only while it is reachable.
 
 **Haptic coaching** (`server/agents/haptics.py`, `HapticCoach`): subscribes to engine events and emits a
 `haptic` event only while a session is live. `HAPTIC_PATTERNS = ("good_rep", "fix_form", "set_done",
@@ -710,17 +722,21 @@ path, so a Safety Guardian hold blocks a watch `ready` exactly like it blocks a 
 - `check_in` — emitted directly by the Safety Guardian (`templates.CHECKIN_HAPTIC`), not by `HapticCoach`,
   to avoid a duplicate emit.
 
+On the watch: `good_rep → .success`, `fix_form → .retry` played twice 150 ms apart, `set_done →
+.notification`, `check_in` (and any unknown pattern) `→ .directionUp`.
+
 `haptic` stays off the LCD kiosk's event allow-list (patients and the dashboard only).
 
 **Heart rate** (`server/db/writes.py::insert_heart_rate`, `server/db/persist.py::SessionPersistence._on_hr`):
 an `hr` event with a numeric `bpm` is now persisted to the `heart_rate` table, throttled to at most one row
-per second per session (`_last_hr_at`).
+per second per session (`_last_hr_at`, forgotten when the session stops).
 
 **What works on the simulator vs. a physical watch:** pairing, Ready/Stop, haptics, live rep/set counts and
 the exercise name all work on a paired Apple Watch *simulator* — nothing there depends on real hardware.
 Heart rate does not: `HKWorkoutSession`/`HKLiveWorkoutBuilder` only deliver live samples from a physical
-Apple Watch being worn. On the simulator the heart-rate field shows "—" (or the status string
-`WorkoutHeartRate` reports when `!HKHealthStore.isHealthDataAvailable()`); on a real watch it streams into
+Apple Watch being worn. On the simulator the heart-rate card shows "—" with "Heart rate needs a real Apple
+Watch"; on a real watch with the workout permission denied it shows "Heart rate needs permission in the
+Watch app"; otherwise it streams into
 `WatchSessionModel` and is relayed to the phone as `heartRate` and on to `/ws/events` as `hr`.
 
 **Build and run:**
@@ -728,8 +744,8 @@ Apple Watch being worn. On the simulator the heart-rate field shows "—" (or th
 2. Select the **MiraWatch** scheme for the watch app standalone, or the **Mira** scheme (which embeds
    `MiraWatch.app`) to run the iPhone app with the watch companion attached.
 3. Pick an iPhone simulator and a paired Apple Watch simulator. To pair simulators: Xcode →
-   **Window ▸ Devices and Simulators**, or `xcrun simctl pair <watch-udid> <phone-udid>` — see
-   `device/ios/MiraWatch/` for the watch app's own sources once pairing is set up.
+   **Window ▸ Devices and Simulators**, or `xcrun simctl pair <watch-udid> <phone-udid>`. The watch app's
+   sources are in `device/ios/MiraWatch/`.
 4. Run Tri's server (above, "Try it") and pair the phone as usual (README "Patient identity (phone)"). Once
    the phone is paired and a session is live, the watch mirrors reps/set/exercise and plays the matching
    haptic on `good_rep`/`fix_form`/`set_done`/`check_in`.
