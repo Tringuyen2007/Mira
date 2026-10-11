@@ -47,7 +47,9 @@ function buildLive(today) {
   if (!live) return null;
   return {
     name: live.name,
-    line: `${capitalize(live.exercise_name)} · set ${live.set} of ${live.sets_target} · rep ${live.rep}`,
+    line: live.sets_target
+      ? `${capitalize(live.exercise_name)} · set ${live.set} of ${live.sets_target} · rep ${live.rep}`
+      : `${capitalize(live.exercise_name || "session")} · camera connected, getting ready`,
     href: href("live", { pid: live.patient_id }),
   };
 }

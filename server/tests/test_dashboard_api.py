@@ -465,3 +465,25 @@ def test_progress_note_rejects_huge_raw_text(dash_client: TestClient) -> None:
     r = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
                          json={"therapist_id": "okafor", "text": " " * 9000}, headers=AUTH)
     assert r.status_code == 422
+
+
+def test_live_now_while_camera_streams_but_engine_idle(make_client: Callable[..., TestClient]) -> None:
+    """A remote camera whose one-camera body is still measuring sends frames before `arrived`: the session must
+    already count as live (room + video on the dashboard), and stop counting once frames stop."""
+    import time as _time
+
+    from server.api.dashboard import _live_now
+    from server.engine_bridge import STREAMING_WINDOW_S
+    from server.state import get_state
+
+    make_client()
+    state = get_state()
+    live = state.bridge.live
+    live.phase = "idle"
+    live.last_frame_at = None
+    assert _live_now([{"id": "maya", "name": "Maya Ellis"}]) is None
+    live.on_frame({"type": "frame", "exercise_id": "squat", "flags": ["measuring"]})
+    assert live.streaming and live.payload()["streaming"] is True
+    assert _live_now([{"id": "maya", "name": "Maya Ellis"}]) is not None
+    live.last_frame_at = _time.monotonic() - STREAMING_WINDOW_S - 1
+    assert _live_now([{"id": "maya", "name": "Maya Ellis"}]) is None

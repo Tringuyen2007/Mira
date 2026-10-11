@@ -81,8 +81,8 @@ def _live_now(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     state = get_state()
     session = state.sessions.current
     live = state.bridge.live
-    if session is None or live.phase in IDLE_PHASES:
-        return None
+    if session is None or (live.phase in IDLE_PHASES and not live.streaming):
+        return None  # idle AND no frames: nothing to watch; a streaming-but-measuring camera is live
     row = next((r for r in rows if r["id"] == session.patient_id), None)
     if row is None:
         return None

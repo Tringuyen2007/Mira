@@ -21,5 +21,6 @@
   },
   "first_name": "Maya",
   "exercise_name": "Mini squats",
-  "incident": false
+  "incident": false,
+  "streaming": true
 }
