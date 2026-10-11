@@ -159,3 +159,16 @@ def test_one_camera_setup_says_the_other_panel_is_unused():
     two = compose_view(target_cams(), MatConfig(), {}, {}, None, None, None, None)
     assert one.shape == two.shape == (720, 1280, 3)
     assert (one[:360, :640] != two[:360, :640]).any()  # "not used (one-camera setup)" instead of camera A
+
+
+def test_one_camera_view_says_stand_straight_while_measuring():
+    from dataclasses import replace
+
+    cams, X = target_cams(), standing_skeleton()
+    one = {"B": cams["B"]}
+    out = Pipeline(one).process(1.0, None, pose_from_points(cams["B"], X))
+    assert out.frame.body == "measuring"
+    measuring = compose_view(one, MatConfig(), {}, out.raw, out, None, None, None)
+    out.frame = replace(out.frame, body="ready", body_progress=1.0)
+    ready = compose_view(one, MatConfig(), {}, out.raw, out, None, None, None)
+    assert (measuring != ready).any()  # the "stand straight to measure" line

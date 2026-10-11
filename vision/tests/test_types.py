@@ -29,3 +29,13 @@ def test_frame_result_round_trip_with_nan():
     g = FrameResult.from_dict(json.loads(json.dumps(f.to_dict(), allow_nan=False)))
     np.testing.assert_array_equal(g.joints, joints)
     assert g.tracking == "3d" and g.flags == ["x"] and g.com is None and g.phase == "idle"
+
+
+def test_frame_result_body_state_round_trip_and_old_files_load_as_ready():
+    f = FrameResult(t=1.0, joints=np.zeros((33, 3)), conf=np.zeros(33), body="measuring", body_progress=0.4)
+    back = FrameResult.from_dict(f.to_dict())
+    assert back.body == "measuring" and back.body_progress == 0.4
+    old = f.to_dict()
+    del old["body"], old["body_progress"]
+    back = FrameResult.from_dict(old)
+    assert back.body == "ready" and back.body_progress == 1.0

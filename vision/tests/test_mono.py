@@ -408,3 +408,43 @@ def test_one_camera_planted_feet_never_pull_the_fit_but_still_show_as_locked():
     assert out.tracker == "model" and out.feet_locked == {"l": True, "r": True}
     J = out.frame.joints
     assert abs(np.linalg.norm(J[25] - J[27]) - pipe._model.shape.lengths["shin"]) < 1e-6  # nothing moved
+
+
+def test_one_camera_body_state_measuring_then_ready_and_after_a_long_loss_measuring_again():
+    from vision.tracker import FORGET_S
+
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    t, states = 0.0, []
+    for _ in range(10):  # crouched: progress does not rise
+        out = pipe.process(t, None, pose_from_points(cam, _crouched(), t=t))
+        t += 1 / 30
+        states.append((out.frame.body, out.frame.body_progress, out.tracker))
+    assert all(s == ("measuring", 0.0, "triangulate") for s in states)
+    states = []
+    for _ in range(60):
+        out = pipe.process(t, None, pose_from_points(cam, X, t=t))
+        t += 1 / 30
+        states.append((out.frame.body, out.frame.body_progress, out.tracker))
+    first_ready = next(i for i, s in enumerate(states) if s[0] == "ready")
+    assert states[first_ready][1] == 1.0 and states[first_ready][2] == "model"  # ready on the measured frame
+    progress = [p for b, p, _ in states[:first_ready]]
+    assert progress == sorted(progress) and 0 < progress[-1] < 1
+    for _ in range(int(30 * (FORGET_S - 1))):  # a short loss: still ready
+        out = pipe.process(t, None, None)
+        t += 1 / 30
+        assert out.frame.tracking == "lost" and out.frame.body == "ready"
+    for _ in range(60):  # longer than FORGET_S in all: forgotten
+        out = pipe.process(t, None, None)
+        t += 1 / 30
+    out = pipe.process(t, None, pose_from_points(cam, X, t=t))
+    assert out.frame.body == "measuring" and out.frame.body_progress < 0.1
+
+
+def test_triangulation_is_always_ready():
+    from vision.tests.synth import target_cams
+
+    cams, X = target_cams(), standing_skeleton()
+    out = Pipeline(cams).process(0.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+    assert out.frame.body == "ready" and out.frame.body_progress == 1.0
+    assert Pipeline(cams).process(0.0, None, None).frame.body == "ready"

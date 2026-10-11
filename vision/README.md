@@ -166,4 +166,13 @@ from vision.replay import replay
 for frame in replay("data/recordings/<file>.jsonl"):
     frame.joints  # (33, 3) metres, mat frame; NaN where unknown
     frame.tracking  # "3d" | "single_cam_A" | "single_cam_B" | "lost"
+    frame.body  # "measuring" | "ready"
+    frame.body_progress  # 0..1 while measuring
 ```
+
+With one camera the body is measured first, from about 40 frames (1.3 s) of the person standing
+straight; crouching or moving frames don't count. Until then `frame.body` is `"measuring"` and
+`frame.joints` are only a rough placement: fine for showing someone is there, not for reps, depth or
+form rules. Prompt the person to stand straight while it says `"measuring"` and a person is tracked;
+start counting when it turns `"ready"`. It stays `"ready"` through a short loss and goes back to
+`"measuring"` for a new person (after 5 s with nobody). Two-camera triangulation is always `"ready"`.

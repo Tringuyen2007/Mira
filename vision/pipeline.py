@@ -177,7 +177,9 @@ class Pipeline:
                 _, feet_locked = self._anchor.update(t, joints)  # report only: joints are not moved
         if used != "model" and self._filter is not None:  # the model smooths its own pose numbers
             joints = self._filter(joints, t)
-        frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
+        ready = self._model is None or self._model.ready
+        frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking, body="ready" if ready else "measuring",
+                            body_progress=1.0 if ready else self._model.progress)
         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
                               people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked,
                               tracker=used, fit_ms=fit_ms)

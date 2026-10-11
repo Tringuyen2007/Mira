@@ -89,6 +89,8 @@ class FrameResult:
     rep: int = 0
     flags: list[str] = field(default_factory=list)
     tracking: str = "lost"  # "3d" | "single_cam_A" | "single_cam_B" | "lost"
+    body: str = "ready"  # "measuring" (joints are a rough placement; don't count reps) | "ready"
+    body_progress: float = 1.0  # 0..1 while measuring: share of the standing frames collected
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +109,8 @@ class FrameResult:
             "rep": self.rep,
             "flags": list(self.flags),
             "tracking": self.tracking,
+            "body": self.body,
+            "body_progress": self.body_progress,
         }
 
     @classmethod
@@ -127,6 +131,8 @@ class FrameResult:
             rep=d.get("rep", 0),
             flags=d.get("flags") or [],
             tracking=d.get("tracking", "lost"),
+            body=d.get("body", "ready"),
+            body_progress=d.get("body_progress", 1.0),
         )
 
 

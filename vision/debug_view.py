@@ -203,6 +203,8 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     hud = []
     if frame is not None:
         hud.append(f"tracking: {frame.tracking}")
+        if frame.body == "measuring" and frame.tracking != "lost":
+            hud.append(f"stand straight to measure... {frame.body_progress * 100:.0f}%")
     if skew:
         hud.append(f"pair skew median {skew['median_ms']:.0f} ms  p95 {skew['p95_ms']:.0f} ms  unpaired {skew['unpaired_pct']:.0f}%")
     if out is not None and out.tri is not None and out.tri.ok.any():
@@ -226,7 +228,7 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
         else:
             body = (view.rig.update(frame.t, frame.joints, frame.tracking, frame.conf, feet)
                     if frame is not None else None)
-            if view.rig.progress < 1:
+            if view.rig.progress < 1 and (frame is None or frame.body != "measuring"):
                 hud = hud + [f"measuring body... {view.rig.progress * 100:.0f}% (stand on the mat)"]
             if not view.rig.constraints:
                 hud = hud + ["body rules off (c to turn on)"]
