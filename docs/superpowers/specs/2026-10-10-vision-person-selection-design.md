@@ -21,7 +21,7 @@ Track exactly one person: the one on or next to the mat. Ignore people elsewhere
 ## Decisions
 
 1. **Who to track:** a person whose feet are on the mat or within **1 m** of it (so tracking works while walking up; the MVP's arrival/on-mat detection needs this). If several qualify, the one **closest to the mat centre**, with stickiness: switch only when another qualifying person is at least **0.3 m** closer to the centre for **0.5 s**.
-2. **Crop to the mat area.** Each calibrated camera's image is cropped to the projection of a box: the mat footprint grown by 1 m on every side, from the floor to 2.1 m, plus 10% padding, clipped to the image. Computed once from the calibration (MediaPipe's VIDEO-mode tracking prefers a steady input). Landmarks are mapped back to full-frame pixels, so everything downstream is unchanged. Uncalibrated cameras use the full frame.
+2. **Crop to the mat area.** Each calibrated camera's image is cropped to the projection of a box: the mat footprint grown by 1 m on every side, from the floor to 2.1 m, plus 10% padding, clipped to the image. Computed once from the calibration (MediaPipe's VIDEO-mode tracking prefers a steady input). Landmarks are mapped back to full-frame pixels, so everything downstream is unchanged. The crop is internal to pose detection only: every view (debug view, calib tools, recordings' frame sizes) keeps showing the full camera picture, with the attended area drawn as an outlined box. Uncalibrated cameras use the full frame.
 3. **Up to 3 people per camera** (`num_poses=3`, configurable). If `checks` shows capture or pose fps below 20, the default drops to 2.
 4. **Same person across cameras = consistent midpoints.** A pairing of a person in A with a person in B is consistent when the triangulated hip, shoulder and ankle **midpoints** reproject within **25 px** (median) in both views. Midpoints are unaffected by MediaPipe's left/right flips, which the pipeline resolves later.
 5. **Disagreeing camera is dropped, not averaged.** If no consistent pairing is at the mat, each camera's candidates are placed on the floor on their own (feet ray ∩ floor) and the camera whose candidate is at the mat and nearest the current track is kept; the other camera is ignored for that frame. The pipeline's existing single-camera fallback then takes over.
@@ -67,7 +67,8 @@ Track exactly one person: the one on or next to the mat. Ignore people elsewhere
 
 ### 6. Debug view — `vision/debug_view.py`
 
-- The chosen person per camera as today (green 2D, magenta 3D); ignored people drawn thin grey with "ignored"; the crop box as a thin outline.
+- The full camera picture is always shown (never cropped). The attended area is drawn as a clearly visible outlined box (cyan, 2 px, labelled "tracking area"), so it is obvious what the camera is paying attention to.
+- The chosen person per camera as today (green 2D, magenta 3D); ignored people drawn thin grey with "ignored".
 - HUD: "ignoring camera A (disagrees)" when `dropped` is set; "N people seen, tracking 1".
 
 ## Error handling
