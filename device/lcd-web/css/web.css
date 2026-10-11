@@ -1,0 +1,48 @@
+/* Static web copy only: room for the screen switcher under the stage, and the switcher itself. */
+
+#stage { top: calc(50% - 28px); } /* centred in the space above the 56 px switcher */
+
+.screen-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  overflow-x: auto;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-mist);
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.screen-nav button {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--color-mist);
+  border-radius: 17px;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.screen-nav button[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-surface);
+}
+
+.screen-nav button.play {
+  margin-left: 8px;
+  border-color: var(--color-berry);
+  color: var(--color-berry);
+  background: var(--color-surface);
+}
+
+.screen-nav button:focus-visible { outline: 2px solid var(--color-accent-bright); outline-offset: 2px; }
