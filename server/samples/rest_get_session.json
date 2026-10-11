@@ -1,11 +1,11 @@
 {
   "session": {
-    "id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+    "id": "54bdaf2b-4097-483e-b429-998d6a1af011",
     "patient_id": "maya",
     "exercise_id": "squat",
-    "started_at": "2026-10-10T20:32:10.053404Z",
-    "ended_at": null,
-    "reps_done": null,
+    "started_at": "2026-10-11T08:24:07.948764Z",
+    "ended_at": "2026-10-11T08:24:33.113413Z",
+    "reps_done": 4,
     "pain_pre": null,
     "pain_post": null,
     "effort": null,
@@ -15,13 +15,42 @@
     "ai_note": null,
     "simulated": false
   },
+  "exercise_name": "Mini squats",
+  "analysis": {
+    "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
+    "created_at": "2026-10-11T08:24:35.176098Z",
+    "form_score": 100,
+    "reps_total": 4,
+    "good_reps": 4,
+    "sets_done": 1,
+    "spoken": "Great session, Maya! 4 of 4 reps had good form.",
+    "note": "AI draft \u2014 review before use: Mini squats: 4 reps over 1 sets (target 3 sets \u00d7 10 reps), 4 with good form; form score 100. Form flags: none.",
+    "highlights": [
+      {
+        "kind": "consistency",
+        "text": "4 of 4 reps had good form"
+      }
+    ],
+    "next_focus": null,
+    "flagged_moments": [],
+    "comparison": {
+      "prev_sessions": 0,
+      "rom_delta_deg": null,
+      "asym_delta_pct": null,
+      "form_score_delta": null,
+      "good_rep_rate_delta": null
+    },
+    "audio_url": null,
+    "source": "ai",
+    "model": "gemini-3.8-flash"
+  },
   "reps": [
     {
-      "session_id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+      "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
       "rep": 1,
       "set_no": 1,
       "started_at": null,
-      "ended_at": "2026-10-10T20:32:16.081000Z",
+      "ended_at": "2026-10-11T08:24:24.083000Z",
       "peak_angle": null,
       "rom": null,
       "hold_s": null,
@@ -32,11 +61,41 @@
       "flags": []
     },
     {
-      "session_id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+      "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
       "rep": 2,
       "set_no": 1,
       "started_at": null,
-      "ended_at": "2026-10-10T20:32:19.081000Z",
+      "ended_at": "2026-10-11T08:24:27.083000Z",
+      "peak_angle": null,
+      "rom": null,
+      "hold_s": null,
+      "asym_avg": null,
+      "asym_max": null,
+      "smoothness": null,
+      "quality": 1.0,
+      "flags": []
+    },
+    {
+      "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
+      "rep": 3,
+      "set_no": 1,
+      "started_at": null,
+      "ended_at": "2026-10-11T08:24:30.083000Z",
+      "peak_angle": null,
+      "rom": null,
+      "hold_s": null,
+      "asym_avg": null,
+      "asym_max": null,
+      "smoothness": null,
+      "quality": 1.0,
+      "flags": []
+    },
+    {
+      "session_id": "54bdaf2b-4097-483e-b429-998d6a1af011",
+      "rep": 4,
+      "set_no": 1,
+      "started_at": null,
+      "ended_at": "2026-10-11T08:24:33.083000Z",
       "peak_angle": null,
       "rom": null,
       "hold_s": null,
@@ -56,11 +115,11 @@
     "ai_note": null,
     "ai_note_label": "AI draft \u2014 review before use"
   },
-  "tw_load_left_pct": 53.348443440011465,
+  "tw_load_left_pct": 52.03523454691561,
   "per_set": [
     {
       "set_no": 1,
-      "tw_load_left_pct": 53.348443440011465,
+      "tw_load_left_pct": 52.03523454691561,
       "reps": 4,
       "good_reps": 4
     }

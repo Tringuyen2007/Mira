@@ -16,3 +16,10 @@ fixed placeholder since a real device token is a secret.
 
 `rest_get_me` is the `GET /me?patient_id=maya` response (admin token), matching the `me` object nested in
 `rest_post_pair`: patient profile, therapist, prescriptions, LCD status and calibration.
+
+Plan 2 (session end, §5.4/§5.5): `ws_events_session_summary` is the `SessionAnalyst`'s whole-session event,
+captured from a mock session stopped via `POST /sessions/{id}/stop`. `rest_get_session` is regenerated from
+that same finished session, so its `analysis` field (the stored `session_analyses` row, note labeled on read)
+and `exercise_name` are populated instead of null. `rest_post_session_checkin` is the
+`POST /sessions/{id}/checkin` response for a moderate pain/effort/note check-in. `rest_get_patient_sessions`
+is `GET /patients/maya/sessions`, newest-first ended sessions with each one's `form_score` from the analysis.

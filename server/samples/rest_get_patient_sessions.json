@@ -1,0 +1,20 @@
+{
+  "patient_id": "maya",
+  "sessions": [
+    {
+      "id": "54bdaf2b-4097-483e-b429-998d6a1af011",
+      "exercise_id": "squat",
+      "started_at": "2026-10-11T08:24:07.948764Z",
+      "ended_at": "2026-10-11T08:24:33.113413Z",
+      "reps_done": 4,
+      "pain_post": 3,
+      "effort": 6,
+      "shared": false,
+      "simulated": false,
+      "form_score": 100,
+      "good_reps": 4,
+      "reps_total": 4,
+      "spoken_preview": "Great session, Maya! 4 of 4 reps had good form."
+    }
+  ]
+}

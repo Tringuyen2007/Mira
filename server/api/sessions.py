@@ -13,11 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from server import security
-from server.ai.validators import AI_DRAFT_LABEL
+from server.ai.validators import AI_DRAFT_LABEL, label_note
 from server.api.db_dep import require_db
 from server.config import cfg
 from server.db import queries, writes
 from server.db.pool import Database
+from server.exercises import display_name
 from server.state import get_state
 
 router = APIRouter()
@@ -26,6 +27,12 @@ router = APIRouter()
 class SessionIn(BaseModel):
     patient_id: str = Field(default_factory=lambda: cfg.MOCK_PATIENT_ID, min_length=1, max_length=64)
     exercise_id: str = Field(default="squat", min_length=1, max_length=64)
+
+
+class CheckinIn(BaseModel):
+    pain_post: int | None = Field(default=None, ge=0, le=10)
+    effort: int | None = Field(default=None, ge=1, le=10)
+    note: str | None = Field(default=None, max_length=1000)
 
 
 async def _owned_session(db: Database, sid: str, principal: security.Principal) -> dict[str, Any]:
@@ -77,15 +84,30 @@ async def stop_session(session_id: uuid.UUID,
     return {"session_id": sid, "stopped": True}
 
 
+@router.post("/sessions/{session_id}/checkin")
+async def checkin_session(session_id: uuid.UUID, body: CheckinIn,
+                          principal: security.Principal = Depends(security.require_principal),
+                          db: Database = Depends(require_db)) -> dict[str, Any]:
+    sid = str(session_id)
+    await _owned_session(db, sid, principal)
+    await writes.record_session_feedback(db, sid, pain_post=body.pain_post, effort=body.effort, note=body.note)
+    if body.pain_post is not None and body.pain_post >= 7:
+        get_state().bridge.inject({"type": "command", "name": "pain",
+                                   "payload": {"level": body.pain_post, "when": "post"}, "session_id": sid})
+    return {"session_id": sid, "pain_post": body.pain_post, "effort": body.effort,
+            "note_saved": body.note is not None}
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: uuid.UUID,
                       principal: security.Principal = Depends(security.require_principal),
                       db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
     session = await _owned_session(db, sid, principal)
-    reps, flags, tw, per_set_tw = await asyncio.gather(
+    reps, flags, tw, per_set_tw, analysis = await asyncio.gather(
         queries.session_reps(db, sid), queries.session_form_events(db, sid),
-        queries.session_tw_load(db, sid), queries.session_tw_load_per_set(db, sid))
+        queries.session_tw_load(db, sid), queries.session_tw_load_per_set(db, sid),
+        queries.session_analysis(db, sid))
     reps_by_set: dict[Any, list[dict[str, Any]]] = {}
     for rep in reps:
         reps_by_set.setdefault(rep["set_no"], []).append(rep)
@@ -93,8 +115,12 @@ async def get_session(session_id: uuid.UUID,
                 "reps": len(reps_by_set.get(row["set_no"], [])),
                 "good_reps": sum(1 for r in reps_by_set.get(row["set_no"], []) if (r["quality"] or 0) >= 1.0)}
                for row in per_set_tw]
+    if analysis is not None:
+        analysis = {**analysis, "note": label_note(analysis["note"])}
     return {
         "session": session,
+        "exercise_name": display_name(session["exercise_id"]),
+        "analysis": analysis,
         "reps": reps,
         "flags": flags,
         "summary": {

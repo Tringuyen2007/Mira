@@ -34,6 +34,16 @@ async def get_patient(patient_id: str, principal: security.Principal = Depends(s
     return {"patient": patient, "prescriptions": rx, "recent_sessions": recent}
 
 
+@router.get("/patients/{patient_id}/sessions")
+async def get_patient_sessions(patient_id: str, limit: int = Query(default=30, ge=1, le=100),
+                               before: str | None = None,
+                               principal: security.Principal = Depends(security.require_principal),
+                               db: Database = Depends(require_db)) -> dict[str, Any]:
+    principal.require(patient_id)
+    sessions = await queries.patient_sessions(db, patient_id, limit, before)
+    return {"patient_id": patient_id, "sessions": sessions}
+
+
 @router.get("/patients/{patient_id}/progress")
 async def get_progress(patient_id: str, exercise_id: str | None = None,
                        days: int = Query(default=90, ge=1, le=365),
