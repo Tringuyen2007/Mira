@@ -49,7 +49,13 @@ fi
 (cd $APP && sudo -u mira $APP/.venv/bin/python -m server.db.migrate) || echo "WARNING: migrations failed; the server will retry at start"
 systemctl restart mira
 for i in \$(seq 1 20); do curl -fsS http://127.0.0.1:8000/health >/dev/null && break; sleep 1; done
-curl -fsS http://127.0.0.1:8000/health; echo
+HEALTH=\$(curl -fsS http://127.0.0.1:8000/health); echo "\$HEALTH"
 systemctl is-active mira
+# Emergency calls must be live on this box (CALLS_DISABLED=0 and every RETELL_* value set in its .env).
+CALLS=\$(printf '%s' "\$HEALTH" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("calls", "missing"))')
+if [ "\$CALLS" != "live" ] && [ "${ALLOW_LOG_ONLY:-0}" != "1" ]; then
+  echo "ERROR: /health reports calls=\$CALLS; emergency calls would not be placed. Set CALLS_DISABLED=0 and the RETELL_* values in $APP/.env (or ALLOW_LOG_ONLY=1 to deploy anyway)." >&2
+  exit 1
+fi
 EOF
 echo "deployed $SHA"
