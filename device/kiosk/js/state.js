@@ -21,6 +21,7 @@ export function initialState() {
     socket: "connecting",
     closedAt: null,
     summary: null,
+    speaking: false,
   };
 }
 
@@ -33,6 +34,7 @@ export function reduce(state, input, now) {
     if (msg.status === "closed") return { ...state, socket: "closed", closedAt: state.closedAt ?? now };
     return state;
   }
+  if (channel === "speaking") return { ...state, speaking: msg.on === true };
   if (channel === "live") {
     let next = { ...state, live: msg };
     if (msg.phase === "countdown" || msg.phase === "active") next = { ...next, awaitingGesture: false };
@@ -110,6 +112,7 @@ export function view(state, now) {
     caption,
     summary: null,
     sessionSummary: null,
+    speaking: state.speaking === true,
   };
 
   if (state.socket === "rejected") return { ...base, screen: "unpaired", mood: null };

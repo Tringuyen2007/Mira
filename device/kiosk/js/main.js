@@ -10,7 +10,7 @@ import { loadMascot } from "./mascot.js";
 
 const VERSION = "1";
 const HEALTH_EVERY_MS = 5000;
-const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready", "session_summary"]);
+const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready", "session_summary", "say"]);
 
 function clamp01(n) {
   return typeof n === "number" && Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
@@ -35,7 +35,8 @@ async function boot() {
     dispatch({ channel: "socket", msg: { status: "rejected" } });
     return;
   }
-  const audio = new AudioPlayer();
+  const audio = new AudioPlayer(globalThis.Audio,
+    { onSpeaking: (on) => dispatch({ channel: "speaking", msg: { on } }) });
   const status = (s) => dispatch({ channel: "socket", msg: { status: s } });
   const live = new ReconnectingSocket(wsUrl(window.location, "/ws/live", token), {
     onMessage: (msg) => {

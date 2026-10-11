@@ -23,6 +23,9 @@ const FIXTURES = {
     caption: cap("Put a little more weight on your right leg. Keep both feet flat.") })],
   rep: [open, live({ phase: "active", rep: 7, load_l_pct: 48, hr: 98,
     caption: cap("That's 7! Nice and even, keep it up.") }), ev({ type: "rep", quality: "good" })],
+  // Rep screen while a `say` clip plays: Mira bobs and the caption's voice bars move.
+  speaking: [open, live({ phase: "active", rep: 3, load_l_pct: 49, hr: 97, caption: cap("Three!") }),
+    { channel: "speaking", msg: { on: true } }],
   paused: [open, live({ phase: "active", paused: true, rep: 7, hr: 84,
     caption: cap("Paused. Take your time, I'll wait right here.") })],
   setDone: [open, live({ phase: "rest", rep: 12, load_l_pct: 52, hr: 92,

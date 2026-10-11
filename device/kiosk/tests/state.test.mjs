@@ -194,3 +194,27 @@ test("captionsOn is false only when device_prefs.captions === false", () => {
   const s = run([open, live({ device_prefs: { captions: false } })]);
   assert.equal(view(s, 1000).captionsOn, false);
 });
+
+test("speaking defaults to false and follows the speaking channel", () => {
+  let s = run([open, live({ phase: "active" })]);
+  assert.equal(view(s, 1000).speaking, false);
+  s = reduce(s, { channel: "speaking", msg: { on: true } }, 1000);
+  assert.equal(view(s, 1000).speaking, true);
+  s = reduce(s, { channel: "speaking", msg: { on: false } }, 1000);
+  assert.equal(view(s, 1000).speaking, false);
+  s = reduce(s, { channel: "speaking", msg: { on: "yes" } }, 1000);
+  assert.equal(view(s, 1000).speaking, false, "only a real true counts");
+});
+
+test("a say event changes neither screen nor mood; its caption arrives via live", () => {
+  let s = run([open, live({ phase: "active", rep: 3 })]);
+  const before = view(s, 1000);
+  s = reduce(s, ev({ type: "say", session_id: "s_01", t: 1, id: "count_3", text: "Three!",
+    audio_url: "/audio/count_3_1.mp3" }), 1000);
+  const after = view(s, 1000);
+  assert.equal(after.screen, before.screen);
+  assert.equal(after.mood, before.mood);
+  assert.equal(after.caption, "");
+  s = reduce(s, live({ phase: "active", rep: 3, caption: { text: "Three!", source: "say", t: 1 } }), 1000);
+  assert.equal(view(s, 1000).caption, "Three!");
+});
