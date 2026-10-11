@@ -148,4 +148,46 @@ final class ContractFixtureTests: XCTestCase {
         XCTAssertEqual(me.prescriptions.first?.exerciseName.isEmpty, false)
         XCTAssertNotNil(me.lcd)
     }
+
+    // MARK: Plan 3: care, messaging, milestones
+
+    func testCareResponseDecodes() throws {
+        let care = try decode(CareResponse.self, "rest_get_me_care")
+        XCTAssertEqual(care.therapist?.name, "Dr. Okafor")
+        XCTAssertNotNil(care.nextVisitAt)
+        XCTAssertEqual(care.hrLimit, 130)
+        XCTAssertEqual(care.emergencyContact?.name, "Eric")
+        XCTAssertTrue(care.alertTherapist)
+        XCTAssertEqual(care.notes.first?.body, "Great squats this week")
+        XCTAssertEqual(care.notes.first?.kind, "note")
+        XCTAssertEqual(care.unreadMessages, 1)
+        XCTAssertTrue(care.highlights.isEmpty)
+    }
+
+    func testMessageListAndSendResponseDecode() throws {
+        let list = try decode(MessageList.self, "rest_get_me_messages")
+        XCTAssertEqual(list.messages.first?.sender, "therapist")
+        XCTAssertEqual(list.messages.first?.kind, "message")
+        XCTAssertNotNil(list.messages.first?.readAt)
+        let sent = try decode(SentMessage.self, "rest_post_me_messages")
+        XCTAssertEqual(sent.message.sender, "patient")
+        XCTAssertEqual(sent.message.body, "My knee hurts today")
+        XCTAssertNil(sent.message.readAt)
+    }
+
+    func testMilestoneListDecodes() throws {
+        let milestones = try decode(MilestoneList.self, "rest_get_patient_milestones")
+        XCTAssertEqual(milestones.patientId, "maya")
+        XCTAssertEqual(milestones.milestones.first?.message, "First pain-free full session")
+        XCTAssertNotNil(milestones.milestones.first?.time)
+    }
+
+    func testMessageEventDecodes() throws {
+        guard case .message(let event) = try decode(SocketEvent.self, "ws_events_message") else {
+            return XCTFail("expected message")
+        }
+        XCTAssertEqual(event.patientId, "maya")
+        XCTAssertEqual(event.message.sender, "therapist")
+        XCTAssertEqual(event.message.body, "How's the knee feeling?")
+    }
 }

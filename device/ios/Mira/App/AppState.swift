@@ -114,6 +114,7 @@ final class AppState {
         }
     }
     let liveSession = LiveSessionStore()
+    let store = PatientStore()
     private(set) var serverAddress: String
     private(set) var connectionEnabled: Bool
     private(set) var restStatus: String?
@@ -168,6 +169,8 @@ final class AppState {
         tokenHint = token.map(PairingToken.masked)
         // Note: patientID's didSet isn't called from init, which is what we want.
         patientID = defaults.string(forKey: "patientID.v1")
+        liveSession.onMessageEvent = { [store] event in store.appendIncoming(event) }
+        liveSession.onSessionSummary = { [weak self] _ in Task { await self?.refreshMe() } }
     }
 
     func advanceOnboarding() {
@@ -296,11 +299,24 @@ final class AppState {
         }
     }
 
+    /// Refreshes `me` plus everything `store` holds (care, sessions, progress,
+    /// milestones, messages), in parallel. Kept as `refreshMe` so existing call
+    /// sites (foreground, after pairing, Settings' "Refresh" button) don't change.
     func refreshMe() async {
-        guard patientID != nil, let apiClient else { return }
-        do { me = try await apiClient.me() } catch APIError.unauthorized {
-            configurationError = APIError.unauthorized.localizedDescription
-        } catch { /* keep the cached `me`; Home shows the offline banner from the socket state */ }
+        guard let patientID, let apiClient else { return }
+        await store.refreshAll(api: apiClient, patientID: patientID)
+        if let fresh = store.me {
+            me = fresh
+            configurationError = nil
+        } else {
+            // `store`'s own /me call failed; a single direct retry tells us whether
+            // it's an auth problem (token rejected) worth surfacing, or just offline
+            // (where we keep the cached `me`; Home shows the offline banner from the
+            // socket state).
+            do { _ = try await apiClient.me() } catch APIError.unauthorized {
+                configurationError = APIError.unauthorized.localizedDescription
+            } catch {}
+        }
     }
 
     // MARK: Sessions (Plan 2)

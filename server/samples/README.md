@@ -23,3 +23,10 @@ that same finished session, so its `analysis` field (the stored `session_analyse
 and `exercise_name` are populated instead of null. `rest_post_session_checkin` is the
 `POST /sessions/{id}/checkin` response for a moderate pain/effort/note check-in. `rest_get_patient_sessions`
 is `GET /patients/maya/sessions`, newest-first ended sessions with each one's `form_score` from the analysis.
+
+Plan 3 (care, messaging, milestones): `rest_get_me_care` is `GET /me/care` after a therapist note and an
+unread therapist message exist. `rest_get_me_messages` is `GET /me/messages` right after that message was
+read (so `read_at` is set). `rest_post_me_messages` is the response to the patient's own
+`POST /me/messages`. `rest_get_patient_milestones` is `GET /patients/maya/milestones` with one
+`memory_events` row of `kind='milestone'` inserted directly. `ws_events_message` is the `message` event a
+therapist's `POST /patients/{id}/messages` emits on the patient's `/ws/events` socket.

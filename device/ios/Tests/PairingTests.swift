@@ -113,16 +113,26 @@ final class PairingTests: XCTestCase {
     }
 
     func testRefreshMeUsesPatientToken() async throws {
+        // refreshMe() now also refreshes `store` (care, sessions, progress, milestones,
+        // messages) in parallel with /me; every call still carries the patient token.
         StubProtocol.handler = { request in
             if request.url?.path == "/pair" { return (200, #"{"patient_id":"maya","token":"pt_abc123","me":\#(Self.meJSON)}"#) }
-            XCTAssertEqual(request.url?.path, "/me")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer pt_abc123")
-            return (200, Self.meJSON)
+            switch request.url?.path {
+            case "/me": return (200, Self.meJSON)
+            case "/me/care":
+                return (200, #"{"therapist":null,"next_visit_at":null,"hr_limit":null,"emergency_contact":null,"alert_therapist":true,"notes":[],"highlights":[],"unread_messages":0}"#)
+            case "/me/messages": return (200, #"{"messages":[]}"#)
+            case "/patients/maya/sessions": return (200, #"{"patient_id":"maya","sessions":[]}"#)
+            case "/patients/maya/milestones": return (200, #"{"patient_id":"maya","milestones":[]}"#)
+            default: return (404, #"{"detail":"not stubbed"}"#)
+            }
         }
         let state = draftState()
         _ = await state.pair()
         await state.refreshMe()
         XCTAssertEqual(state.me?.patient.firstName, "Maya")
+        XCTAssertEqual(state.store.care?.unreadMessages, 0)
     }
 }
 

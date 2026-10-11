@@ -1,0 +1,15 @@
+{
+  "patient_id": "maya",
+  "milestones": [
+    {
+      "id": 1,
+      "time": "2026-10-11T08:47:07.667650Z",
+      "message": "First pain-free full session",
+      "evidence": {
+        "value": 0,
+        "metric": "pain_post",
+        "session_id": null
+      }
+    }
+  ]
+}

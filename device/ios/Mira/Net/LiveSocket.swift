@@ -176,6 +176,12 @@ final class LiveSessionStore {
     private(set) var lastCommand: CommandMessage?
     private(set) var decodingError: String?
     private(set) var receivedMessages = 0
+    /// Forwards every `message` event (a therapist note/message or the patient's own,
+    /// echoed back) so `PatientStore` can append it without this store knowing about it.
+    @ObservationIgnored var onMessageEvent: ((MessageEvent) -> Void)?
+    /// Fires once per `session_summary`, after `sessionSummary` is updated, so `AppState`
+    /// can refresh care/progress data for the session that just ended.
+    @ObservationIgnored var onSessionSummary: ((SessionSummaryMessage) -> Void)?
 
     var connectionState: ConnectionState {
         let states = [liveSocket.state, eventSocket.state, poseSocket.state]
@@ -212,7 +218,11 @@ final class LiveSessionStore {
                     // let it clobber that boundary.
                     self?.sessionSummary = summary
                     self?.cue = summary.spoken
+                    self?.onSessionSummary?(summary)
                     return
+                }
+                if case .message(let messageEvent) = event {
+                    self?.onMessageEvent?(messageEvent)
                 }
                 // Every other /ws/events message carries the current session's stamp.
                 if let stamp = try? WireJSON.decoder().decode(SessionStamp.self, from: data), let sessionId = stamp.sessionId {

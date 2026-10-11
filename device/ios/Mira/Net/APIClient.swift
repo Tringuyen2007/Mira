@@ -162,4 +162,21 @@ struct APIClient {
     func updateMe(_ body: MeUpdate) async throws -> MeResponse { try await request("PUT", path: ["me"], body: json(body)) }
     func exportMe() async throws -> Data { try await perform("GET", path: ["me", "export"]) }
     func deleteMe() async throws { _ = try await perform("DELETE", path: ["me"]) }
+
+    // MARK: Care, messaging, milestones (Plan 3)
+
+    func care() async throws -> CareResponse { try await request(path: ["me", "care"]) }
+    /// `sinceID`: only messages after this id (also marks unread therapist/mira messages as read).
+    func messages(sinceID: Int? = nil) async throws -> MessageList {
+        var query: [URLQueryItem] = []
+        if let sinceID { query.append(URLQueryItem(name: "since_id", value: String(sinceID))) }
+        return try await request(path: ["me", "messages"], query: query)
+    }
+    func sendMessage(_ body: String) async throws -> SentMessage {
+        try await request("POST", path: ["me", "messages"], body: json(MessageSendRequest(body: body)))
+    }
+    func milestones(patientID: String) async throws -> MilestoneList {
+        try await request(path: ["patients", patientID, "milestones"])
+    }
+    func testAlert() async throws -> TestAlertResponse { try await request("POST", path: ["me", "test-alert"]) }
 }
