@@ -50,6 +50,9 @@ class Config:
     MOCK_PATIENT_ID: str = "maya"
     MOCK_FALL_RESPONDS_AT: float | None = None
     DEMO_TOOLS_ENABLED: bool = False
+    MOCK_LOOP: bool = False  # True: the mock squat program repeats forever (pre-Plan-2 behaviour)
+    MOCK_AUTO_RESTART_S: float = 30.0  # mock mode: start the next demo session this long after one ends (0 = off)
+    AUTO_STOP_AFTER_LAST_SET: bool = True  # end the session when set == sets_target (engines without `stopped`)
     PAIRING_DEMO_CODE: str = "K7P4M2"  # therapist code the seed binds to Maya (the iOS design preview uses it)
     PAIRING_DEMO_CODE_REUSABLE: bool = True  # the demo code may pair many phones; real codes are single-use
     PAIRING_REUSABLE_UPDATES_PROFILE: bool = True  # set to 0 on a public server once the demo phone has paired

@@ -1,0 +1,71 @@
+"""Ends a session from engine events (`stopped`, or the last `set_done`) and, in mock mode, starts the next demo
+session after a pause so the LCD keeps looping — every loop is now a real session with a real analysis."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from server.logging_setup import get_logger
+from server.state import LiveSession, SessionRegistry
+
+log = get_logger("session_end")
+
+
+class SessionEnder:
+    """EngineBridge event subscriber. `live` is the bridge's LiveState (for sets_target)."""
+
+    def __init__(self, registry: SessionRegistry, live: Any, *, auto_stop_after_last_set: bool = True) -> None:
+        self.registry = registry
+        self.live = live
+        self.auto_stop_after_last_set = auto_stop_after_last_set
+
+    async def on_event(self, ev: dict[str, Any]) -> None:
+        kind = ev.get("type")
+        sid = ev.get("session_id")
+        current = self.registry.current
+        if current is None or not isinstance(sid, str) or sid != current.session_id:
+            return
+        if kind == "stopped":
+            log.info("engine stopped the session", extra={"session_id": sid, "reason": ev.get("reason")})
+            await self.registry.stop(sid)
+        elif kind == "set_done" and self.auto_stop_after_last_set:
+            target = getattr(self.live, "sets_target", None)
+            done = ev.get("set")
+            if isinstance(target, int) and isinstance(done, int) and done >= target:
+                log.info("last set done; ending the session", extra={"session_id": sid, "set": done})
+                await self.registry.stop(sid)
+
+
+class MockAutoRestart:
+    """on_stop hook for mock mode: start a fresh demo session `delay_s` after one ends, unless something else
+    (REST, boot) already started one."""
+
+    def __init__(self, registry: SessionRegistry, patient_id: str, exercise_id: str, delay_s: float) -> None:
+        self.registry = registry
+        self.patient_id = patient_id
+        self.exercise_id = exercise_id
+        self.delay_s = delay_s
+        self._task: asyncio.Task[None] | None = None
+
+    def on_stop(self, session: LiveSession) -> None:
+        if self.delay_s <= 0:
+            return
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = asyncio.get_running_loop().create_task(self._restart())
+
+    async def _restart(self) -> None:
+        await asyncio.sleep(self.delay_s)
+        if self.registry.current is not None:
+            return
+        log.info("mock auto-restart", extra={"patient_id": self.patient_id})
+        await self.registry.start(self.patient_id, self.exercise_id)
+
+    async def close(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass

@@ -118,6 +118,10 @@ class SessionRegistry:
         # Called with the new LiveSession after every start() (boot or REST), e.g. to restart the mock
         # engine's program and to warm up the greeting (server.ai.session_voice.SessionVoice.prepare_greeting).
         self.on_start: list[Callable[[LiveSession], None]] = []
+        self.ended: set[str] = set()
+        # Called once per session after it ends (REST stop, engine `stopped`, last set, shutdown). Sync hooks run
+        # inline; a coroutine result is scheduled as a task — stop() never waits on the analyst.
+        self.on_stop: list[Callable[[LiveSession], Any]] = []
 
     async def start(self, patient_id: str, exercise_id: str) -> LiveSession:
         profile = await self._load_profile(patient_id)
@@ -141,13 +145,25 @@ class SessionRegistry:
                                             "exercise_id": exercise_id})
         return session
 
+    def is_ended(self, session_id: str) -> bool:
+        return session_id in self.ended
+
     async def stop(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
-        if session is None:
+        if session is None or session_id in self.ended:
             return
+        self.ended.add(session_id)
         if self.current is session:
             self.current = None
         await self._store_call("session_stopped", session)
+        for hook in self.on_stop:
+            try:
+                result = hook(session)
+                if asyncio.iscoroutine(result):
+                    task = asyncio.get_running_loop().create_task(result)
+                    task.add_done_callback(_log_hook_failure)
+            except Exception as exc:  # noqa: BLE001 - a hook bug must not break session stop
+                log.warning("session stop hook failed", extra={"session_id": session_id, "error": repr(exc)})
         log.info("session stopped", extra={"session_id": session_id})
 
     def get(self, session_id: str) -> LiveSession | None:
@@ -172,6 +188,11 @@ class SessionRegistry:
         except Exception as exc:  # noqa: BLE001 - persistence must never break the live session
             log.warning(f"session store {method} failed", extra={"session_id": session.session_id,
                                                                   "error": repr(exc)})
+
+
+def _log_hook_failure(task: asyncio.Task[Any]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        log.warning("async session stop hook failed", extra={"error": repr(task.exception())})
 
 
 StatProvider = Callable[[], Any | Awaitable[Any]]

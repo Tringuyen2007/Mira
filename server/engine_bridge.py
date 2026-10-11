@@ -405,6 +405,11 @@ class MockSource:
                 events = list(self._events_between(self._prev_program_s, self._program_s)) if self._ready else []
                 if self._ready:
                     self._prev_program_s = self._program_s
+                if self._ready and not cfg.MOCK_LOOP and self._program_s >= _PROGRAM_S:
+                    # The program is over: one `stopped`, then stand still (like a user stop) until the next
+                    # session.
+                    self._stopped = True
+                    events.append({"type": "stopped", "reason": "program_complete"})
             self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
             for ev in events:
                 self._emit(emit, ev)

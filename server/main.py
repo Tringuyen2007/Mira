@@ -49,6 +49,7 @@ from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
 from server.security import (Principal, TokenCheckUnavailable, TunnelFilterMiddleware, require_principal,
                              require_token, ws_scope, ws_token_ok)
+from server.session_end import MockAutoRestart, SessionEnder
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -170,6 +171,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
 
+    ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=cfg.AUTO_STOP_AFTER_LAST_SET)
+    bridge.subscribe_events(ender.on_event)
+    auto_restart: MockAutoRestart | None = None
+    if cfg.MIRA_SOURCE.startswith("mock"):
+        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S)
+        sessions.on_stop.append(auto_restart.on_stop)
+
     # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
     # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
     sessions.on_start.append(lambda session: bridge.live.on_session_start(session.profile.first_name,
@@ -194,6 +202,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await coach.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
+        if auto_restart is not None:
+            await auto_restart.close()
         if writer is not None:
             await asyncio.to_thread(writer.stop)
         if db is not None:
