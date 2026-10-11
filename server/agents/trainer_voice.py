@@ -10,7 +10,8 @@ Event -> line (spec §3, docs/superpowers/specs/2026-10-11-lcd-agent-design.md):
   `i < target - 1`) and `last_rep` at `i == target - 1`. The target comes from the rep itself or the last
   `countdown`/`arrived` of the session; with no known target both extras are skipped. Other reps are silent
   (the correction `cue` already speaks).
-- `paused` -> `pause`; `resumed` -> `resume`; `session_summary` -> `session_done`.
+- `paused` -> `pause`; `resumed` -> `resume`; `session_summary` -> `session_done` (and cancels a pending
+  `set_done`).
 - `set_done` -> `set_done`, but only when no `summary_ready` with audio arrives for that session within 1 s
   (SessionVoice's own summary audio wins when runtime TTS is on).
 - `alert` steps narrate the emergency call: `escalated`/`call_registered` -> `calling_contact`,
@@ -19,7 +20,11 @@ Event -> line (spec §3, docs/superpowers/specs/2026-10-11-lcd-agent-design.md):
 
 Never talks over safety: a confirmed `fall`, the Guardian's `check_in` cue or `alert detected` opens an
 incident hold for the session, during which only the call-flow lines are spoken; a closing alert step
-(`resolved`, `closed`, `resolved_by_therapist`) lifts it. The same line id is not repeated within 1.5 s.
+(`resolved`, `closed`, `resolved_by_therapist`) lifts it. The same line id is not repeated within 1.5 s. Lines from one trigger are emitted in speaking order
+(the count before `halfway`/`last_rep`); the kiosk queues `say` clips so neither is cut off.
+
+Per-session state is dropped on `stopped` (an open incident keeps its hold) and, for every other session, on an
+`arrived` for a new session, so it stays bounded on an always-on box.
 
 Engine events arrive through `bridge.subscribe_events(on_event)`; agent events (`alert`, `cue`,
 `session_summary`, `summary_ready`, sent with `hub.emit`) through `hub.emit_observers` (`observe`). An event seen
@@ -70,7 +75,7 @@ class TrainerVoice:
         self._incident: set[str | None] = set()
         self._reps_target: dict[str | None, int] = {}
         self._last_said: dict[tuple[str | None, str], float] = {}
-        self._call_lines_said: set[tuple[Any, str]] = set()
+        self._call_lines_said: dict[str | None, set[tuple[Any, str]]] = {}
         self._set_done_tasks: dict[str | None, asyncio.Task[None]] = {}
         self._seen: deque[tuple[Any, ...]] = deque(maxlen=SEEN_EVENTS_MAX)
 
@@ -111,6 +116,10 @@ class TrainerVoice:
         if kind == "say" or self._already_seen(ev):
             return
         sid = self._session_id(ev)
+        if kind == "arrived":
+            self._forget_other_sessions(sid)
+        elif kind == "stopped":
+            self._forget_session(sid)
         self._track_target(sid, ev)
         if kind == "alert":
             self._on_alert(sid, ev)
@@ -120,12 +129,12 @@ class TrainerVoice:
             return
         if kind == "summary_ready":
             if ev.get("audio_url"):
-                task = self._set_done_tasks.pop(sid, None)
-                if task is not None:
-                    task.cancel()
+                self._cancel_set_done(sid)
             return
         if sid in self._incident:
             return
+        if kind == "session_summary":
+            self._cancel_set_done(sid)  # the last set's pending "Set done" must not cut off "That's your whole session"
         if kind in SIMPLE_LINES:
             self._say(sid, SIMPLE_LINES[kind])
         elif kind == "countdown":
@@ -163,21 +172,41 @@ class TrainerVoice:
         if line is None:
             return
         key = (ev.get("alert_id") or sid, line)
-        if key in self._call_lines_said:  # escalated + call_registered both mean "calling": say it once
+        said = self._call_lines_said.setdefault(sid, set())
+        if key in said:  # escalated + call_registered both mean "calling": say it once
             return
         if self._say(sid, line):
-            self._call_lines_said.add(key)
+            said.add(key)
 
     def _open_incident(self, sid: str | None) -> None:
         self._incident.add(sid)
+        self._cancel_set_done(sid)
+
+    def _cancel_set_done(self, sid: str | None) -> None:
         task = self._set_done_tasks.pop(sid, None)
         if task is not None:
             task.cancel()
 
+    def _forget_session(self, sid: str | None) -> None:
+        """`stopped`: drop the session's per-session state so it stays bounded. An open incident keeps its
+        hold and its said call lines until the alert closes (the call flow outlives the session)."""
+        self._cancel_set_done(sid)
+        self._reps_target.pop(sid, None)
+        for key in [k for k in self._last_said if k[0] == sid]:
+            del self._last_said[key]
+        if sid not in self._incident:
+            self._call_lines_said.pop(sid, None)
+
+    def _forget_other_sessions(self, sid: str | None) -> None:
+        """`arrived` for a new session: nothing of any other session is needed any more."""
+        for other in {*self._reps_target, *self._set_done_tasks, *self._call_lines_said, *self._incident,
+                      *(k[0] for k in self._last_said)} - {sid}:
+            self._forget_session(other)
+            self._incident.discard(other)
+            self._call_lines_said.pop(other, None)
+
     def _schedule_set_done(self, sid: str | None) -> None:
-        old = self._set_done_tasks.pop(sid, None)
-        if old is not None:
-            old.cancel()
+        self._cancel_set_done(sid)
         task = asyncio.get_running_loop().create_task(self._set_done_later(sid), name="trainer-set-done")
         self._set_done_tasks[sid] = task
 

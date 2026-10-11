@@ -200,3 +200,50 @@ async def test_say_payload_shape() -> None:
     assert kind == "say"
     assert payload == {"session_id": SID, "t": 1760000000.0, "id": "count_3", "text": "COUNT_3",
                        "audio_url": "/audio/count_3_1.mp3"}
+
+
+async def test_count_is_emitted_before_last_rep_on_the_same_rep() -> None:
+    tv, hub, clock = make()
+    await tv.on_event(ev("rep", index=9, quality="good", reps_target=10))
+    assert said(hub) == ["count_9", "last_rep"]
+
+
+async def test_session_summary_cancels_the_pending_set_done() -> None:
+    tv, hub, clock = make()
+    await tv.on_event(ev("set_done", set=3, reps=10))
+    await asyncio.sleep(0.2)
+    await tv.on_event(ev("session_summary"))
+    await asyncio.sleep(1.0)
+    assert said(hub) == ["session_done"]
+    await tv.close()
+
+
+async def test_stopped_drops_the_sessions_state() -> None:
+    tv, hub, clock = make()
+    await feed(tv, clock, ev("countdown", n=3, reps_target=10), ev("rep", index=1, quality="good"),
+               ev("alert", step="escalated", alert_id="a1"))
+    await tv.on_event(ev("set_done", set=1))
+    await tv.on_event(ev("stopped", reason="command"))
+    assert tv._reps_target == {} and tv._last_said == {} and tv._call_lines_said == {}
+    assert tv._set_done_tasks == {}
+    await asyncio.sleep(1.05)
+    assert "set_done" not in said(hub)
+
+
+async def test_stopped_keeps_an_open_incident_hold() -> None:
+    tv, hub, clock = make()
+    await feed(tv, clock, ev("fall", stage="confirmed"), ev("alert", step="escalated", alert_id="a1"),
+               ev("stopped", reason="command"), ev("alert", step="call_registered", alert_id="a1"),
+               ev("rep", index=1, quality="good"))
+    assert said(hub) == ["calling_contact"]
+
+
+async def test_arrived_for_a_new_session_drops_other_sessions() -> None:
+    tv, hub, clock = make()
+    await feed(tv, clock, ev("countdown", n=3, reps_target=10), ev("rep", index=1, quality="good"),
+               ev("fall", stage="confirmed"), ev("alert", step="escalated", alert_id="a1"))
+    await feed(tv, clock, {"type": "arrived", "session_id": "s_02"}, {"type": "rep", "session_id": "s_02",
+                                                                      "index": 1, "quality": "good"})
+    assert set(tv._reps_target) <= {"s_02"} and tv._incident == set() and tv._call_lines_said == {}
+    assert {k[0] for k in tv._last_said} == {"s_02"}
+    assert said(hub)[-1] == "count_1"
