@@ -100,3 +100,66 @@ test("onSpeaking is optional", () => {
   audio.current.onplaying();
   audio.current.onended();
 });
+
+test("queued clips play one after another and speaking stays on across the hand-over", () => {
+  const calls = [];
+  const audio = new AudioPlayer(EventClip, { onSpeaking: (on) => calls.push(on) });
+  audio.play("/audio/count_9_1.mp3", { queue: true });
+  const first = audio.current;
+  first.onplaying();
+  assert.equal(audio.play("/audio/last_rep_1.mp3", { queue: true }), true);
+  assert.equal(audio.current, first, "the second clip waits for the first");
+  first.ended = true;
+  first.onpause(); // browsers fire pause right before ended
+  first.onended();
+  assert.equal(audio.current.url, "/audio/last_rep_1.mp3");
+  audio.current.onplaying();
+  audio.current.onended();
+  assert.deepEqual(calls, [true, true, false]);
+  assert.deepEqual(audio.queue, []);
+});
+
+test("an errored clip also hands over to the next queued one", () => {
+  const audio = new AudioPlayer(EventClip);
+  audio.play("/audio/a.mp3", { queue: true });
+  audio.play("/audio/b.mp3", { queue: true });
+  audio.current.onerror();
+  assert.equal(audio.current.url, "/audio/b.mp3");
+});
+
+test("the queue keeps at most 2 clips, dropping the oldest", () => {
+  const audio = new AudioPlayer(EventClip);
+  audio.play("/audio/a.mp3", { queue: true });
+  for (const name of ["b", "c", "d"]) audio.play(`/audio/${name}.mp3`, { queue: true });
+  assert.deepEqual(audio.queue, ["/audio/c.mp3", "/audio/d.mp3"]);
+  audio.current.onended();
+  assert.equal(audio.current.url, "/audio/c.mp3");
+  audio.current.onended();
+  assert.equal(audio.current.url, "/audio/d.mp3");
+  audio.current.onended();
+  assert.equal(audio.current.url, "/audio/d.mp3");
+  assert.deepEqual(audio.queue, []);
+});
+
+test("a queued clip plays at once when nothing is playing", () => {
+  const audio = new AudioPlayer(EventClip);
+  audio.play("/audio/a.mp3");
+  audio.current.onended();
+  audio.play("/audio/b.mp3", { queue: true });
+  assert.equal(audio.current.url, "/audio/b.mp3");
+  assert.deepEqual(audio.queue, []);
+});
+
+test("a preempting clip stops the current one and clears the queue", () => {
+  let paused = 0;
+  class Counted extends EventClip { pause() { paused += 1; } }
+  const audio = new AudioPlayer(Counted);
+  audio.play("/audio/a.mp3", { queue: true });
+  audio.play("/audio/b.mp3", { queue: true });
+  audio.play("/audio/countdown_3_1.mp3");
+  assert.equal(audio.current.url, "/audio/countdown_3_1.mp3");
+  assert.deepEqual(audio.queue, []);
+  assert.equal(paused, 1);
+  audio.current.onended();
+  assert.equal(audio.current.url, "/audio/countdown_3_1.mp3", "nothing left to play");
+});
