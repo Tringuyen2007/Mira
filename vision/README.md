@@ -182,3 +182,10 @@ start counting when it turns `"ready"`. It stays `"ready"` through a short loss 
 `"measuring"` for a new person (after 5 s with nobody). Two-camera triangulation is always `"ready"`.
 Do not count reps or judge form on a frame with `"pose_held"` in `frame.flags`: its joints are the last
 reliable pose, held for at most 0.5 s while the lower-body detection is unreliable.
+
+
+## Sending frames to the Mira server
+
+`python -m vision.agent --host wss://<mira-host> --token <MIRA_VISION_TOKEN>` runs `Engine` on camera B and streams
+its frames/events to `/ws/vision` in the server's format; see the repo README, "Remote vision agent" →
+"Starting the vision agent". The camera stays closed until the server sends `command start`.
