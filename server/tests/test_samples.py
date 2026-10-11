@@ -8,7 +8,7 @@ from server.hub import POSE_FIELDS
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdown", "cue", "rep", "set_done",
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
-                 "proposal_created", "coach_adapt", "device_health"}
+                 "proposal_created", "coach_adapt", "device_health", "device_status"}
 CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health"}
 
 
@@ -36,4 +36,5 @@ def test_pose_and_frame_samples_match_contract() -> None:
     assert {"type", "seq", "t", "session_id", "exercise_id", "set_no", "joints", "confidence", "angles", "com",
             "load_l_pct", "heel_l_pct", "heel_r_pct", "confidence_avg", "flags"} <= set(frame)
     assert set(_load("ws_live")) >= {"phase", "exercise_id", "rep", "reps_target", "set", "sets_target", "countdown",
-                                     "main_angle", "load_l_pct", "load_conf", "hr", "flags", "cue_id", "paused"}
+                                     "main_angle", "load_l_pct", "load_conf", "hr", "flags", "cue_id", "paused",
+                                     "caption", "first_name", "exercise_name", "incident"}

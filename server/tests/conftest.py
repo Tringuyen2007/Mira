@@ -15,10 +15,12 @@ from server.config import reload_config  # noqa: E402
 from server.logging_setup import shutdown_logging  # noqa: E402
 
 TOKEN = "test-token-0123456789abcdef"
+DEVICE_TOKEN = "device-token-0123456789abcdef"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 BASELINE_ENV = {
     "MIRA_API_TOKEN": TOKEN,
+    "MIRA_DEVICE_TOKEN": "",
     "MIRA_SOURCE": "mock",
     "ENGINE_MODE": "thread",
     "MOCK_PATIENT_ID": "maya",
