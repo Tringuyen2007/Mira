@@ -60,6 +60,18 @@ means someone is standing over them.
 
 If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on macOS cannot.
 
+### Who gets tracked
+
+Only the person on the mat or within 1 m of it. Each camera's pose detection searches only the area
+around the mat (the cyan "tracking area" box in the debug view; the full picture is still shown) and
+finds up to 3 people. A person counts as the same in both cameras when their hip, shoulder and ankle
+midpoints line up in 3D; of those near the mat, the one closest to the mat centre is tracked, and
+tracking only switches to someone else when they are 30 cm closer to the centre for half a second.
+Everyone else is drawn grey and labelled "ignored". If the two cameras disagree (e.g. a hand over one
+lens), the camera whose person stands at the mat is kept and the other is ignored for that frame
+("ignoring camera A (disagrees)"). Recordings keep everyone found, so `--retriangulate` re-runs the
+selection.
+
 ### Left/right flips
 
 Both cameras are at the same height, so a MediaPipe left/right flip in one camera still looks
