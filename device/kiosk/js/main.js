@@ -10,7 +10,7 @@ import { loadMascot } from "./mascot.js";
 
 const VERSION = "1";
 const HEALTH_EVERY_MS = 5000;
-const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready"]);
+const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready", "session_summary"]);
 
 // Uniform scale with letterboxing: the stage is always 1024×600 CSS px inside.
 function fitStage() {

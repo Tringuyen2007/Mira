@@ -157,6 +157,16 @@
     </div>
   </section>
 
+  <!-- Session Complete: whole-session summary from the session_summary event, mirrors Set Done (37:242) -->
+  <section class="screen" data-screen="sessionDone" aria-label="Session complete">
+    <div class="summary">
+      <p class="eyebrow">SESSION COMPLETE</p>
+      <p class="count count-done"><span id="session-score" class="count-now">—</span><span class="count-target">/100</span></p>
+      <div class="pill done-pill"><span id="session-good"></span></div>
+      <p id="session-spoken" class="session-spoken"></p>
+    </div>
+  </section>
+
   <!-- 8 Fall Alert (37:321) -->
   <section class="screen" data-screen="fall" role="alert" aria-label="Are you okay?">
     <div class="fall-border" aria-hidden="true"></div>

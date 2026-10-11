@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { initialState, reduce, view, CUE_WINDOW_MS, CHEER_MS, OFFLINE_AFTER_MS } from "../js/state.js";
+import { initialState, reduce, view, CUE_WINDOW_MS, CHEER_MS, OFFLINE_AFTER_MS, SESSION_DONE_MS }
+  from "../js/state.js";
 
 const live = (over = {}) => ({ channel: "live", msg: { phase: "idle", rep: 0, reps_target: 12, set: 2,
   sets_target: 3, countdown: null, load_l_pct: 50, hr: 96, paused: false, caption: null, first_name: "Maya",
@@ -139,4 +140,43 @@ test("balance hidden when unknown, ok within 15 points", () => {
 test("dose line and pings are ignored", () => {
   let s = run([open, live({ phase: "idle" }), ev({ type: "arrived" }), ev({ type: "ping" })]);
   assert.equal(view(s, 1000).dose, "3 sets · 12 reps");
+});
+
+const summaryMsg = { session_id: "s1", exercise_name: "Mini squats", form_score: 82, reps_total: 12,
+  good_reps: 10, spoken: "Nice work today, Maya!", audio_url: "/audio/summary_s1.mp3" };
+
+test("session_summary shows the sessionDone screen with the numbers while fresh and idle/rest/done", () => {
+  let s = run([open, live({ phase: "idle" })]);
+  s = reduce(s, ev({ type: "session_summary", ...summaryMsg }), 1000);
+  let v = view(s, 1000);
+  assert.equal(v.screen, "sessionDone");
+  assert.equal(v.mood, "celebrating");
+  assert.deepEqual(v.sessionSummary, { formScore: 82, goodReps: 10, repsTotal: 12, spoken: "Nice work today, Maya!" });
+
+  s = reduce(s, live({ phase: "rest" }), 1000);
+  assert.equal(view(s, 1000).screen, "sessionDone");
+
+  s = reduce(s, live({ phase: "done" }), 1000);
+  assert.equal(view(s, 1000).screen, "sessionDone");
+});
+
+test("session_summary expires after SESSION_DONE_MS", () => {
+  let s = run([open, live({ phase: "idle" })]);
+  s = reduce(s, ev({ type: "session_summary", ...summaryMsg }), 1000);
+  assert.equal(view(s, 1000 + SESSION_DONE_MS).screen, "sessionDone");
+  assert.equal(view(s, 1000 + SESSION_DONE_MS + 1).screen, "idle");
+});
+
+test("arrived clears the session summary", () => {
+  let s = run([open, live({ phase: "idle" })]);
+  s = reduce(s, ev({ type: "session_summary", ...summaryMsg }), 1000);
+  s = reduce(s, ev({ type: "arrived" }), 1000);
+  assert.equal(view(s, 1000).screen, "greeting");
+});
+
+test("countdown phase wins over a fresh session summary (next session started)", () => {
+  let s = run([open, live({ phase: "idle" })]);
+  s = reduce(s, ev({ type: "session_summary", ...summaryMsg }), 1000);
+  s = reduce(s, live({ phase: "countdown", countdown: 3 }), 1000);
+  assert.equal(view(s, 1000).screen, "countdown");
 });
