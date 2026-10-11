@@ -196,7 +196,7 @@ No agent logic changes. Coach and Guardian cues and Voice greetings/summaries no
   - live: `caption`, `first_name`, `exercise_name`, `incident` set from bridge and agent events.
   - mock: `awaiting_gesture` → `gesture` → `countdown` order.
   - static: `/device/` serves `index.html`; `/device/../ios` still 404.
-- `node --test device/kiosk/tests/`: reducer and view-model for every screen and the priority order, balance
+- `node --test device/kiosk/tests/*.test.mjs`: reducer and view-model for every screen and the priority order, balance
   thresholds, caption, audio URL filter.
 - Visual: `make run`, open `http://localhost:8000/device/#token=…` in Chrome at 1024×600 for each state
   (mock flow + `POST /demo/trigger_fall` with `DEMO_TOOLS_ENABLED=1`), compare side by side with the Figma
