@@ -61,8 +61,10 @@ DEVICE_HEALTH_STR_MAX = 64  # chars kept of a device_health string (screen, vers
 CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
 # Static web pages, mounted only when the directory exists. `device/` itself holds the iOS sources, so it is
-# never served as a whole: the therapist dashboard lives in device/dashboard, the kiosk page in device/kiosk.
-STATIC_PAGES = {"dashboard": REPO_ROOT / "device" / "dashboard", "device": REPO_ROOT / "device" / "kiosk"}
+# never served as a whole: the therapist dashboard lives in device/dashboard, the kiosk page in device/kiosk,
+# and a static demo copy of the kiosk (no server data, shareable) in device/lcd-web.
+STATIC_PAGES = {"dashboard": REPO_ROOT / "device" / "dashboard", "device": REPO_ROOT / "device" / "kiosk",
+                "lcd-web": REPO_ROOT / "device" / "lcd-web"}  # static demo copy of the kiosk, no token
 
 
 class MultiDirStaticFiles(StaticFiles):

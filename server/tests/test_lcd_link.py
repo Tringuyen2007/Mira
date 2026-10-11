@@ -55,3 +55,15 @@ def test_the_link_key_is_a_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LCD_LINK_KEY", KEY)
     reload_config()
     assert KEY in cfg.secret_values() and cfg.redacted()["LCD_LINK_KEY"] == "set"
+
+
+def test_the_static_web_copy_is_served_without_any_token(make_client: Callable[..., TestClient]) -> None:
+    client = make_client(MIRA_DEVICE_TOKEN=DEVICE_TOKEN, LCD_LINK_KEY=KEY)
+    page = client.get("/lcd-web/")
+    assert page.status_code == 200 and 'src="js/demo.js"' in page.text and "screen-nav" in page.text
+    for path in ("js/demo.js", "js/state.js", "js/view.js", "js/mascot.js", "css/web.css", "assets/mira/mascot.json"):
+        r = client.get(f"/lcd-web/{path}")
+        assert r.status_code == 200, path
+        assert DEVICE_TOKEN not in r.text and TOKEN not in r.text and KEY not in r.text
+    demo = client.get("/lcd-web/js/demo.js").text
+    assert "WebSocket" not in demo and "/ws/" not in demo  # demo data only, no server connection
