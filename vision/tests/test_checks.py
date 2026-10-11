@@ -106,3 +106,10 @@ def test_camera_moved_checks():
     assert checks["camera A not moved"].passed is True and checks["camera B not moved"].passed is False
     blind = {c.name: c for c in run_checks([], {}, MAT, moved={"A": ("blind", None)})}
     assert blind["camera A not moved"].passed is None
+
+
+def test_pose_time_checks():
+    checks = {c.name: c for c in run_checks([], {}, MAT, pose_ms={"A": 30.0, "B": 60.0})}
+    assert checks["pose time A"].passed is True and checks["pose time B"].passed is False
+    assert checks["pose time B"].value == 60.0 and checks["pose time B"].target == "≤ 45"
+    assert "pose time A" not in {c.name for c in run_checks([], {}, MAT)}

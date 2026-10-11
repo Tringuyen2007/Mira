@@ -2,6 +2,7 @@
 
     python -m vision.checks --height-cm 180   # 5 s live: stand still, facing Mira, in view of both cameras
     python -m vision.checks --from FILE       # on a recording, re-triangulated with the current calibration
+    python -m vision.checks --poses 1         # live, with pose looking for one person per camera (cost check)
 """
 from __future__ import annotations
 
@@ -103,8 +104,10 @@ def _check(name, value, unit, target, test) -> Check:
 
 def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat: MatConfig,
                fps: dict[str, float] | None = None, height_cm: float | None = None,
-               moved: dict[str, tuple[str, float | None]] | None = None) -> list[Check]:
-    """`moved`: camera name -> (MoveMonitor status, shift px), from a live run."""
+               moved: dict[str, tuple[str, float | None]] | None = None,
+               pose_ms: dict[str, float] | None = None) -> list[Check]:
+    """`moved`: camera name -> (MoveMonitor status, shift px); `pose_ms`: camera name -> pose time per
+    frame (ms); both from a live run."""
     checks = []
     n3d = sum(o.frame.tracking == "3d" for o in outputs)
     frac = 100.0 * n3d / len(outputs) if outputs else None
@@ -148,6 +151,8 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
                          lambda v: v <= 33))
     for n, v in sorted((fps or {}).items()):
         checks.append(_check(f"capture fps {n}", v, "fps", "≥ 20", lambda x: x >= 20))
+    for n, v in sorted((pose_ms or {}).items()):
+        checks.append(_check(f"pose time {n}", v, "ms", "≤ 45", lambda x: x <= 45))
     for n, (status, shift) in sorted((moved or {}).items()):
         value = shift if status in ("ok", "moved") else None
         checks.append(Check(f"camera {n} not moved", value, "px", "< 3",
@@ -173,9 +178,10 @@ def outputs_from_recording(path, cams: dict[str, CameraConfig]) -> list[Pipeline
                                anchor_feet=False))
 
 
-def _live_outputs(cams, mat, model: str, seconds: float):
+def _live_outputs(cams, mat, model: str, seconds: float, num_poses: int | None = None):
     from vision.capture import mono_to_unix
     from vision.live import LiveSource
+    from vision.pose import NUM_POSES
     from vision.markers import MarkerDetector
     from vision.moved import MoveMonitor
 
@@ -183,7 +189,7 @@ def _live_outputs(cams, mat, model: str, seconds: float):
     monitor = MoveMonitor(cams, MarkerDetector(mat), interval_s=0.25)
     # smoothing and foot anchoring would hide the jitter and floor errors these checks measure
     pipeline = Pipeline(cams, smoothing=False, mat=mat, anchor_feet=False)
-    with LiveSource(cams, model, mat) as src:
+    with LiveSource(cams, model, mat, num_poses=NUM_POSES if num_poses is None else num_poses) as src:
         problems = src.wait_ready()
         if problems:
             raise SystemExit("cannot run checks: " + "; ".join(problems))
@@ -197,9 +203,11 @@ def _live_outputs(cams, mat, model: str, seconds: float):
             for n, v in src.latest_frames().items():
                 if v is not None:
                     monitor.update(n, v[0], time.monotonic())
-        fps = {n: s["fps"] for n, s in src.stats().items()}
+        stats = src.stats()
+    fps = {n: s["fps"] for n, s in stats.items()}
+    pose_ms = {n: s["pose_ms"] for n, s in stats.items()}
     moved = {n: (monitor.status(n), monitor.shift_px(n)) for n in cams}
-    return outputs, fps, moved
+    return outputs, fps, moved, pose_ms
 
 
 def main() -> int:
@@ -208,13 +216,15 @@ def main() -> int:
     p.add_argument("--from", dest="from_path", type=Path)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
     p.add_argument("--height-cm", type=float, help="your height, to check the 3D scale")
+    p.add_argument("--poses", type=int, default=None,
+                   help="people pose looks for per camera, live (default vision.pose.NUM_POSES)")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
     if args.from_path:
-        outputs, fps, moved = outputs_from_recording(args.from_path, cams), None, None
+        outputs, fps, moved, pose_ms = outputs_from_recording(args.from_path, cams), None, None, None
     else:
-        outputs, fps, moved = _live_outputs(cams, mat, args.model, args.seconds)
-    checks = run_checks(outputs, cams, mat, fps, args.height_cm, moved)
+        outputs, fps, moved, pose_ms = _live_outputs(cams, mat, args.model, args.seconds, args.poses)
+    checks = run_checks(outputs, cams, mat, fps, args.height_cm, moved, pose_ms)
     print(format_checks(checks))
     return 0 if all(c.passed is not False for c in checks) else 1
 

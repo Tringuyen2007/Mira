@@ -2,6 +2,7 @@
 
     python -m vision.debug_view                   # live cameras
     python -m vision.debug_view --replay FILE     # a recording (add --retriangulate for current calibration)
+    python -m vision.debug_view --poses 1         # live, pose looking for one person per camera
 
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
 Bottom: top-down view of the mat and a front view from Mira; orange = person's left, blue = right.
@@ -195,8 +196,11 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     return np.vstack([np.hstack(panels), bottom])
 
 
-def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
+def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_poses: int | None = None) -> None:
     from vision.live import LiveSource  # imports MediaPipe; keep replay usable without it
+    from vision.pose import NUM_POSES
+
+    num_poses = NUM_POSES if num_poses is None else num_poses
 
     detector, show_markers = MarkerDetector(mat), False
     pipeline = Pipeline(cams, mat=mat)
@@ -204,7 +208,7 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
     last_draw = 0.0
-    with LiveSource(cams, model, mat) as src:
+    with LiveSource(cams, model, mat, num_poses=num_poses) as src:
         try:
             while True:
                 for pair in src.poll(0.005):
@@ -262,12 +266,14 @@ def main() -> None:
     p.add_argument("--retriangulate", action="store_true")
     p.add_argument("--speed", type=float, default=1.0)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
+    p.add_argument("--poses", type=int, default=None,
+                   help="people pose looks for per camera, live (default vision.pose.NUM_POSES)")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
     if args.replay:
         run_replay(args.replay, cams, mat, args.retriangulate, args.speed)
     else:
-        run_live(cams, mat, args.model)
+        run_live(cams, mat, args.model, args.poses)
 
 
 if __name__ == "__main__":
