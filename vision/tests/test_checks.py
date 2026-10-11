@@ -50,7 +50,8 @@ def test_run_checks_all_pass_on_clean_synthetic_data():
     assert not any(c.name.startswith("lens RMS") for c in checks)
     assert {"frames tracked in 3D", "mean body reprojection", "thigh_l length std",
             "standing knee angle l", "median triangulation angle", "marker distance 0–2",
-            "pair skew p95", "capture fps A", "feet anchored while standing"} <= names
+            "pair skew p95", "capture fps A", "feet anchored while standing", "foot height above mat"} <= names
+    assert abs({c.name: c for c in checks}["foot height above mat"].value - 2.0) < 0.5
     failed = [c for c in checks if c.passed is False]
     assert failed == [], format_checks(failed)
     assert "PASS" in format_checks(checks)
@@ -72,10 +73,20 @@ def test_checks_from_recording_use_unsmoothed_joints(tmp_path):
         for k in range(30):
             rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X, noise_px=4.0, rng=rng),
                                    pose_from_points(cams["B"], X, noise_px=4.0, rng=rng), 0.0))
-    for out in outputs_from_recording(path, cams):
-        body = out.tri.ok.copy()
-        body[27:33] = False  # feet may be held by the FootAnchor; everything else is unsmoothed
-        np.testing.assert_allclose(out.frame.joints[body], out.tri.points[body])
+    outs = outputs_from_recording(path, cams)
+    for out in outs:
+        assert out.feet_locked is None  # checks measure the feet as triangulated, not anchored
+        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])
+    anchored = {c.name: c for c in run_checks(outs, cams, MAT)}["feet anchored while standing"]
+    assert anchored.value is not None  # computed from the joints, not from the pipeline's anchor
+
+
+def test_feet_below_the_mat_fail_foot_height():
+    cams, X = _cams(), standing_skeleton() - [0.0, 0.08, 0.0]
+    pipe = Pipeline(cams, anchor_feet=False)
+    outs = [pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0) for k in range(20)]
+    c = {c.name: c for c in run_checks(outs, cams, MAT)}["foot height above mat"]
+    assert abs(c.value - -6.0) < 0.5 and c.passed is False
 
 
 def test_height_estimate_and_check():

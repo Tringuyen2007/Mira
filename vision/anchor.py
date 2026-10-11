@@ -1,8 +1,8 @@
 """Foot anchoring: pin a planted foot so MediaPipe's wobble doesn't make it jitter.
 
 A foot (ankle, heel, toe) is planted when its heel and toe are near the floor and it has barely
-moved for a moment; it is then held at its average position, with the lowest point snapped to the
-mat surface. It is released by a real step or lift (the raw foot moves away from the anchor, or the
+moved for a moment; it is then held at its average position over that moment (no vertical snap, so
+a floor error stays visible). It is released by a real step or lift (the raw foot moves away from the anchor, or the
 heel leaves the floor, for a couple of frames) and blends back to the live position so it never jumps.
 The rest of the body is untouched: a squat with planted feet keeps the feet locked while hips drop.
 """
@@ -19,13 +19,12 @@ STILL_S = 0.2
 RELEASE_M = 0.05  # raw foot this far from the anchor ...
 RELEASE_FRAMES = 2  # ... for this many frames in a row: a real step
 BLEND_S = 0.1
-TOE_HEIGHT_M = 0.02  # where the lowest foot point sits on the mat surface
 
 
 class _Foot:
     def __init__(self):
         self.history: deque[tuple[float, np.ndarray]] = deque()
-        self.anchor: np.ndarray | None = None  # held output (lowest point snapped to the floor)
+        self.anchor: np.ndarray | None = None  # held output: the average position while planting
         self.anchor_raw: np.ndarray | None = None  # what the detections said when it planted
         self.away = 0
         self.blend: tuple[float, np.ndarray] | None = None  # (release time, held - live offset) fading out
@@ -91,8 +90,5 @@ class FootAnchor:
             return False
         foot.anchor_raw = window.mean(axis=0)
         foot.anchor = foot.anchor_raw.copy()
-        offset = min(foot.anchor[1, 1], foot.anchor[2, 1]) - TOE_HEIGHT_M
-        if abs(offset) < CONTACT_HEIGHT_M:
-            foot.anchor[:, 1] -= offset
         foot.blend = None
         return True

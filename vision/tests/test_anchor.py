@@ -18,14 +18,17 @@ def _run(frames, anchor=None):
 
 def test_jittery_planted_foot_is_held_still():
     rng = np.random.default_rng(0)
-    X = standing_skeleton()
+    X = standing_skeleton() + [0.0, 0.03, 0.0]  # feet seen 3 cm high (a floor error) but still in contact
     frames = [X + rng.normal(0, 0.01, X.shape) for _ in range(60)]
     outs, locks = _run(frames)
     assert all(lk["l"] and lk["r"] for lk in locks[10:])
     for side, idx in FEET.items():
         assert outs[10:, list(idx)].std(axis=0).max() < 0.002  # raw jitter was 1 cm
-    toe_y = outs[-1, 31, 1]
-    assert abs(toe_y - 0.02) < 0.01  # lowest point on the mat surface
+    k0 = next(k for k, lk in enumerate(locks) if lk["l"])  # planted here, held ever since
+    assert all(lk["l"] for lk in locks[k0:])
+    j = max(i for i in range(k0 + 1) if k0 * DT - i * DT >= 0.2)  # the stillness window it averaged
+    raw_mean = np.mean([f[list(FEET["l"])] for f in frames[j:k0 + 1]], axis=0)
+    assert np.abs(outs[-1, list(FEET["l"])] - raw_mean).max() < 0.002  # held where it was, not snapped down
     assert outs[10:, 0].std(axis=0).max() > 0.005  # the rest of the body is untouched
 
 

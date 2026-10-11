@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import argparse
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from vision.anchor import FootAnchor
 from vision.config import CameraConfig, MatConfig, load_cameras, load_mat
 from vision.pipeline import Pipeline, PipelineOutput
 from vision.triangulate import triangulate_points
@@ -20,6 +22,7 @@ BONES_CHECKED = {"thigh_l": (23, 25), "thigh_r": (24, 26), "shin_l": (25, 27), "
 KNEE = {"l": (23, 25, 27), "r": (24, 26, 28)}
 MARKER_PAIRS = [(0, 2), (1, 3), (0, 1), (2, 3)]
 EYES = (2, 5)
+FOOT_POINTS = {"l": (29, 31), "r": (30, 32)}  # heel, toe
 EYE_HEIGHT_RATIO = 0.936  # eye height / stature (adult anthropometry); MediaPipe has no head-top point
 
 
@@ -54,6 +57,27 @@ def estimate_height_cm(seq: np.ndarray) -> float:
     eye_y = np.nanmean(seq[:, list(EYES), 1], axis=1)
     eye_y = eye_y[np.isfinite(eye_y)]
     return float(np.median(eye_y) / EYE_HEIGHT_RATIO * 100) if len(eye_y) else float("nan")
+
+
+def foot_height_cm(seq: np.ndarray) -> float:
+    """Median over frames of the lower foot's lowest heel/toe height above the mat surface."""
+    with warnings.catch_warnings():  # frames with no foot point give NaN, dropped below
+        warnings.simplefilter("ignore", RuntimeWarning)
+        low = np.nanmin(seq[:, [*FOOT_POINTS["l"], *FOOT_POINTS["r"]], 1], axis=1)
+    low = low[np.isfinite(low)]
+    return float(np.median(low) * 100) if len(low) else float("nan")
+
+
+def anchored_fraction(outputs: list[PipelineOutput]) -> float | None:
+    """% of 3D frames in which a fresh FootAnchor run over the (unanchored) joints holds both feet."""
+    anchor, both, n = FootAnchor(), 0, 0
+    for o in outputs:
+        if o.frame.tracking != "3d":
+            continue
+        _, locked = anchor.update(o.frame.t, o.frame.joints)
+        both += locked["l"] and locked["r"]
+        n += 1
+    return 100.0 * both / n if n else None
 
 
 def triangulate_marker_centers(cam_a: CameraConfig, cam_b: CameraConfig) -> dict[int, np.ndarray]:
@@ -100,9 +124,9 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
         checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
                              lambda v: 170 <= v <= 180))
 
-    locks = [o.feet_locked for o in outputs if o.frame.tracking == "3d" and o.feet_locked is not None]
-    frac_locked = 100.0 * sum(lk.get("l", False) and lk.get("r", False) for lk in locks) / len(locks) if locks else None
-    checks.append(_check("feet anchored while standing", frac_locked, "%", "≥ 80", lambda v: v >= 80))
+    checks.append(_check("feet anchored while standing", anchored_fraction(outputs), "%", "≥ 80", lambda v: v >= 80))
+    foot_h = foot_height_cm(seq) if seq is not None else None
+    checks.append(_check("foot height above mat", foot_h, "cm", "-1 to 5", lambda v: -1 <= v <= 5))
 
     if height_cm is not None:
         est = estimate_height_cm(seq) if seq is not None else None
@@ -141,10 +165,12 @@ def format_checks(checks: list[Check]) -> str:
 
 
 def outputs_from_recording(path, cams: dict[str, CameraConfig]) -> list[PipelineOutput]:
-    """Re-triangulate a recording with the current calibration, unsmoothed so jitter stays visible."""
+    """Re-triangulate a recording with the current calibration, unsmoothed and unanchored so jitter and
+    floor errors stay visible."""
     from vision.replay import replay_outputs
 
-    return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
+    return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False,
+                               anchor_feet=False))
 
 
 def _live_outputs(cams, mat, model: str, seconds: float):
@@ -155,7 +181,8 @@ def _live_outputs(cams, mat, model: str, seconds: float):
 
     outputs = []
     monitor = MoveMonitor(cams, MarkerDetector(mat), interval_s=0.25)
-    pipeline = Pipeline(cams, smoothing=False, mat=mat)  # smoothing would hide the jitter these checks measure
+    # smoothing and foot anchoring would hide the jitter and floor errors these checks measure
+    pipeline = Pipeline(cams, smoothing=False, mat=mat, anchor_feet=False)
     with LiveSource(cams, model, mat) as src:
         problems = src.wait_ready()
         if problems:
