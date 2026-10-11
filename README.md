@@ -277,7 +277,9 @@ passes.
 | `DELETE /patients/{id}/devices` | full | revokes every paired phone for that patient |
 
 A demo code `K7P4M2` is seeded for Maya and never expires; while `PAIRING_DEMO_CODE_REUSABLE=1` (default on)
-it can be reused so the demo phone can re-pair.
+it can be reused so the demo phone can re-pair. Set `PAIRING_REUSABLE_UPDATES_PROFILE=0` on a public server
+once the demo phone has paired, so the reusable code can still pair a phone but no longer rewrites Maya's
+profile or emergency contact for every stranger who tries it.
 
 Existing routes also accept a patient token, scoped to its own patient: `GET /sessions/{id}` (own session
 only), `GET /patients/{id}`, `GET /patients/{id}/progress`, `GET /prescriptions/{id}` (writes stay `full`-only).

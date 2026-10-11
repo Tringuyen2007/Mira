@@ -9,12 +9,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import security
+from server.db import writes
 from server.tests.conftest import AUTH
 from server.tests.dbutil import fresh_database, prepare, ro_dsn
 
 PROFILE = {"name": "Maya Ellis", "height_cm": 163, "mass_kg": 70, "affected_side": "right",
            "condition": "Knee replacement"}
 CONTACT = {"name": "Eric", "phone": "+15550100111", "relationship": "son"}
+
+
+@pytest.fixture(autouse=True)
+def _clear_pairing_attempts() -> Iterator[None]:
+    """The per-IP limiter is a module-global dict: without this, attempts recorded by one test (successes now
+    count too, item 4a) would bleed into the next and spuriously trip its rate limit."""
+    from server.api import pair as pair_api
+
+    pair_api._attempts.clear()
+    yield
+    pair_api._attempts.clear()
 
 
 @pytest.fixture(scope="module")
@@ -110,3 +122,70 @@ def test_admin_mints_single_use_code_and_revokes_devices(client: TestClient, dsn
 def test_pair_without_database_is_503(make_client: Callable[..., TestClient]) -> None:
     client = make_client()
     assert _pair(client).status_code == 503
+
+
+def test_rate_limit_counts_successful_pairs_too(client: TestClient) -> None:
+    """A reusable demo code must not let one IP pair unlimited phones: successes count against the limit too."""
+    from server.api import pair as pair_api
+
+    for _ in range(pair_api.MAX_ATTEMPTS_PER_MIN):
+        assert _pair(client).status_code == 200
+    assert _pair(client).status_code == 429
+
+
+def test_reusable_code_profile_update_can_be_disabled(make_client: Callable[..., TestClient], dsn: str) -> None:
+    """With PAIRING_REUSABLE_UPDATES_PROFILE=0, a reusable code still pairs the phone but no longer rewrites
+    Maya's profile/emergency contact for every stranger who pairs with the public demo code."""
+    security.invalidate_token_cache()
+    client = make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), PAIRING_REUSABLE_UPDATES_PROFILE="0")
+    other_profile = {"name": "Someone Else", "height_cm": 180, "mass_kg": 90, "affected_side": "left",
+                     "condition": "Hip pain"}
+    other_contact = {"name": "Nobody", "phone": "+15550199999", "relationship": "friend"}
+    r = client.post("/pair", json={"code": "K7P4M2", "device_name": "iPhone", "profile": other_profile,
+                                   "emergency_contact": other_contact, "alert_therapist": True})
+    assert r.status_code == 200 and r.json()["patient_id"] == "maya"
+    with psycopg.connect(dsn) as conn:
+        row = conn.execute("SELECT name, emergency_contact_name FROM patients WHERE id = 'maya'").fetchone()
+        assert row[0] != "Someone Else"
+        assert row[1] != "Nobody"
+
+
+def test_excess_devices_are_capped_at_ten(client: TestClient, dsn: str) -> None:
+    from server.api import pair as pair_api
+
+    tokens = []
+    for _ in range(pair_api.MAX_ACTIVE_DEVICES_PER_PATIENT):
+        pair_api._attempts.clear()  # this test pairs more than MAX_ATTEMPTS_PER_MIN times from one IP
+        tokens.append(_pair(client).json()["token"])
+    pair_api._attempts.clear()
+    eleventh = _pair(client).json()["token"]
+    with psycopg.connect(dsn) as conn:
+        active = conn.execute(
+            "SELECT count(*) FROM patient_devices WHERE patient_id = 'maya' AND revoked_at IS NULL").fetchone()[0]
+        assert active == pair_api.MAX_ACTIVE_DEVICES_PER_PATIENT
+        oldest_revoked = conn.execute("SELECT revoked_at IS NOT NULL FROM patient_devices WHERE token_hash = %s",
+                                      (security.token_hash(tokens[0]),)).fetchone()[0]
+        assert oldest_revoked is True
+    import asyncio
+
+    assert asyncio.run(security.resolve_token(eleventh)) is not None
+
+
+def test_claim_pairing_code_is_atomic_against_concurrent_claims(dsn: str) -> None:
+    """Two concurrent /pair calls for the same single-use code must not both succeed (TOCTOU race)."""
+    import asyncio
+
+    from server.db.pool import Database
+
+    async def run() -> tuple[dict | None, dict | None]:
+        db = Database(dsn, ro_dsn(dsn))
+        await db.open()
+        try:
+            await writes.upsert_pairing_code(db, "RACE01", "maya", "okafor", reusable=False)
+            return await asyncio.gather(writes.claim_pairing_code(db, "RACE01"),
+                                        writes.claim_pairing_code(db, "RACE01"))
+        finally:
+            await db.close()
+
+    first, second = asyncio.run(run())
+    assert (first is None) != (second is None)  # exactly one succeeds

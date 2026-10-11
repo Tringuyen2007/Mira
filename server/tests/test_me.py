@@ -14,6 +14,15 @@ from server.tests.dbutil import fresh_database, prepare, ro_dsn
 from server.tests.test_pairing import CONTACT, PROFILE
 
 
+@pytest.fixture(autouse=True)
+def _clear_pairing_attempts() -> Iterator[None]:
+    from server.api import pair as pair_api
+
+    pair_api._attempts.clear()
+    yield
+    pair_api._attempts.clear()
+
+
 @pytest.fixture(scope="module")
 def dsn() -> Iterator[str]:
     with fresh_database() as url:

@@ -52,6 +52,7 @@ class Config:
     DEMO_TOOLS_ENABLED: bool = False
     PAIRING_DEMO_CODE: str = "K7P4M2"  # therapist code the seed binds to Maya (the iOS design preview uses it)
     PAIRING_DEMO_CODE_REUSABLE: bool = True  # the demo code may pair many phones; real codes are single-use
+    PAIRING_REUSABLE_UPDATES_PROFILE: bool = True  # set to 0 on a public server once the demo phone has paired
 
     TIGER_DSN: str | None = None
     COPILOT_DSN: str | None = None

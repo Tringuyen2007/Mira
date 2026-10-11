@@ -385,6 +385,28 @@ async def revoke_patient_devices(db: Database | None, patient_id: str) -> int | 
                        patient_id=patient_id)
 
 
+async def revoke_excess_patient_devices(db: Database | None, patient_id: str, keep: int = 10) -> int | None:
+    """Keep only the `keep` most recently paired active devices for a patient; revoke any older ones. Called
+    right after a successful pair so a reusable demo code can't accumulate unbounded live tokens."""
+    sql = ("UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s AND revoked_at IS NULL "
+           "AND token_hash NOT IN (SELECT token_hash FROM patient_devices WHERE patient_id = %s "
+           "AND revoked_at IS NULL ORDER BY created_at DESC LIMIT %s)")
+    return await _safe(db, "revoke_excess_patient_devices", lambda d: d.execute(sql, (patient_id, patient_id, keep)),
+                       None, patient_id=patient_id)
+
+
+async def claim_pairing_code(db: Database | None, code: str) -> dict[str, Any] | None:
+    """Atomically claim a pairing code: a reusable code is always claimable; a single-use code only while
+    unused and unexpired. Returns {patient_id, therapist_id, reusable}, or None if it can't be claimed right
+    now (lost the race to another request, or it was expired/used between the caller's lookup and this call).
+    Replaces the separate SELECT-then-UPDATE in `pair.py::pair` for the actual claim, closing the TOCTOU race
+    where two requests both see an unused single-use code."""
+    sql = ("UPDATE pairing_codes SET used_at = CASE WHEN reusable THEN used_at ELSE now() END "
+           "WHERE code = %s AND (reusable OR used_at IS NULL) AND (expires_at IS NULL OR expires_at > now()) "
+           "RETURNING patient_id, therapist_id, reusable")
+    return await _safe(db, "claim_pairing_code", lambda d: d.fetchrow(sql, (code,)), None)
+
+
 async def upsert_pairing_code(db: Database | None, code: str, patient_id: str, therapist_id: str | None,
                               expires_at: Timestamp = None, reusable: bool = False) -> bool:
     sql = ("INSERT INTO pairing_codes (code, patient_id, therapist_id, expires_at, reusable) "
