@@ -160,6 +160,14 @@ make test
 
 Always exactly **one** server process (`--workers 1`): live state is in memory.
 
+### Deploy (Vultr)
+
+The demo server runs on a Vultr box as the systemd unit `mira` (`/opt/mira/app`, port 8000, plain HTTP).
+`tools/deploy_vultr.sh [ref]` (default `origin/main`) ships the tracked files of that ref with rsync, keeps the
+box's own `.env`, `.venv`, logs and generated data, installs requirements, creates a `MIRA_DEVICE_TOKEN` on first
+deploy, restarts and checks `/health`. Override with `MIRA_HOST`, `MIRA_SSH_USER`, `MIRA_SSH_KEY`.
+Plain HTTP sends both tokens in clear text; put Caddy or a tunnel with TLS in front before real patient use.
+
 ## Troubleshooting
 
 - **`RuntimeError: MIRA_API_TOKEN ...; refusing to start`**: set a generated token (Quick start).
