@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from server.agents.haptics import HapticCoach
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
 from server.agents.session_analyst import SessionAnalyst
@@ -184,6 +185,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     coach = SessionCoach(hub, sessions, bridge, incident_open=lambda sid: sid in guardian.incidents)
     bridge.subscribe_events(coach.on_event)
     state.coach = coach
+    haptics = HapticCoach(hub)
+    bridge.subscribe_events(haptics.on_event)
 
     ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
@@ -261,6 +264,10 @@ def _client_event_handler() -> Callable[[dict[str, Any]], None]:
     return handle
 
 
+#: watch_button name → the session command it maps to (unknown names are ignored).
+WATCH_BUTTON_COMMANDS = {"ready": "start", "stop": "stop"}
+
+
 def _on_client_event(msg: dict[str, Any]) -> None:
     if msg.get("type") not in CLIENT_EVENT_TYPES or len(msg) > MAX_CLIENT_MSG_KEYS:
         log.debug("dropping client event", extra={"event_type": str(msg.get("type"))[:40]})
@@ -269,6 +276,10 @@ def _on_client_event(msg: dict[str, Any]) -> None:
     state.bridge.inject(msg)
     if msg.get("type") == "command" and msg.get("name") in SESSION_COMMANDS:
         _forward_session_command(state, msg)
+    elif msg.get("type") == "watch_button":
+        name = WATCH_BUTTON_COMMANDS.get(msg.get("name"))
+        if name:
+            _forward_session_command(state, {"type": "command", "name": name, "payload": {"source": "watch"}})
 
 
 def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:

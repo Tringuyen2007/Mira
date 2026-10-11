@@ -141,6 +141,13 @@ async def insert_form_event(db: Database | None, time: Timestamp, patient_id: st
         sql, (ts(time), patient_id, session_id, rep, rule_id, severity, duration_s))), False, session_id=session_id)
 
 
+async def insert_heart_rate(db: Database | None, time: Timestamp, patient_id: str | None, session_id: str | None,
+                            bpm: int) -> bool:
+    sql = "INSERT INTO heart_rate (time, patient_id, session_id, bpm) VALUES (%s, %s, %s, %s)"
+    return await _safe(db, "insert_heart_rate", lambda d: _ok(d.execute(
+        sql, (ts(time), patient_id, session_id, bpm))), False, session_id=session_id)
+
+
 # ---- safety, agents, AI ---------------------------------------------------------------------------------
 
 async def insert_alert_step(db: Database | None, time: Timestamp, alert_id: str, patient_id: str | None,
