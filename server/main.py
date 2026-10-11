@@ -26,6 +26,7 @@ from server.agents.session_coach import SessionCoach
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, lcd_link, patients, prescriptions
+from server.api import me as me_api
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
 from server.api import insight as insight_api
@@ -359,6 +360,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token
     app.include_router(pair_api.router)  # /pair is public; its two admin routes carry their own require_token
+    app.include_router(me_api.router)  # routes carry their own require_principal
 
     @app.websocket("/ws/pose")
     async def ws_pose(ws: WebSocket) -> None:

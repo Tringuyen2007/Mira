@@ -423,6 +423,40 @@ async def update_patient_profile(db: Database | None, patient_id: str, **fields:
                        patient_id=patient_id)
 
 
+async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, int] | None:
+    """DELETE /me: the patient's own (non-simulated) sessions and everything hanging off them, their alerts,
+    memory events, notifications, agent actions and phones; profile fields are blanked. Labeled simulated demo
+    history is kept: it is not the patient's data. The patient row and prescriptions stay (the therapist's plan).
+    One transaction; None on database failure."""
+    if db is None:
+        return None
+
+    async def run(d: Database) -> dict[str, int]:
+        async with d.connection() as conn, conn.transaction():
+            await conn.execute("SET LOCAL statement_timeout = 120000")
+            cur = await conn.execute("SELECT id FROM sessions WHERE patient_id = %s AND NOT simulated", (patient_id,))
+            ids = [r["id"] for r in await cur.fetchall()]
+            counts: dict[str, int] = {"sessions": len(ids)}
+            if ids:
+                for table in ("pose_frames", "reps", "form_events", "wrist_motion", "heart_rate"):
+                    cur = await conn.execute(f"DELETE FROM {table} WHERE session_id = ANY(%s)", (ids,))  # noqa: S608
+                    counts[table] = cur.rowcount
+            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals"):
+                cur = await conn.execute(f"DELETE FROM {table} WHERE patient_id = %s", (patient_id,))  # noqa: S608
+                counts[table] = cur.rowcount
+            if ids:
+                await conn.execute("DELETE FROM sessions WHERE id = ANY(%s)", (ids,))
+            cur = await conn.execute("UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s "
+                                     "AND revoked_at IS NULL", (patient_id,))
+            counts["devices_revoked"] = cur.rowcount
+            await conn.execute("UPDATE patients SET height_cm = NULL, mass_kg = NULL, emergency_contact_name = NULL, "
+                               "emergency_contact_phone = NULL, emergency_contact_relationship = NULL, "
+                               "device_prefs = '{}' WHERE id = %s", (patient_id,))
+            return counts
+
+    return await _safe(db, "purge_patient_data", run, None, patient_id=patient_id)
+
+
 # ---- helpers ---------------------------------------------------------------------------------------------
 
 async def _ok(count: Awaitable[int]) -> bool:

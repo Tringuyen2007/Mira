@@ -222,6 +222,25 @@ async def prescriptions(db: Database, patient_id: str, history: bool = False) ->
     return await db.fetch(PRESCRIPTIONS_SQL, (patient_id, history))
 
 
+async def patient_export(db: Database, patient_id: str) -> dict[str, Any]:
+    """Everything DELETE /me would remove, as JSON-able rows (no pose frames, only their count)."""
+    sessions = await db.fetch("SELECT * FROM sessions WHERE patient_id = %s AND NOT simulated ORDER BY started_at",
+                              (patient_id,), timeout_s=20)
+    ids = [s["id"] for s in sessions]
+    reps = await db.fetch("SELECT * FROM reps WHERE session_id = ANY(%s) ORDER BY session_id, rep", (ids,),
+                          timeout_s=20) if ids else []
+    flags = await db.fetch("SELECT time, session_id, rep, rule_id, severity, duration_s FROM form_events "
+                           "WHERE session_id = ANY(%s) ORDER BY time", (ids,), timeout_s=20) if ids else []
+    alerts = await db.fetch("SELECT time, alert_id, session_id, kind, step, channel, payload FROM alerts "
+                            "WHERE patient_id = %s ORDER BY time", (patient_id,), timeout_s=20)
+    memory = await db.fetch("SELECT time, kind, message, evidence FROM memory_events WHERE patient_id = %s "
+                            "ORDER BY time", (patient_id,), timeout_s=10)
+    frames = await db.fetchrow("SELECT count(*) AS n FROM pose_frames WHERE session_id = ANY(%s)", (ids,),
+                               timeout_s=30) if ids else {"n": 0}
+    return {"sessions": sessions, "reps": reps, "form_events": flags, "alerts": alerts, "memory_events": memory,
+            "pose_frames_count": int(frames["n"]) if frames else 0}
+
+
 async def ro_prescriptions(db: Database, patient_id: str, timeout_s: float = 1.5) -> list[dict[str, Any]]:
     """The active prescriptions as copilot_ro (agents read only through the read-only role)."""
     return await db.ro_fetch(PRESCRIPTIONS_SQL, (patient_id, False), timeout_s=timeout_s)
