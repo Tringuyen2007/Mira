@@ -1,11 +1,12 @@
 """Measure how body-like the 3D avatar is on recordings.
 
-    python -m vision.avatar_eval data/recordings/<file>.jsonl [...] [--plain]
+    python -m vision.avatar_eval data/recordings/<file>.jsonl [...] [--plain] [--current-calibration]
 
-For each recording, replays it through the pipeline (current calibration) and the avatar rig, and
+For each recording, replays it through the pipeline (the calibration saved in the recording) and the avatar rig, and
 prints: arm (elbow/wrist) inside the torso %, elbow/knee hinge violations %, foot yaw change per frame
 (median/p95/max), bone-length std, how far confidently tracked wrists/ankles end up from tracking,
-and rig time per frame. --plain evaluates the rig without anatomical constraints, for comparison.
+and rig time per frame. --plain evaluates the rig without anatomical constraints, for comparison;
+--current-calibration replays with config/cameras.yaml instead.
 """
 from __future__ import annotations
 
@@ -112,19 +113,28 @@ def evaluate(outputs, rig) -> Report:
                   float(tr.mean()), float(np.percentile(tr, 95)), 1000 * spent / max(n, 1))
 
 
-def main() -> int:
+def recording_outputs(path, current_calibration: bool = False):
+    """Replay a recording through the pipeline with the calibration it was recorded with
+    (or the current config/cameras.yaml when current_calibration=True)."""
     from vision.config import load_cameras
-    from vision.replay import replay_outputs
+    from vision.replay import cams_from_header, read_header, replay_outputs
+
+    cams = load_cameras() if current_calibration else cams_from_header(read_header(path))
+    return replay_outputs(path, retriangulate=True, cams=cams, realtime=False)
+
+
+def main() -> int:
     from vision.rig import BodyRig
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("paths", nargs="+")
     p.add_argument("--plain", action="store_true", help="rig without anatomical constraints")
+    p.add_argument("--current-calibration", action="store_true",
+                   help="replay with config/cameras.yaml instead of the calibration saved in each recording")
     args = p.parse_args()
-    cams = load_cameras()
     print(HEADER)
     for path in args.paths:
-        outs = replay_outputs(path, retriangulate=True, cams=cams, realtime=False)
+        outs = recording_outputs(path, args.current_calibration)
         print(evaluate(outs, BodyRig(constraints=not args.plain)).row(path.split("/")[-1]))
     return 0
 

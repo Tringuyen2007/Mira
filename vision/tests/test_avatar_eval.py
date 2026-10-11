@@ -35,3 +35,18 @@ def test_evaluate_reports_a_still_synthetic_person_as_clean():
     assert r.frames > 30 and r.arm_in_torso_pct == 0 and r.hinge_pct == 0
     assert r.bone_std_mm < 1e-6 and r.foot_yaw_max < 10 and r.truth_mean_cm < 5
     assert "arm∈torso" in HEADER and r.row("synthetic").startswith("synthetic")
+
+
+def test_recording_outputs_use_the_recordings_own_calibration(tmp_path, monkeypatch):
+    from vision.avatar_eval import recording_outputs
+    from vision.record import Recorder
+
+    cams, X = target_cams(), standing_skeleton()
+    path = tmp_path / "rec.jsonl"
+    pipe = Pipeline(cams)
+    with Recorder(path, cams, {}) as rec:
+        for k in range(90):  # the rig needs a few seconds of tracking to measure the body
+            rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X)))
+    monkeypatch.setattr("vision.config.load_cameras", lambda *a, **k: {})  # a recalibrated config that no longer matches
+    assert evaluate(recording_outputs(path), BodyRig()).frames > 0
+    assert evaluate(recording_outputs(path, current_calibration=True), BodyRig()).frames == 0
