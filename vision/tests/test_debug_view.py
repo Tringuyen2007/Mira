@@ -30,3 +30,12 @@ def test_compose_view_renders_with_and_without_images():
     assert img.shape == (720, 1280, 3)
     img = compose_view({}, MatConfig(), {}, {}, None, None, None, None)
     assert img.shape == (720, 1280, 3)
+
+
+def test_compose_view_shows_camera_moved_banner():
+    cams = target_cams()
+    plain = compose_view(cams, MatConfig(), {}, {}, None, None, None, None)
+    alarm = compose_view(cams, MatConfig(), {}, {}, None, None, None, None,
+                         alarms={"A": "Camera A has moved (6 px): re-run calib_extrinsics", "B": None})
+    assert (alarm[:360, :640] != plain[:360, :640]).any()
+    np.testing.assert_array_equal(alarm[:360, 640:], plain[:360, 640:])

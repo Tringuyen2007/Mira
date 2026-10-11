@@ -21,6 +21,7 @@ from vision.config import CameraConfig, MatConfig, load_cameras, load_mat, mat_r
 from vision.draw import GREEN, MAGENTA, RED, WHITE, YELLOW, draw_points, draw_skeleton, draw_text, fit, pt
 from vision.frames import cam_center, project
 from vision.markers import MarkerDetector
+from vision.moved import MoveMonitor
 from vision.pipeline import Pipeline, PipelineOutput
 from vision.record import Recorder, default_path
 from vision.replay import cams_from_header, read_header, replay_outputs
@@ -132,7 +133,7 @@ def render_front(frame: FrameResult | None, hud_lines: list[str]) -> np.ndarray:
 
 def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, poses: dict,
                  out: PipelineOutput | None, stats: dict | None, skew: dict | None, recording: str | None,
-                 detector: MarkerDetector | None = None) -> np.ndarray:
+                 detector: MarkerDetector | None = None, alarms: dict[str, str | None] | None = None) -> np.ndarray:
     frame = out.frame if out is not None else None
     panels = []
     for name in ("A", "B"):
@@ -141,7 +142,7 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
         s = (stats or {}).get(name)
         draw_text(panel, f"{name}  {s['fps']:.0f} fps  pose {s['pose_ms']:.0f} ms" if s else name, (8, 20))
         y = 40
-        for msg in ((s or {}).get("error"), (s or {}).get("warning")):
+        for msg in ((s or {}).get("error"), (s or {}).get("warning"), (alarms or {}).get(name)):
             if msg:
                 draw_text(panel, msg, (8, y), RED, 0.45)
                 y += 18
@@ -172,6 +173,7 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
 
     detector, show_markers = MarkerDetector(mat), False
     pipeline = Pipeline(cams)
+    monitor = MoveMonitor(cams, detector)
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
     last_draw = 0.0
@@ -188,9 +190,12 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
                     latest = src.latest_frames()
                     images = {n: v[0] for n, v in latest.items() if v}
                     poses = {n: v[1] for n, v in latest.items() if v}
+                    for n, image in images.items():
+                        monitor.update(n, image, now)
+                    alarms = {n: monitor.message(n) for n in cams}
                     rec = f"REC {recorder.count} frames -> {recorder.path.name}" if recorder else None
                     img = compose_view(cams, mat, images, poses, last, src.stats(), src.skew.summary(), rec,
-                                       detector if show_markers else None)
+                                       detector if show_markers else None, alarms)
                     cv2.imshow(WINDOW, img)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):

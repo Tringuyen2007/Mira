@@ -4,7 +4,8 @@
     python -m vision.calib_refine --from data/recordings/refine-<time>.jsonl
 
 During capture: walk around the mat, squat, raise and spread your arms, turn.
-Stay visible to both cameras. Requires lens calibration and calib_extrinsics first.
+Stay visible to both cameras. Requires calib_extrinsics first. Refuses to start if a camera has
+moved since calib_extrinsics (--force overrides). Refines camera poses and zoom.
 """
 from __future__ import annotations
 
@@ -19,14 +20,32 @@ from vision.bundle import refine_extrinsics
 from vision.capture import mono_to_unix
 from vision.config import load_cameras, load_mat, mat_raw, save_cameras
 from vision.draw import GREEN, YELLOW, draw_skeleton, draw_text, fit
+from vision.markers import MarkerDetector
+from vision.moved import MoveMonitor
 from vision.pipeline import Pipeline
 from vision.record import Recorder, default_path
 from vision.replay import iter_frames
 
 COUNTDOWN_S = 3.0
+MOVE_CHECK_S = 2.0
 
 
-def capture_live(cams, model: str, seconds: float):
+def moved_cameras(src, mat, seconds: float = MOVE_CHECK_S) -> list[str]:
+    """Watch the markers for a moment; names of cameras whose markers moved since calib_extrinsics."""
+    monitor = MoveMonitor(src.cams, MarkerDetector(mat), interval_s=0.25)
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        for n, v in src.latest_frames().items():
+            if v is not None:
+                monitor.update(n, v[0], time.monotonic())
+        time.sleep(0.02)
+    for n in sorted(src.cams):
+        if monitor.message(n):
+            print(monitor.message(n))
+    return [n for n in sorted(src.cams) if monitor.status(n) == "moved"]
+
+
+def capture_live(cams, mat, model: str, seconds: float, force: bool = False):
     from vision.live import LiveSource
 
     pairs = []
@@ -36,6 +55,10 @@ def capture_live(cams, model: str, seconds: float):
         problems = src.wait_ready()
         if problems:
             print("cannot capture: " + "; ".join(problems))
+            return None
+        moved = moved_cameras(src, mat)
+        if moved and not force:
+            print(f"camera(s) {moved} moved since calib_extrinsics: re-run it first (or --force)")
             return None
         with Recorder(path, cams, mat_raw()) as rec:
             _capture(src, rec, pipeline, pairs, seconds)
@@ -78,7 +101,8 @@ def main() -> int:
     p.add_argument("--from", dest="from_path", type=Path)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
     p.add_argument("--marker-weight", type=float, default=5.0)
-    p.add_argument("--force", action="store_true", help="save even if the guards reject the result")
+    p.add_argument("--force", action="store_true",
+                   help="capture even if a camera moved; save even if the guards reject the result")
     args = p.parse_args()
 
     cams, mat = load_cameras(), load_mat()
@@ -86,7 +110,7 @@ def main() -> int:
         pairs = [(raw.get("A"), raw.get("B")) for _, raw, _ in iter_frames(args.from_path)]
     else:
         print(__doc__)
-        pairs = capture_live(cams, args.model, args.seconds)
+        pairs = capture_live(cams, mat, args.model, args.seconds, args.force)
         if pairs is None:
             return 1
     try:
@@ -99,7 +123,7 @@ def main() -> int:
         print("not saved (use --force to override)")
         return 1
     for n in ("A", "B"):
-        cams[n].R, cams[n].t = report.R[n], report.t[n]
+        cams[n].R, cams[n].t, cams[n].K = report.R[n], report.t[n], report.K[n]
         cams[n].extrinsics_source, cams[n].extrinsics_rms = "bundle", report.body_rms_after
     save_cameras(cams)
     print("saved refined extrinsics. Next: python -m vision.debug_view and python -m vision.checks")
