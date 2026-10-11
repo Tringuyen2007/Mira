@@ -38,6 +38,7 @@ python -m vision.calib_extrinsics             # B and the markers: the whole cal
 python -m vision.debug_view --height-cm 175   # your height, saved in config/person.yaml
 python -m vision.checks                       # one-camera checks (uses the saved height)
 python -m vision.mono_eval FILE...            # B-only replay of a two-camera recording vs triangulation
+python -m vision.stability_eval FILE... [--height-cm 170]  # how steady the one-camera body is (still, spikes, lag)
 ```
 
 Place B so it sees your whole body anywhere on the mat (head to feet) and at least two markers, ideally one
