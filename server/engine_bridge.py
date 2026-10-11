@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from server.config import cfg
 from server.logging_setup import get_logger
+from server import exercises  # noqa: E402
 
 if TYPE_CHECKING:
     from server.hub import Hub
@@ -662,7 +663,7 @@ class LagMonitor:
 
 
 # Display names for the LCD and the app ("REPS · MINI SQUATS"); unknown ids are title-cased.
-EXERCISE_NAMES = {"squat": "Mini squats"}
+EXERCISE_NAMES = {e.exercise_id: e.exercise_name for e in exercises.EXERCISES.values()}  # kept for callers
 CAPTION_SOURCES = {"greeting": "text", "cue": "text", "summary_ready": "spoken"}
 CLOSED_ALERT_STEPS = frozenset({"resolved", "closed", "resolved_by_therapist"})
 
@@ -693,7 +694,7 @@ class LiveState:
     def on_session_start(self, first_name: str, exercise_id: str) -> None:
         self.first_name = first_name
         self.exercise_id = exercise_id
-        self.exercise_name = EXERCISE_NAMES.get(exercise_id, exercise_id.replace("_", " ").capitalize())
+        self.exercise_name = exercises.display_name(exercise_id)
         self.caption = None
         self.incident = False
         self.phase = "idle"
