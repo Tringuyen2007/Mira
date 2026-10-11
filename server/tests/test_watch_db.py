@@ -68,12 +68,12 @@ def test_migration_005_adds_columns_and_tables(dsn: str) -> None:
             "source", "updated_at"} <= _columns(dsn, "tremor_daily")
     with psycopg.connect(dsn) as conn:
         names = {r[0] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
-    assert "005_watch.sql" in names
+    assert "007_watch.sql" in names
 
 
 def test_migration_005_is_idempotent(dsn: str) -> None:
     first = migrate.apply_migrations(dsn)
-    assert migrate.apply_migrations(dsn) == first and "005_watch.sql" in first
+    assert migrate.apply_migrations(dsn) == first and "007_watch.sql" in first
 
 
 def test_schema_sql_alone_already_has_the_watch_ddl() -> None:

@@ -55,4 +55,4 @@ BEGIN
 END
 $$;
 
-INSERT INTO schema_migrations (name) VALUES ('005_watch.sql') ON CONFLICT (name) DO NOTHING;
+INSERT INTO schema_migrations (name) VALUES ('007_watch.sql') ON CONFLICT (name) DO NOTHING;

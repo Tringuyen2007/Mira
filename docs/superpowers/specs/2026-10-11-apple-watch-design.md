@@ -51,7 +51,7 @@ iPhone app's `MiraUI.swift` tokens).
 
 ## Server
 
-### Migration `server/db/migrations/005_watch.sql` (idempotent)
+### Migration `server/db/migrations/007_watch.sql` (idempotent)
 - `ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS patient_id text, ADD COLUMN IF NOT EXISTS accel real[]` (keep existing columns).
 - `ALTER TABLE patients ADD COLUMN IF NOT EXISTS tremor_monitoring boolean NOT NULL DEFAULT false,
    ADD COLUMN IF NOT EXISTS hr_limit_set_by text` (therapist id).

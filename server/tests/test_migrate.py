@@ -29,7 +29,7 @@ def test_migrations_apply_and_are_idempotent() -> None:
         assert {"emergency_contact_relationship", "alert_therapist", "next_visit_at", "share_by_default",
                 "device_prefs"} <= _columns(dsn, "patients")
         assert "clinic" in _columns(dsn, "therapists")
-        assert "005_watch.sql" in first
+        assert "007_watch.sql" in first
         assert {"tremor_monitoring", "hr_limit_set_by"} <= _columns(dsn, "patients")
         assert {"patient_id", "accel"} <= _columns(dsn, "wrist_motion")
         assert "watch_clock_offset_ms" in _columns(dsn, "sessions")

@@ -9,7 +9,7 @@ counted from the watch, clock sync, and AI context — without a new server or a
 **Architecture:** The watch never talks to the server; the iPhone relays it over the existing `/ws/events` socket and
 REST. New behaviour lives in small, single-purpose agents (`server/agents/recovery.py`, `rotation.py`, `clock_sync.py`)
 subscribed to `EngineBridge` like the existing ones, plus additions to the Safety Guardian and HapticCoach. New tables
-come from an idempotent migration (`005_watch.sql`) mirrored in `schema.sql`; every write goes through `server/db/writes.py`,
+come from an idempotent migration (`007_watch.sql`) mirrored in `schema.sql`; every write goes through `server/db/writes.py`,
 every read through `server/db/queries.py`.
 
 **Tech Stack:** Python 3.12, FastAPI, psycopg 3 (async pool + COPY writer thread), TimescaleDB, numpy (already pinned:
@@ -71,7 +71,7 @@ every read through `server/db/queries.py`.
 
 | File | Task | Responsibility |
 |---|---|---|
-| `server/db/migrations/005_watch.sql` | 1 | new columns/tables, copilot_ro grants |
+| `server/db/migrations/007_watch.sql` | 1 | new columns/tables, copilot_ro grants |
 | `server/db/schema.sql`, `server/db/roles.sql` | 1 | fresh-setup mirror, grants |
 | `server/db/writes.py`, `server/db/queries.py` | 1 | watch writes/reads, purge/export, `RO_TABLES` |
 | `server/agents/sql_guard.py` | 1 | allow-list |
@@ -95,7 +95,7 @@ every read through `server/db/queries.py`.
 ### Task 1: Migration 005, rotation exercises, watch writes/queries, copilot_ro grants
 
 **Files:**
-- Create: `server/db/migrations/005_watch.sql`
+- Create: `server/db/migrations/007_watch.sql`
 - Modify: `server/db/schema.sql` (append a block at the end), `server/db/roles.sql` (one GRANT line)
 - Modify: `server/db/writes.py` (new section before `# ---- helpers`; `purge_patient_data` table tuples)
 - Modify: `server/db/queries.py` (new section before `# ---- alerts`; `patient_export`; `RO_TABLES`)
@@ -204,12 +204,12 @@ def test_migration_005_adds_columns_and_tables(dsn: str) -> None:
             "source", "updated_at"} <= _columns(dsn, "tremor_daily")
     with psycopg.connect(dsn) as conn:
         names = {r[0] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
-    assert "005_watch.sql" in names
+    assert "007_watch.sql" in names
 
 
 def test_migration_005_is_idempotent(dsn: str) -> None:
     first = migrate.apply_migrations(dsn)
-    assert migrate.apply_migrations(dsn) == first and "005_watch.sql" in first
+    assert migrate.apply_migrations(dsn) == first and "007_watch.sql" in first
 
 
 def test_schema_sql_alone_already_has_the_watch_ddl() -> None:
@@ -345,7 +345,7 @@ def test_allow_list_matches_copilot_ro_grants() -> None:
 In `server/tests/test_migrate.py`, inside `test_migrations_apply_and_are_idempotent` after the `clinic` assertion add:
 
 ```python
-        assert "005_watch.sql" in first
+        assert "007_watch.sql" in first
         assert {"tremor_monitoring", "hr_limit_set_by"} <= _columns(dsn, "patients")
         assert {"patient_id", "accel"} <= _columns(dsn, "wrist_motion")
         assert "watch_clock_offset_ms" in _columns(dsn, "sessions")
@@ -365,7 +365,7 @@ Expected: FAIL (missing columns/tables, `AttributeError: module 'server.exercise
 
 - [ ] **Step 3: Create the migration**
 
-Create `server/db/migrations/005_watch.sql`:
+Create `server/db/migrations/007_watch.sql`:
 
 ```sql
 -- Apple Watch (tri-watch). Every statement is idempotent (applied by server/db/migrate.py on every start).
@@ -425,7 +425,7 @@ BEGIN
 END
 $$;
 
-INSERT INTO schema_migrations (name) VALUES ('005_watch.sql') ON CONFLICT (name) DO NOTHING;
+INSERT INTO schema_migrations (name) VALUES ('007_watch.sql') ON CONFLICT (name) DO NOTHING;
 ```
 
 - [ ] **Step 4: Mirror it in `schema.sql` and grant in `roles.sql`**
@@ -434,7 +434,7 @@ Append to the end of `server/db/schema.sql` (same DDL, no `DO` block, no `schema
 
 ```sql
 
--- tri-watch (2026-10-11): Apple Watch. Mirrors db/migrations/005_watch.sql (grants are in roles.sql).
+-- tri-watch (2026-10-11): Apple Watch. Mirrors db/migrations/007_watch.sql (grants are in roles.sql).
 ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS accel real[];
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS tremor_monitoring boolean NOT NULL DEFAULT false;
@@ -754,7 +754,7 @@ Expected: all PASS (no skips — if DB tests skip, run `make db-local` first).
 - [ ] **Step 10: Commit**
 
 ```bash
-git add server/db/migrations/005_watch.sql server/db/schema.sql server/db/roles.sql server/db/writes.py \
+git add server/db/migrations/007_watch.sql server/db/schema.sql server/db/roles.sql server/db/writes.py \
   server/db/queries.py server/agents/sql_guard.py server/exercises.py server/tests/test_watch_db.py \
   server/tests/test_exercises.py server/tests/test_sql_guard.py server/tests/test_migrate.py
 git commit -F - <<'EOF'
@@ -4256,7 +4256,7 @@ Insert into `README.md` before `## Dashboard notifications`:
 Wire contract: `docs/superpowers/plans/2026-10-11-watch-contract.md` (samples in `server/samples/`). The watch still
 talks only to the iPhone; everything below rides the phone's `/ws/events` socket and REST token.
 
-- **Tables** (`server/db/migrations/005_watch.sql`, mirrored in `schema.sql`, readable by `copilot_ro`):
+- **Tables** (`server/db/migrations/007_watch.sql`, mirrored in `schema.sql`, readable by `copilot_ro`):
   `hr_recovery`, `rotation_sets`, `tremor_daily`; `patients.tremor_monitoring`, `patients.hr_limit_set_by`,
   `sessions.watch_clock_offset_ms`; `wrist_motion` gains `patient_id` and `accel`.
 - **REST:** `GET /me/watch` (patient token; the watch's setup: first name, heart limit and who set it, therapist,

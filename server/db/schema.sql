@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_patient_id_idx ON messages (patient_id, id);
 
--- tri-watch (2026-10-11): Apple Watch. Mirrors db/migrations/005_watch.sql (grants are in roles.sql).
+-- tri-watch (2026-10-11): Apple Watch. Mirrors db/migrations/007_watch.sql (grants are in roles.sql).
 ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS patient_id text;
 ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS accel real[];
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS tremor_monitoring boolean NOT NULL DEFAULT false;
