@@ -85,3 +85,15 @@ Track exactly one person: the one on or next to the mat. Ignore people elsewhere
 - `uncrop(crop(...))` maps landmarks back to the exact full-frame pixels; ROI covers the projected box.
 - Old recordings replay unchanged; new recordings replay with re-selection.
 - Rig: with a hand over one lens, the 3D skeleton stays on the person (single-camera mode) instead of jumping; a bystander beside the mat is ignored; `checks` still reports ≥ 20 fps per camera.
+
+## Addendum: foot anchoring (Task 7)
+
+Rig testing showed jittery feet in the skeleton while standing still or squatting.
+
+- `vision/anchor.py` `FootAnchor.update(t, joints) -> (joints, {"l": bool, "r": bool})`, per foot (ankle, heel, toe = 27/29/31 and 28/30/32).
+- **Planted:** heel and toe y ≤ 0.12 m and the foot's average position over the last 0.2 s has moved less than 0.15 m/s. The foot is then held at that average, shifted so its lowest point sits at 0.02 m (the mat surface) when the shift is under 0.12 m.
+- **Released:** the raw foot more than 0.05 m from where it planted, or the heel/toe above 0.12 m, for 2 frames in a row. After release the output follows the live foot with the held-minus-live offset fading out over 0.1 s (fading the offset, not blending positions, so a moving foot never catches up in one jump).
+- Runs in `Pipeline` after cleanup and before smoothing, on by default (`anchor_feet=True`), reset when tracking is lost. `PipelineOutput.feet_locked` reports it.
+- Debug view: a white square under an anchored foot in the top view. `checks`: "feet anchored while standing" (% of 3D frames with both feet anchored, target ≥ 80).
+- Tests that compared unsmoothed joints to the triangulation exclude the foot joints (27–32).
+- Success: a planted foot with 1 cm raw jitter varies < 2 mm; a 30 cm step releases within 2 frames of moving more than 5 cm, with no frame-to-frame jump ≥ 6 cm; feet stay anchored through a squat while the hips drop.

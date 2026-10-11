@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Track exactly one person, the one on or within 1 m of the mat: crop pose detection to the mat area, find up to 3 people per camera, pick the consistent pair at the mat (sticky), and drop a camera that disagrees (hand over the lens) so the single-camera fallback takes over.
+**Goal:** (Tasks 1–6) Track exactly one person, the one on or within 1 m of the mat: crop pose detection to the mat area, find up to 3 people per camera, pick the consistent pair at the mat (sticky), and drop a camera that disagrees (hand over the lens) so the single-camera fallback takes over. (Task 7) Anchor planted feet so they don't jitter.
 
 **Architecture:** `roi.py` computes each calibrated camera's pixel box around the mat; `pose.py` runs MediaPipe on that crop with `num_poses=3` and returns `CameraPeople` in full-frame pixels; `select.py` (`PersonSelector`) chooses the person; `Pipeline.process` runs selection when given multi-person input and is unchanged for single `PoseResult`s (old recordings, tests). Recordings gain a `people` field; replay re-runs selection. The debug view draws the cyan tracking area, grey ignored people and a dropped-camera message; the full picture is never cropped.
 
@@ -23,13 +23,16 @@ Every code block below was run against a scratch copy of the repo before this pl
 - `Pipeline.process` with single `PoseResult`s behaves exactly as before; old recordings replay unchanged.
 - Run tests with `.venv/bin/python -m pytest` from the repo root.
 
+- Foot anchoring (Task 7): planted = heel and toe ≤ 0.12 m and < 0.15 m/s over 0.2 s; release after 2 frames > 0.05 m away or lifted; offset fades over 0.1 s; on by default.
+
 ## Review Focus
 
 1. Performance on the rig: 3 poses per camera with two cameras must keep ≥ 20 fps per camera (`checks` reports it); if not, lower `NUM_POSES` to 2.
 2. ROI at the real camera spots (3.7–4.5 m, ~0.9 m high): with a 1 m margin the box may cover most of the frame or fall back to full frame; it must never cut off a person standing at the mat edge.
 3. A real hand over one lens: MediaPipe may still report plausible-looking feet for the junk; the floor test must not place it at the mat more readily than the real person seen by the other camera.
 4. Two people close together (< 0.5 m): identity can swap; acceptable but must not oscillate every frame.
-5. `calib_refine` now feeds the selected person (`out.raw`) to the bundle adjustment instead of raw pairs; with nobody at the mat it must still raise "not enough body observations" rather than crash.
+5. Foot anchoring on the rig: a foot must release promptly on a real step (no visible "skating"), and anchoring must not hide a calibration error (e.g. a floor 5 cm off) from `checks`.
+6. `calib_refine` now feeds the selected person (`out.raw`) to the bundle adjustment instead of raw pairs; with nobody at the mat it must still raise "not enough body observations" rather than crash.
 
 ---
 
@@ -1244,6 +1247,420 @@ Expected: PASS (134 passed).
 ```bash
 git add vision/README.md
 git commit -m "vision: README: who gets tracked"
+```
+
+---
+
+### Task 7: Foot anchoring
+
+**Files:**
+- Create: `vision/anchor.py`
+- Create: `vision/tests/test_anchor.py`
+- Modify: `vision/pipeline.py`, `vision/debug_view.py`, `vision/checks.py`, `vision/README.md`
+- Modify: `vision/tests/test_checks.py`, `vision/tests/test_record_replay.py`
+
+**Interfaces:**
+- Consumes: `Pipeline` and `PipelineOutput` as changed by Task 4; `render_topdown`/`compose_view` as changed by Task 5.
+- Produces: `FootAnchor().update(t, joints) -> (joints, {"l": bool, "r": bool})`, `.reset()`; `Pipeline(..., anchor_feet=True)`; `PipelineOutput.feet_locked`; `render_topdown(frame, mat, cams, feet_locked=None)`; check "feet anchored while standing".
+- Spec: the "Addendum: foot anchoring (Task 7)" section of the spec.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `vision/tests/test_anchor.py`:
+
+```python
+import numpy as np
+
+from vision.anchor import FEET, FootAnchor
+from vision.tests.synth import standing_skeleton
+
+DT = 1 / 30
+
+
+def _run(frames, anchor=None):
+    anchor = anchor or FootAnchor()
+    outs, locks = [], []
+    for k, X in enumerate(frames):
+        o, lk = anchor.update(k * DT, X)
+        outs.append(o)
+        locks.append(lk)
+    return np.array(outs), locks
+
+
+def test_jittery_planted_foot_is_held_still():
+    rng = np.random.default_rng(0)
+    X = standing_skeleton()
+    frames = [X + rng.normal(0, 0.01, X.shape) for _ in range(60)]
+    outs, locks = _run(frames)
+    assert all(lk["l"] and lk["r"] for lk in locks[10:])
+    for side, idx in FEET.items():
+        assert outs[10:, list(idx)].std(axis=0).max() < 0.002  # raw jitter was 1 cm
+    toe_y = outs[-1, 31, 1]
+    assert abs(toe_y - 0.02) < 0.01  # lowest point on the mat surface
+    assert outs[10:, 0].std(axis=0).max() > 0.005  # the rest of the body is untouched
+
+
+def test_real_step_releases_quickly_without_a_jump():
+    X = standing_skeleton()
+    frames = [X.copy() for _ in range(15)]
+    for k in range(1, 16):  # left foot steps 30 cm forward over 0.5 s
+        Y = X.copy()
+        Y[[27, 29, 31], 2] += 0.02 * k
+        frames.append(Y)
+    outs, locks = _run(frames)
+    assert locks[14]["l"]
+    first_away = next(k for k in range(15, 30) if frames[k][29, 2] - X[29, 2] > 0.05)
+    assert not locks[first_away + 1]["l"]  # released within 2 frames of really moving
+    assert locks[-1]["r"]  # the other foot stays planted
+    jumps = np.linalg.norm(np.diff(outs[:, 29], axis=0), axis=1)
+    assert jumps.max() < 0.06  # blends instead of jumping
+    assert np.linalg.norm(outs[-1, 29] - frames[-1][29]) < 0.03  # follows the foot again
+
+
+def test_squat_keeps_feet_locked_while_hips_drop():
+    rng = np.random.default_rng(1)
+    X = standing_skeleton()
+    frames = []
+    for k in range(60):
+        Y = X + rng.normal(0, 0.008, X.shape)
+        drop = 0.4 * min(k / 30, 1.0)
+        Y[:25, 1] -= drop  # upper body and hips go down, feet stay
+        frames.append(Y)
+    outs, locks = _run(frames)
+    assert all(lk["l"] and lk["r"] for lk in locks[10:])
+    assert outs[-1, 23, 1] < X[23, 1] - 0.35
+
+
+def test_lifted_or_missing_foot_is_not_locked():
+    X = standing_skeleton()
+    lifted = X.copy()
+    lifted[[27, 29, 31], 1] += 0.25
+    _, locks = _run([lifted] * 20)
+    assert not locks[-1]["l"] and locks[-1]["r"]
+    gone = X.copy()
+    gone[29] = np.nan
+    a = FootAnchor()
+    _run([X] * 20, a)
+    out, lk = a.update(1.0, gone)
+    assert not lk["l"] and np.isnan(out[29]).all()
+
+
+def test_pipeline_anchors_feet_and_can_be_turned_off():
+    from vision.pipeline import Pipeline
+    from vision.tests.synth import pose_from_points, target_cams
+
+    cams, X = target_cams(), standing_skeleton()
+    rng = np.random.default_rng(2)
+    on, off = Pipeline(cams, smoothing=False), Pipeline(cams, smoothing=False, anchor_feet=False)
+    heels_on, heels_off, locked = [], [], []
+    for k in range(45):
+        a = pose_from_points(cams["A"], X, noise_px=2.0, rng=rng)
+        b = pose_from_points(cams["B"], X, noise_px=2.0, rng=rng)
+        o1, o2 = on.process(k / 30, a, b), off.process(k / 30, a, b)
+        heels_on.append(o1.frame.joints[29])
+        heels_off.append(o2.frame.joints[29])
+        locked.append(o1.feet_locked)
+    assert locked[-1] == {"l": True, "r": True} and off.process(2.0, a, b).feet_locked is None
+    assert np.std(heels_on[15:], axis=0).max() < 0.3 * np.std(heels_off[15:], axis=0).max()
+```
+
+Apply to `vision/tests/test_checks.py` (expects the new check, and excludes feet from the unsmoothed-equality test):
+
+```diff
+--- a/vision/tests/test_checks.py
++++ b/vision/tests/test_checks.py
+@@ -50,7 +50,7 @@
+     assert not any(c.name.startswith("lens RMS") for c in checks)
+     assert {"frames tracked in 3D", "mean body reprojection", "thigh_l length std",
+             "standing knee angle l", "median triangulation angle", "marker distance 0–2",
+-            "pair skew p95", "capture fps A"} <= names
++            "pair skew p95", "capture fps A", "feet anchored while standing"} <= names
+     failed = [c for c in checks if c.passed is False]
+     assert failed == [], format_checks(failed)
+     assert "PASS" in format_checks(checks)
+@@ -73,7 +73,9 @@
+             rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X, noise_px=4.0, rng=rng),
+                                    pose_from_points(cams["B"], X, noise_px=4.0, rng=rng), 0.0))
+     for out in outputs_from_recording(path, cams):
+-        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])
++        body = out.tri.ok.copy()
++        body[27:33] = False  # feet may be held by the FootAnchor; everything else is unsmoothed
++        np.testing.assert_allclose(out.frame.joints[body], out.tri.points[body])
+ 
+ 
+ def test_height_estimate_and_check():
+```
+
+Apply to `vision/tests/test_record_replay.py`:
+
+```diff
+--- a/vision/tests/test_record_replay.py
++++ b/vision/tests/test_record_replay.py
+@@ -60,4 +60,6 @@
+             rec.write(pipe.process(1000 + k / 30, a, b, 0.0))
+     raw = list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
+     for out in raw:
+-        np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])
++        body = out.tri.ok.copy()
++        body[27:33] = False  # feet may be held by the FootAnchor; everything else is unsmoothed
++        np.testing.assert_allclose(out.frame.joints[body], out.tri.points[body])
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `.venv/bin/python -m pytest vision/tests/test_anchor.py vision/tests/test_checks.py -q`
+Expected: FAIL — `ModuleNotFoundError: No module named 'vision.anchor'` at collection of `test_anchor.py` (run `.venv/bin/python -m pytest vision/tests/test_checks.py -q` alone to see `test_run_checks_all_pass_on_clean_synthetic_data` fail on the missing "feet anchored while standing" check).
+
+- [ ] **Step 3: Implement**
+
+Create `vision/anchor.py`:
+
+```python
+"""Foot anchoring: pin a planted foot so MediaPipe's wobble doesn't make it jitter.
+
+A foot (ankle, heel, toe) is planted when its heel and toe are near the floor and it has barely
+moved for a moment; it is then held at its average position, with the lowest point snapped to the
+mat surface. It is released by a real step or lift (the raw foot moves away from the anchor, or the
+heel leaves the floor, for a couple of frames) and blends back to the live position so it never jumps.
+The rest of the body is untouched: a squat with planted feet keeps the feet locked while hips drop.
+"""
+from __future__ import annotations
+
+from collections import deque
+
+import numpy as np
+
+FEET = {"l": (27, 29, 31), "r": (28, 30, 32)}  # ankle, heel, toe (foot index)
+CONTACT_HEIGHT_M = 0.12  # heel and toe below this: touching the floor
+STILL_SPEED_MPS = 0.15  # slower than this over STILL_S: not moving
+STILL_S = 0.2
+RELEASE_M = 0.05  # raw foot this far from the anchor ...
+RELEASE_FRAMES = 2  # ... for this many frames in a row: a real step
+BLEND_S = 0.1
+TOE_HEIGHT_M = 0.02  # where the lowest foot point sits on the mat surface
+
+
+class _Foot:
+    def __init__(self):
+        self.history: deque[tuple[float, np.ndarray]] = deque()
+        self.anchor: np.ndarray | None = None  # held output (lowest point snapped to the floor)
+        self.anchor_raw: np.ndarray | None = None  # what the detections said when it planted
+        self.away = 0
+        self.blend: tuple[float, np.ndarray] | None = None  # (release time, held - live offset) fading out
+
+    def reset(self):
+        self.__init__()
+
+
+class FootAnchor:
+    def __init__(self):
+        self._feet = {side: _Foot() for side in FEET}
+
+    def reset(self) -> None:
+        for f in self._feet.values():
+            f.reset()
+
+    def update(self, t: float, joints: np.ndarray) -> tuple[np.ndarray, dict[str, bool]]:
+        """Returns (joints with planted feet held, side -> locked)."""
+        out = np.array(joints, float, copy=True)
+        locked = {}
+        for side, idx in FEET.items():
+            foot = self._feet[side]
+            pts = out[list(idx)]
+            if not np.isfinite(pts).all():
+                foot.reset()
+                locked[side] = False
+                continue
+            locked[side] = self._step(foot, t, pts)
+            if foot.anchor is not None:
+                out[list(idx)] = foot.anchor
+            elif foot.blend is not None:
+                t0, offset = foot.blend
+                a = (t - t0) / BLEND_S
+                if a >= 1:
+                    foot.blend = None
+                else:  # follow the live foot, with the gap from the held spot fading out
+                    out[list(idx)] = pts + (1 - a) * offset
+        return out, locked
+
+    @staticmethod
+    def _step(foot: _Foot, t: float, pts: np.ndarray) -> bool:
+        on_floor = pts[1, 1] <= CONTACT_HEIGHT_M and pts[2, 1] <= CONTACT_HEIGHT_M
+        if foot.anchor is not None:
+            moved = float(np.max(np.linalg.norm(pts - foot.anchor_raw, axis=1))) > RELEASE_M
+            foot.away = foot.away + 1 if (moved or not on_floor) else 0
+            if foot.away < RELEASE_FRAMES:
+                return True
+            foot.blend = (t, foot.anchor - pts)
+            foot.anchor = foot.anchor_raw = None
+            foot.away = 0
+            foot.history.clear()
+            return False
+        foot.history.append((t, pts.copy()))
+        while len(foot.history) > 1 and t - foot.history[1][0] >= STILL_S:
+            foot.history.popleft()
+        t_first, first = foot.history[0]
+        span = t - t_first
+        if not on_floor or span < STILL_S:
+            return False
+        window = np.stack([p for _, p in foot.history])
+        speed = float(np.max(np.linalg.norm(window.mean(axis=0) - first, axis=1))) / span
+        if speed >= STILL_SPEED_MPS:
+            return False
+        foot.anchor_raw = window.mean(axis=0)
+        foot.anchor = foot.anchor_raw.copy()
+        offset = min(foot.anchor[1, 1], foot.anchor[2, 1]) - TOE_HEIGHT_M
+        if abs(offset) < CONTACT_HEIGHT_M:
+            foot.anchor[:, 1] -= offset
+        foot.blend = None
+        return True
+```
+
+Apply to `vision/pipeline.py`:
+
+```diff
+--- a/vision/pipeline.py
++++ b/vision/pipeline.py
+@@ -5,6 +5,7 @@
+ 
+ import numpy as np
+ 
++from vision.anchor import FootAnchor
+ from vision.cleanup import Cleaner
+ from vision.config import CameraConfig, MatConfig
+ from vision.filters import OneEuroFilter
+@@ -28,6 +29,7 @@
+     people: dict[str, list[PoseResult]] | None = None  # everyone found per camera (multi-person input)
+     ignored: dict[str, list[PoseResult]] | None = None  # people not tracked, per camera
+     dropped: str | None = None  # camera ignored this frame because it disagreed with the other
++    feet_locked: dict[str, bool] | None = None  # "l"/"r" -> foot held by the FootAnchor this frame
+ 
+ 
+ def _flipped(p: PoseResult) -> PoseResult:
+@@ -79,8 +81,10 @@
+ 
+ class Pipeline:
+     def __init__(self, cams: dict[str, CameraConfig], smoothing: bool = True,
+-                 min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None):
++                 min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None,
++                 anchor_feet: bool = True):
+         self.cams = cams
++        self._anchor = FootAnchor() if anchor_feet else None
+         self._selector = PersonSelector(cams, mat or MatConfig())
+         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
+         self._cleaner = Cleaner(cams)
+@@ -117,8 +121,14 @@
+                     best, swapped, a, b, tri = cost, name, a2, b2, tri2
+         usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
+         joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
++        feet_locked = None
++        if self._anchor is not None:
++            if tracking == "lost":
++                self._anchor.reset()
++            else:
++                joints, feet_locked = self._anchor.update(t, joints)
+         if self._filter is not None:
+             joints = self._filter(joints, t)
+         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
+         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
+-                              people=people, ignored=ignored, dropped=dropped)
++                              people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked)
+```
+
+Apply to `vision/debug_view.py`:
+
+```diff
+--- a/vision/debug_view.py
++++ b/vision/debug_view.py
+@@ -96,7 +96,8 @@
+     return panel
+ 
+ 
+-def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, CameraConfig]) -> np.ndarray:
++def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, CameraConfig],
++                   feet_locked: dict[str, bool] | None = None) -> np.ndarray:
+     img = _blank()
+     for x in np.arange(-2.5, 2.51, 0.5):
+         a, b = TOP([[x, -1.3], [x, 2.9]])
+@@ -124,10 +125,14 @@
+         draw_text(img, name, pt(p + [8, -8]), YELLOW)
+     if frame is not None:
+         draw_skeleton(img, TOP(frame.joints[:, [0, 2]]))
++        for side, heel in (("l", 29), ("r", 30)):
++            if (feet_locked or {}).get(side) and np.isfinite(frame.joints[heel]).all():
++                c = TOP([frame.joints[heel][[0, 2]]])[0]
++                cv2.rectangle(img, pt(c - 7), pt(c + 7), WHITE, 2)  # this foot is anchored
+     a, b = TOP([[0.0, -1.15], [0.5, -1.15]])
+     cv2.arrowedLine(img, pt(a), pt(b), WHITE, 1, tipLength=0.2)
+     draw_text(img, "+x", pt(b + [-24, -6]), WHITE, 0.4)
+-    draw_text(img, "top view   orange = left, blue = right", (8, PANEL_H - 10), WHITE, 0.45)
++    draw_text(img, "top view   orange = left, blue = right, square = foot anchored", (8, PANEL_H - 10), WHITE, 0.45)
+     return img
+ 
+ 
+@@ -185,7 +190,8 @@
+     if recording:
+         hud.append(recording)
+     hud.append("keys: r record   m markers   q quit")
+-    bottom = np.hstack([render_topdown(frame, mat, cams), render_front(frame, hud)])
++    bottom = np.hstack([render_topdown(frame, mat, cams, out.feet_locked if out is not None else None),
++                        render_front(frame, hud)])
+     return np.vstack([np.hstack(panels), bottom])
+ 
+ 
+```
+
+Apply to `vision/checks.py`:
+
+```diff
+--- a/vision/checks.py
++++ b/vision/checks.py
+@@ -100,6 +100,10 @@
+         checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
+                              lambda v: 170 <= v <= 180))
+ 
++    locks = [o.feet_locked for o in outputs if o.frame.tracking == "3d" and o.feet_locked is not None]
++    frac_locked = 100.0 * sum(lk.get("l", False) and lk.get("r", False) for lk in locks) / len(locks) if locks else None
++    checks.append(_check("feet anchored while standing", frac_locked, "%", "≥ 80", lambda v: v >= 80))
++
+     if height_cm is not None:
+         est = estimate_height_cm(seq) if seq is not None else None
+         checks.append(_check("estimated height", est, "cm", f"{height_cm:.0f} ± 5%",
+```
+
+Apply to `vision/README.md`:
+
+```diff
+--- a/vision/README.md
++++ b/vision/README.md
+@@ -72,6 +72,15 @@
+ ("ignoring camera A (disagrees)"). Recordings keep everyone found, so `--retriangulate` re-runs the
+ selection.
+ 
++### Foot anchoring
++
++A planted foot (heel and toe within 12 cm of the floor, barely moving for 0.2 s) is held still at its
++average position with its lowest point on the mat surface, so MediaPipe's wobble doesn't make the
++feet jitter while standing or squatting. It releases on a real step or lift (the detected foot more
++than 5 cm away, or the heel off the floor, for 2 frames) and fades back to the live position over
++0.1 s. The debug view's top view draws a white square under an anchored foot; `checks` reports
++"feet anchored while standing". `Pipeline(..., anchor_feet=False)` turns it off.
++
+ ### Left/right flips
+ 
+ Both cameras are at the same height, so a MediaPipe left/right flip in one camera still looks
+```
+
+- [ ] **Step 4: Run the whole suite and import every tool**
+
+Run: `.venv/bin/python -m pytest -q && for m in debug_view calib_refine checks live calib_extrinsics; do .venv/bin/python -c "import vision.$m" || echo FAIL $m; done`
+Expected: PASS (139 passed), no `FAIL` lines.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add vision/anchor.py vision/tests/test_anchor.py vision/pipeline.py vision/debug_view.py vision/checks.py vision/README.md vision/tests/test_checks.py vision/tests/test_record_replay.py
+git commit -m "vision: anchor planted feet so they don't jitter"
 ```
 
 ---
