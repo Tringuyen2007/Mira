@@ -102,9 +102,11 @@ async def pair(body: PairIn, request: Request, db: Database = Depends(require_db
         if not ok:
             raise HTTPException(status_code=503, detail="database unavailable: could not save the profile")
     token = security.new_patient_token()
-    if not await writes.insert_patient_device(db, security.token_hash(token), patient_id, body.device_name):
+    if not await writes.insert_patient_device(db, security.token_hash(token), patient_id, body.device_name,
+                                              via_reusable=bool(reusable)):
         raise HTTPException(status_code=503, detail="database unavailable: could not pair the phone")
-    await writes.revoke_excess_patient_devices(db, patient_id, keep=MAX_ACTIVE_DEVICES_PER_PATIENT)
+    if await writes.revoke_excess_patient_devices(db, patient_id, keep=MAX_ACTIVE_DEVICES_PER_PATIENT):
+        security.invalidate_token_cache()  # an evicted demo phone is refused now, not when its cache entry expires
     log.info("phone paired", extra={"patient_id": patient_id, "device": body.device_name,
                                     "token": security.mask(token)})
     return {"patient_id": patient_id, "token": token, "me": await build_me(db, patient_id)}

@@ -403,11 +403,11 @@ async def touch_patient_device(db: Database | None, token_hash: str) -> bool:
 
 
 async def insert_patient_device(db: Database | None, token_hash: str, patient_id: str,
-                                device_name: str | None) -> bool:
-    sql = "INSERT INTO patient_devices (token_hash, patient_id, device_name) VALUES (%s, %s, %s)"
+                                device_name: str | None, via_reusable: bool = False) -> bool:
+    sql = "INSERT INTO patient_devices (token_hash, patient_id, device_name, via_reusable) VALUES (%s, %s, %s, %s)"
     return await _safe(db, "insert_patient_device", lambda d: _ok(d.execute(sql, (token_hash, patient_id,
-                                                                                 device_name))), False,
-                       patient_id=patient_id)
+                                                                                 device_name, via_reusable))),
+                       False, patient_id=patient_id)
 
 
 async def revoke_patient_devices(db: Database | None, patient_id: str) -> int | None:
@@ -417,11 +417,13 @@ async def revoke_patient_devices(db: Database | None, patient_id: str) -> int | 
 
 
 async def revoke_excess_patient_devices(db: Database | None, patient_id: str, keep: int = 10) -> int | None:
-    """Keep only the `keep` most recently paired active devices for a patient; revoke any older ones. Called
-    right after a successful pair so a reusable demo code can't accumulate unbounded live tokens."""
+    """Keep only the `keep` most recently paired active demo (`via_reusable`) devices for a patient; revoke any
+    older ones. Called right after a successful pair so a reusable demo code can't accumulate unbounded live
+    tokens. A phone paired with a single-use (therapist-minted) code is never evicted: strangers pairing with the
+    public demo code must not be able to sign the real patient's phone out."""
     sql = ("UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s AND revoked_at IS NULL "
-           "AND token_hash NOT IN (SELECT token_hash FROM patient_devices WHERE patient_id = %s "
-           "AND revoked_at IS NULL ORDER BY created_at DESC LIMIT %s)")
+           "AND via_reusable AND token_hash NOT IN (SELECT token_hash FROM patient_devices WHERE patient_id = %s "
+           "AND revoked_at IS NULL AND via_reusable ORDER BY created_at DESC LIMIT %s)")
     return await _safe(db, "revoke_excess_patient_devices", lambda d: d.execute(sql, (patient_id, patient_id, keep)),
                        None, patient_id=patient_id)
 

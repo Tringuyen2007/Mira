@@ -66,6 +66,8 @@ async def put_me(body: MeUpdate, principal: security.Principal = Depends(securit
                  patient_id: str | None = Query(default=None), db: Database = Depends(require_db)) -> dict[str, Any]:
     pid = _patient_for(principal, patient_id)
     p, c = body.profile, body.emergency_contact
+    if principal.locked_demo:  # a demo-code phone may not rewrite who Retell dials (other fields still apply)
+        p, c = None, None
     ok = await writes.update_patient_profile(
         db, pid, name=p.name if p else None, height_cm=p.height_cm if p else None, mass_kg=p.mass_kg if p else None,
         affected_side=p.affected_side if p else None, condition=p.condition if p else None,
@@ -96,6 +98,8 @@ async def delete_me(principal: security.Principal = Depends(security.require_pri
     """Caveat (mock): when this stops Maya's live mock session under MIRA_SOURCE=mock, nothing restarts it in
     this plan — that is Plan 2's auto-restart."""
     pid = _patient_for(principal, patient_id)
+    if principal.locked_demo:
+        raise HTTPException(status_code=403, detail="demo phone: deleting this patient is disabled on this server")
     if await queries.patient_me_row(db, pid) is None:
         raise HTTPException(status_code=404, detail="patient not found")
     state = get_state()

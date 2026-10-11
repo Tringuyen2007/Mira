@@ -98,3 +98,62 @@ def test_export_and_delete(client: TestClient, phone: dict[str, str], dsn: str) 
     assert client.get("/me", headers=phone).status_code == 401
     # the live session was Maya's: it has been stopped
     assert get_state().sessions.current is None or get_state().sessions.current.session_id != sid
+
+
+def _locked_client(make_client: Callable[..., TestClient], dsn: str) -> TestClient:
+    security.invalidate_token_cache()
+    return make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), PAIRING_REUSABLE_UPDATES_PROFILE="0")
+
+
+def test_demo_phone_is_locked_when_reusable_updates_are_off(make_client: Callable[..., TestClient], dsn: str) -> None:
+    """With PAIRING_REUSABLE_UPDATES_PROFILE=0 a demo-code phone can't wipe Maya or rewrite who Retell dials."""
+    client = _locked_client(make_client, dsn)
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("UPDATE patients SET emergency_contact_name = 'Eric', emergency_contact_phone = '+15550100111' "
+                     "WHERE id = 'maya'")
+    r = client.post("/pair", json={"code": "K7P4M2", "profile": PROFILE, "emergency_contact": CONTACT})
+    phone = {"Authorization": f"Bearer {r.json()['token']}"}
+    assert client.delete("/me", headers=phone).status_code == 403
+    r = client.put("/me", headers=phone, json={"emergency_contact": {"name": "Mallory", "phone": "+15550199999"},
+                                               "profile": {"name": "Not Maya"}, "share_by_default": True})
+    assert r.status_code == 200
+    me = r.json()["patient"]
+    assert me["emergency_contact"]["name"] == "Eric" and me["name"] != "Not Maya"
+    assert me["share_by_default"] is True  # other fields still apply
+    # an admin-minted (single-use) phone is never locked
+    code = client.post("/patients/maya/pairing-code", headers=AUTH).json()["code"]
+    real = client.post("/pair", json={"code": code, "profile": PROFILE, "emergency_contact": CONTACT}).json()
+    r = client.put("/me", headers={"Authorization": f"Bearer {real['token']}"},
+                   json={"emergency_contact": {"name": "Ana", "phone": "+15550100999"}})
+    assert r.json()["patient"]["emergency_contact"]["name"] == "Ana"
+
+
+def test_demo_phone_test_alert_never_calls_when_locked(make_client: Callable[..., TestClient], dsn: str) -> None:
+    security.invalidate_token_cache()
+    client = make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), PAIRING_REUSABLE_UPDATES_PROFILE="0",
+                         CALLS_DISABLED="0", ALLOW_TEST_CALLS="1")
+    from server.state import get_state
+
+    calls: list[str] = []
+
+    async def fake_call(phone: str) -> None:
+        calls.append(phone)
+
+    get_state().notifier.test_call = fake_call
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("UPDATE patients SET emergency_contact_phone = '+15550100111' WHERE id = 'maya'")
+    token = client.post("/pair", json={"code": "K7P4M2", "profile": PROFILE, "emergency_contact": CONTACT}).json()
+    r = client.post("/me/test-alert", headers={"Authorization": f"Bearer {token['token']}"})
+    assert r.status_code == 200 and r.json()["called"] is False and r.json()["logged"] is True
+    assert calls == []
+    # the admin acting for Maya still places the test call
+    assert client.post("/me/test-alert?patient_id=maya", headers=AUTH).json()["called"] is True
+    assert calls == ["+15550100111"]
+
+
+def test_demo_phone_unlocked_by_default(client: TestClient, dsn: str) -> None:
+    r = client.post("/pair", json={"code": "K7P4M2", "profile": PROFILE, "emergency_contact": CONTACT})
+    phone = {"Authorization": f"Bearer {r.json()['token']}"}
+    r = client.put("/me", headers=phone, json={"emergency_contact": {"name": "Zed", "phone": "+15550100888"}})
+    assert r.json()["patient"]["emergency_contact"]["name"] == "Zed"
+    assert client.delete("/me", headers=phone).status_code == 200

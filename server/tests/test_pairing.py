@@ -189,3 +189,33 @@ def test_claim_pairing_code_is_atomic_against_concurrent_claims(dsn: str) -> Non
 
     first, second = asyncio.run(run())
     assert (first is None) != (second is None)  # exactly one succeeds
+
+
+def test_demo_phone_principal_is_marked_demo(client: TestClient) -> None:
+    """A phone paired with a reusable code is a demo phone; one paired with an admin-minted code is not."""
+    import asyncio
+
+    demo = asyncio.run(security.resolve_token(_pair(client).json()["token"]))
+    assert demo is not None and demo.demo is True
+    code = client.post("/patients/maya/pairing-code", headers=AUTH).json()["code"]
+    real = asyncio.run(security.resolve_token(_pair(client, code=code).json()["token"]))
+    assert real is not None and real.demo is False
+
+
+def test_reusable_pairs_never_evict_a_single_use_device(client: TestClient, dsn: str) -> None:
+    """The demo code pairing 12 phones must evict only older demo phones, never the admin-minted device."""
+    from server.api import pair as pair_api
+
+    code = client.post("/patients/maya/pairing-code", headers=AUTH).json()["code"]
+    real = _pair(client, code=code).json()["token"]
+    for _ in range(12):
+        pair_api._attempts.clear()
+        assert _pair(client).status_code == 200
+    import asyncio
+
+    security.invalidate_token_cache()
+    assert asyncio.run(security.resolve_token(real)) is not None
+    with psycopg.connect(dsn) as conn:
+        demo_active = conn.execute("SELECT count(*) FROM patient_devices WHERE patient_id = 'maya' "
+                                   "AND revoked_at IS NULL AND via_reusable").fetchone()[0]
+    assert demo_active == pair_api.MAX_ACTIVE_DEVICES_PER_PATIENT

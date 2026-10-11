@@ -4,12 +4,15 @@ session after a pause so the LCD keeps looping — every loop is now a real sess
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from server.logging_setup import get_logger
 from server.state import LiveSession, SessionRegistry
 
 log = get_logger("session_end")
+
+INCIDENT_POLL_S = 2.0  # MockAutoRestart: how often to re-check an open incident before restarting
 
 
 class SessionEnder:
@@ -39,13 +42,16 @@ class SessionEnder:
 
 class MockAutoRestart:
     """on_stop hook for mock mode: start a fresh demo session `delay_s` after one ends, unless something else
-    (REST, boot) already started one."""
+    (REST, boot) already started one. While `incident_open()` is True (a Safety Guardian incident is still being
+    handled) it keeps waiting, polling every INCIDENT_POLL_S with no limit: a new session must never bury it."""
 
-    def __init__(self, registry: SessionRegistry, patient_id: str, exercise_id: str, delay_s: float) -> None:
+    def __init__(self, registry: SessionRegistry, patient_id: str, exercise_id: str, delay_s: float,
+                 incident_open: Callable[[], bool] = lambda: False) -> None:
         self.registry = registry
         self.patient_id = patient_id
         self.exercise_id = exercise_id
         self.delay_s = delay_s
+        self.incident_open = incident_open
         self._task: asyncio.Task[None] | None = None
 
     def on_stop(self, session: LiveSession) -> None:
@@ -57,6 +63,8 @@ class MockAutoRestart:
 
     async def _restart(self) -> None:
         await asyncio.sleep(self.delay_s)
+        while self.incident_open():
+            await asyncio.sleep(INCIDENT_POLL_S)
         started = await self.registry.start_if_idle(self.patient_id, self.exercise_id)
         if started is None:
             return

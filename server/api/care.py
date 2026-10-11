@@ -155,7 +155,8 @@ async def test_alert(principal: security.Principal = Depends(security.require_pr
     note = "Test alert logged. Calls are disabled on this server."
     notifier = get_state().notifier
     test_call = getattr(notifier, "test_call", None) if notifier is not None else None
-    if not cfg.CALLS_DISABLED and cfg.ALLOW_TEST_CALLS and test_call is not None and me_row["emergency_contact_phone"]:
+    may_call = not cfg.CALLS_DISABLED and cfg.ALLOW_TEST_CALLS and not principal.locked_demo
+    if may_call and test_call is not None and me_row["emergency_contact_phone"]:
         await test_call(me_row["emergency_contact_phone"])
         called = True
         note = "Calling your emergency contact now."

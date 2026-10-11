@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Literal
 
@@ -31,10 +31,19 @@ PrincipalScope = Literal["full", "device", "patient"]
 
 @dataclass(frozen=True)
 class Principal:
-    """Who a token belongs to. `full` = MIRA_API_TOKEN (dashboard/ops), `device` = the LCD, `patient` = one phone."""
+    """Who a token belongs to. `full` = MIRA_API_TOKEN (dashboard/ops), `device` = the LCD, `patient` = one phone.
+    `demo` = a phone paired with a reusable (demo) code; see `locked_demo`. Not part of equality: it describes
+    how the phone paired, not who it acts for."""
 
     scope: PrincipalScope
     patient_id: str | None = None
+    demo: bool = field(default=False, compare=False)
+
+    @property
+    def locked_demo(self) -> bool:
+        """A demo phone on a server that set PAIRING_REUSABLE_UPDATES_PROFILE=0: it may not delete the patient,
+        rewrite their profile/emergency contact, or place a test call."""
+        return self.demo and not cfg.PAIRING_REUSABLE_UPDATES_PROFILE
 
     def owns(self, patient_id: str) -> bool:
         return self.scope == "full" or (self.scope == "patient" and self.patient_id == patient_id)
@@ -109,7 +118,7 @@ async def _patient_principal(token: str) -> Principal | None:
     row = await queries.patient_device(db, digest)  # DBError propagates → unavailable, never a false 401
     if row is None or row["revoked_at"] is not None:
         return None
-    principal = Principal("patient", row["patient_id"])
+    principal = Principal("patient", row["patient_id"], demo=bool(row.get("via_reusable")))
     _prune_cache(now)
     _cache[digest] = (principal, now + TOKEN_CACHE_S, now)
     writes.fire(writes.touch_patient_device(db, digest))

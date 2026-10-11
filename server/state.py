@@ -54,6 +54,7 @@ class LiveSession:
     exercise_id: str
     started_at: float
     profile: PatientProfile
+    origin: str = "rest"  # rest (phone/dashboard) | auto (MockAutoRestart) | boot (mock mode start-up)
 
 
 def default_profile(patient_id: str) -> PatientProfile:
@@ -129,9 +130,9 @@ class SessionRegistry:
         # auto-restart) can never both see `current is None` and both start a session.
         self._start_lock = asyncio.Lock()
 
-    async def start(self, patient_id: str, exercise_id: str) -> LiveSession:
+    async def start(self, patient_id: str, exercise_id: str, origin: str = "rest") -> LiveSession:
         async with self._start_lock:
-            return await self._start_locked(patient_id, exercise_id)
+            return await self._start_locked(patient_id, exercise_id, origin)
 
     async def start_if_idle(self, patient_id: str, exercise_id: str) -> LiveSession | None:
         """Like start(), but returns None instead of starting when a session is already current. Holds the
@@ -139,9 +140,9 @@ class SessionRegistry:
         async with self._start_lock:
             if self.current is not None:
                 return None
-            return await self._start_locked(patient_id, exercise_id)
+            return await self._start_locked(patient_id, exercise_id, "auto")
 
-    async def _start_locked(self, patient_id: str, exercise_id: str) -> LiveSession:
+    async def _start_locked(self, patient_id: str, exercise_id: str, origin: str) -> LiveSession:
         profile = await self._load_profile(patient_id)
         session = LiveSession(
             session_id=str(uuid.uuid4()),
@@ -149,6 +150,7 @@ class SessionRegistry:
             exercise_id=exercise_id,
             started_at=time.time(),
             profile=profile,
+            origin=origin,
         )
         self._sessions[session.session_id] = session
         self.current = session

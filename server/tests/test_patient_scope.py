@@ -100,3 +100,31 @@ def test_admin_unchanged(client: TestClient) -> None:
     r = client.post("/sessions", json={"patient_id": "bob", "exercise_id": "anything"}, headers=AUTH)
     assert r.status_code == 200 and r.json()["patient_id"] == "bob"  # admin is not validated against the plan
     client.post(f"/sessions/{r.json()['session_id']}/stop", headers=AUTH)
+
+
+def test_patient_cannot_start_a_session_while_an_incident_is_open(client: TestClient, phone: dict[str, str]) -> None:
+    """A phone starting a session must not replace the one a Safety Guardian incident is holding open (409);
+    the admin is unchanged."""
+    from types import SimpleNamespace
+
+    from server.state import get_state
+
+    state = get_state()
+    current = state.sessions.current
+    assert current is not None
+    incident = SimpleNamespace(session_id=current.session_id, profile=SimpleNamespace(patient_id="maya"))
+    state.guardian.incidents[current.session_id] = incident
+    try:
+        r = client.post("/sessions", json={"exercise_id": "squat"}, headers=phone)
+        assert r.status_code == 409 and "incident" in r.json()["detail"]
+        assert state.sessions.current is current
+        # an incident for another patient (session unknown to the registry: its profile says whose) doesn't block
+        state.guardian.incidents.clear()
+        other = SimpleNamespace(session_id=None, profile=SimpleNamespace(patient_id="bob"))
+        state.guardian.incidents[str(uuid.uuid4())] = other
+        assert client.post("/sessions", json={"exercise_id": "squat"}, headers=phone).status_code == 200
+        state.guardian.incidents[state.sessions.current.session_id] = incident
+        r = client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
+        assert r.status_code == 200  # admin unchanged
+    finally:
+        state.guardian.incidents.clear()

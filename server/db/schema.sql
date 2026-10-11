@@ -205,6 +205,8 @@ CREATE TABLE IF NOT EXISTS patient_devices (
   revoked_at    timestamptz
 );
 CREATE INDEX IF NOT EXISTS patient_devices_patient_idx ON patient_devices (patient_id);
+-- Final review C1: phones paired with a reusable (demo) code. Mirrors db/migrations/004_patient_devices_reusable.sql.
+ALTER TABLE patient_devices ADD COLUMN IF NOT EXISTS via_reusable boolean NOT NULL DEFAULT false;
 
 -- Plan 2 (2026-10-11): whole-session analysis. Mirrors db/migrations/002_session_analysis.sql.
 CREATE TABLE IF NOT EXISTS session_analyses (

@@ -24,7 +24,8 @@ def test_migrations_apply_and_are_idempotent() -> None:
         second = migrate.apply_migrations(dsn)  # every statement is IF NOT EXISTS
         assert second == first
         assert {"code", "patient_id", "expires_at", "used_at", "reusable"} <= _columns(dsn, "pairing_codes")
-        assert {"token_hash", "patient_id", "last_seen", "revoked_at"} <= _columns(dsn, "patient_devices")
+        assert {"token_hash", "patient_id", "last_seen", "revoked_at", "via_reusable"} <= _columns(dsn,
+                                                                                               "patient_devices")
         assert {"emergency_contact_relationship", "alert_therapist", "next_visit_at", "share_by_default",
                 "device_prefs"} <= _columns(dsn, "patients")
         assert "clinic" in _columns(dsn, "therapists")
@@ -39,3 +40,4 @@ def test_schema_sql_already_contains_the_migration_ddl() -> None:
         apply_file(migrate.DB_DIR / "schema.sql", dsn)
         assert "reusable" in _columns(dsn, "pairing_codes")
         assert "device_prefs" in _columns(dsn, "patients")
+        assert "via_reusable" in _columns(dsn, "patient_devices")

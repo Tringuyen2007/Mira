@@ -95,6 +95,33 @@ async def test_mock_auto_restart_starts_a_new_session_after_delay() -> None:
     await restart.close()
 
 
+async def test_mock_auto_restart_waits_while_an_incident_is_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An open Safety Guardian incident must survive the session ending: no fresh demo session until it closes."""
+    monkeypatch.setattr(session_end, "INCIDENT_POLL_S", 0.02)
+    reg = SessionRegistry()
+    incident = {"open": True}
+    restart = session_end.MockAutoRestart(reg, "maya", "squat", delay_s=0.02, incident_open=lambda: incident["open"])
+    reg.on_stop.append(restart.on_stop)
+    first = await reg.start("maya", "squat")
+    await reg.stop(first.session_id)
+    await asyncio.sleep(0.2)
+    assert reg.current is None  # still waiting on the incident
+    incident["open"] = False
+    await asyncio.sleep(0.1)
+    assert reg.current is not None and reg.current.session_id != first.session_id
+    assert reg.current.origin == "auto"
+    await restart.close()
+
+
+async def test_session_origin_is_recorded() -> None:
+    reg = SessionRegistry()
+    assert (await reg.start("maya", "squat")).origin == "rest"
+    assert (await reg.start("maya", "squat", origin="boot")).origin == "boot"
+    await reg.stop(reg.current.session_id)
+    started = await reg.start_if_idle("maya", "squat")
+    assert started is not None and started.origin == "auto"
+
+
 async def test_start_if_idle_lets_exactly_one_concurrent_caller_win() -> None:
     reg = SessionRegistry()
     results = await asyncio.gather(*(reg.start_if_idle("maya", "squat") for _ in range(5)))

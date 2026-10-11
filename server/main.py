@@ -192,7 +192,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(ender.on_event)
     auto_restart: MockAutoRestart | None = None
     if cfg.MIRA_SOURCE.startswith("mock") and not _mock_loops(cfg):
-        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S)
+        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S,
+                                       incident_open=lambda: bool(guardian.incidents))
         sessions.on_stop.append(auto_restart.on_stop)
     # Every ended session gets a whole-session analysis (session_summary event, session_analyses row).
     analyst = SessionAnalyst(hub, sessions)
@@ -208,7 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sessions.on_start.append(voice.prepare_greeting)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
-        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID)
+        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, origin="boot")
     await bridge.start()
     try:
         yield

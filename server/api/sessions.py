@@ -46,6 +46,19 @@ async def _owned_session(db: Database, sid: str, principal: security.Principal) 
     return session
 
 
+def _incident_blocks(state: Any, patient_id: str) -> bool:
+    """Is a Safety Guardian incident open for this patient? Incidents are keyed by session id: the registry says
+    whose session it was, else the incident's own profile; an incident nobody can attribute blocks everyone."""
+    guardian = state.guardian
+    for key, incident in list(getattr(guardian, "incidents", {}).items()):
+        live = state.sessions.get(key) if isinstance(key, str) else None
+        owner = live.patient_id if live is not None else getattr(getattr(incident, "profile", None), "patient_id",
+                                                                 None)
+        if owner is None or owner == patient_id:
+            return True
+    return False
+
+
 @router.post("/sessions")
 async def start_session(body: SessionIn | None = None,
                         principal: security.Principal = Depends(security.require_principal)) -> dict[str, Any]:
@@ -61,6 +74,8 @@ async def start_session(body: SessionIn | None = None,
         current = state.sessions.current
         if current is not None and current.patient_id != body.patient_id:
             raise HTTPException(status_code=409, detail="another patient's session is running")
+        if _incident_blocks(state, body.patient_id):
+            raise HTTPException(status_code=409, detail="an incident is open; your care team is checking in")
     registry = state.sessions
     if registry.current is not None:
         await registry.stop(registry.current.session_id)
