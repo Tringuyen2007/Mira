@@ -70,10 +70,10 @@ Send one every ~2 s while the person is down. `moving` (bool) and `posture` driv
 hears ("Maya is still not moving", "she is sitting up now"); `still_s` is seconds without movement.
 
 ```json
-{"type": "gesture", "name": "thumbs_up", "session_id": "<sid>", "t": 1791729390.1}
+{"type": "gesture", "name": "raised_hand", "session_id": "<sid>", "t": 1791729390.1}
 ```
 
-`name` is `thumbs_up` or `raised_hand`. This is the patient's answer to the check-in.
+`name` is `raised_hand` (`thumbs_up` is still accepted, but Mira no longer asks for it). This is the patient's answer to the check-in.
 
 ```json
 {"type": "hr", "bpm": 111, "session_id": "<sid>", "t": 1791729383.4}

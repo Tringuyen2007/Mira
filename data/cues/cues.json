@@ -229,7 +229,7 @@
  ],
  "greeting_generic": [
   {
-   "text": "Hi there! Thumbs up when you're ready.",
+   "text": "Hi there! Raise your hand when you're ready.",
    "file": "greeting_generic_1.mp3"
   },
   {
@@ -237,13 +237,13 @@
    "file": "greeting_generic_2.mp3"
   },
   {
-   "text": "Welcome back! Thumbs up to begin.",
+   "text": "Welcome back! Raise your hand to begin.",
    "file": "greeting_generic_3.mp3"
   }
  ],
  "check_in": [
   {
-   "text": "Are you okay? Give me a thumbs up or raise your hand.",
+   "text": "Are you okay? Raise your hand to let me know.",
    "file": "check_in_1.mp3"
   }
  ],
@@ -251,6 +251,12 @@
   {
    "text": "Thanks for letting me know you're okay.",
    "file": "im_ok_thanks_1.mp3"
+  }
+ ],
+ "instructions": [
+  {
+   "text": "Stand back so I can see you from head to toe. When you're ready, raise your hand and we'll begin.",
+   "file": "instructions_1.mp3"
   }
  ],
  "raise_hand": [

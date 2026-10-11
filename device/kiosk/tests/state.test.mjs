@@ -22,7 +22,7 @@ test("idle before anything happens", () => {
 test("greeting after arrived, gesture after awaiting_gesture, countdown wins", () => {
   let s = run([open, live(), ev({ type: "arrived" })]);
   assert.equal(view(s, 1000).screen, "greeting");
-  s = reduce(s, ev({ type: "awaiting_gesture", gesture: "thumbs_up" }), 1000);
+  s = reduce(s, ev({ type: "awaiting_gesture", gesture: "raised_hand" }), 1000);
   assert.equal(view(s, 1000).screen, "gesture");
   s = reduce(s, live({ phase: "countdown", countdown: 3 }), 1000);
   const v = view(s, 1000);

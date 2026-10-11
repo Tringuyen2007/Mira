@@ -58,7 +58,7 @@ async def run_bridge() -> AsyncIterator[Callable[..., Any]]:
 
 async def test_mock_produces_contract_frames_and_events(run_bridge: Callable[..., Any]) -> None:
     bridge, got = await run_bridge(source="mock", speed=15)
-    # reps end at 10, 13, 16, 19, 22 s (3 s arrival + 4 s awaiting the mock's thumbs-up, then every 3 s)
+    # reps end at 10, 13, 16, 19, 22 s (3 s arrival + 4 s awaiting the mock's raised hand, then every 3 s)
     await wait_until(lambda: len(got.of_type("rep")) >= 5)
 
     frame = got.frames[-1]
@@ -127,10 +127,10 @@ async def test_mock_fall_script(run_bridge: Callable[..., Any]) -> None:
     assert all(g == pytest.approx(2.0, abs=0.05) for g in gaps)
     assert statuses[0]["moving"] is False and statuses[0]["still_s"] == 2.0
 
-    # The mock's own "ready to start" thumbs-up fires earlier (MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
+    # The mock's own "ready to start" raised hand fires earlier (MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
     # arrival, well before this scripted fall at t=20); the incident response is the first "gesture" at/after the fall.
     gesture = next(e for e in got.of_type("gesture") if e["t"] >= fall["t"])
-    assert gesture["name"] == "thumbs_up" and gesture["t"] - fall["t"] == pytest.approx(6, abs=0.1)
+    assert gesture["name"] == "raised_hand" and gesture["t"] - fall["t"] == pytest.approx(6, abs=0.1)
     assert statuses[-1]["moving"] is True
     assert got.frames[-1]["com"][1] < 0.3, "frames show her on the floor"
     assert bridge.live.payload()["phase"] == "incident"
@@ -146,7 +146,7 @@ async def test_mock_fall_script(run_bridge: Callable[..., Any]) -> None:
 async def test_mock_fall_without_response_never_sends_gesture(run_bridge: Callable[..., Any]) -> None:
     _, got = await run_bridge(source="mock:fall", speed=40, responds_at_s=None)
     await wait_until(lambda: len(got.of_type("fall_status")) >= 10)
-    # The mock's own "ready to start" thumbs-up (before the fall, MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
+    # The mock's own "ready to start" raised hand (before the fall, MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
     # arrival) is expected; the point of this test is that no gesture answers the incident once it is underway.
     fall_t = got.of_type("fall")[0]["t"]
     assert not [g for g in got.of_type("gesture") if g["t"] >= fall_t]
@@ -362,8 +362,8 @@ async def test_mock_waits_for_a_gesture_before_the_countdown(run_bridge: Callabl
     await wait_until(lambda: len(got.of_type("countdown")) >= 1)
     order = [e["type"] for e in got.events if e["type"] in ("arrived", "awaiting_gesture", "gesture", "countdown")]
     assert order[:4] == ["arrived", "awaiting_gesture", "gesture", "countdown"]
-    assert got.of_type("awaiting_gesture")[0]["gesture"] == "thumbs_up"
-    assert got.of_type("gesture")[0]["name"] == "thumbs_up"
-    # The greeting stays on screen MOCK_GREETING_HOLD_S before the thumbs-up prompt.
+    assert got.of_type("awaiting_gesture")[0]["gesture"] == "raised_hand"
+    assert got.of_type("gesture")[0]["name"] == "raised_hand"
+    # The greeting stays on screen MOCK_GREETING_HOLD_S before the raise-hand prompt.
     held = got.of_type("awaiting_gesture")[0]["t"] - got.of_type("arrived")[0]["t"]
     assert held == pytest.approx(MOCK_GREETING_HOLD_S, abs=0.2)

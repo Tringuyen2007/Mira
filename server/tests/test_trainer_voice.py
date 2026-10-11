@@ -57,8 +57,62 @@ async def feed(tv: TrainerVoice, clock: Clock, *events: dict[str, Any], step_s: 
 
 async def test_gesture_prompt_and_go() -> None:
     tv, hub, clock = make()
-    await feed(tv, clock, ev("awaiting_gesture", gesture="thumbs_up"), ev("gesture", name="thumbs_up"))
-    assert said(hub) == ["raise_hand", "lets_go"]
+    await feed(tv, clock, ev("awaiting_gesture", gesture="raised_hand"), ev("gesture", name="raised_hand"))
+    assert said(hub) == ["instructions", "lets_go"]  # the instructions were still unsaid: they carry the prompt
+    assert tv._prompt_tasks == {}
+
+
+async def test_instructions_follow_the_greeting_then_raise_hand_after_a_while() -> None:
+    tv, hub, clock = make()
+    await feed(tv, clock, ev("arrived"), ev("greeting", text="Hi Maya!"), ev("awaiting_gesture"))
+    assert said(hub) == ["instructions"]  # spoken 2 s before awaiting_gesture: no raise_hand right after it
+    await feed(tv, clock, ev("gesture", name="raised_hand"))
+    tv2, hub2, clock2 = make()
+    await feed(tv2, clock2, ev("greeting", text="Hi Maya!"), step_s=11.0)
+    await feed(tv2, clock2, ev("awaiting_gesture"), ev("greeting", text="again"))
+    assert said(hub2) == ["instructions", "raise_hand"]  # once per session
+    await tv.close()
+    await tv2.close()
+
+
+async def test_instructions_fallback_without_greeting(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("server.agents.trainer_voice.INSTRUCTIONS_FALLBACK_S", 0.05)
+    tv, hub, clock = make()
+    await tv.on_event(ev("arrived"))
+    await asyncio.sleep(0.1)
+    assert said(hub) == ["instructions"]
+    tv2, hub2, _ = make()
+    await tv2.on_event(ev("arrived"))
+    await tv2.on_event(ev("countdown", n=3))  # the session moved on before the fallback: stay quiet
+    await asyncio.sleep(0.1)
+    assert said(hub2) == ["countdown_3"]
+    await tv.close()
+    await tv2.close()
+
+
+async def test_raise_hand_repeats_until_the_gesture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("server.agents.trainer_voice.RAISE_HAND_REPEAT_S", 0.05)
+    monkeypatch.setattr("server.agents.trainer_voice.DEDUPE_WINDOW_S", 0.0)
+    tv, hub, clock = make()
+    await tv.on_event(ev("awaiting_gesture"))
+    await asyncio.sleep(0.13)
+    assert said(hub) == ["instructions", "raise_hand", "raise_hand"]
+    await tv.on_event(ev("gesture", name="raised_hand"))
+    await asyncio.sleep(0.1)
+    assert said(hub)[-1] == "lets_go" and said(hub).count("raise_hand") == 2
+    await tv.close()
+
+
+@pytest.mark.parametrize("ender", [ev("paused"), ev("stopped"), ev("fall", stage="confirmed")])
+async def test_raise_hand_reminders_stop_on_pause_stop_or_incident(monkeypatch: pytest.MonkeyPatch,
+                                                                    ender: dict[str, Any]) -> None:
+    monkeypatch.setattr("server.agents.trainer_voice.RAISE_HAND_REPEAT_S", 0.05)
+    tv, hub, clock = make()
+    await tv.on_event(ev("awaiting_gesture"))
+    await tv.on_event(ender)
+    await asyncio.sleep(0.12)
+    assert "raise_hand" not in said(hub) and tv._prompt_tasks == {}
+    await tv.close()
 
 
 async def test_countdown_three_two_one_only() -> None:
@@ -138,7 +192,7 @@ async def test_incident_hold_only_call_flow_lines() -> None:
 @pytest.mark.parametrize("opener", [ev("fall", stage="confirmed"), ev("alert", step="detected", alert_id="a2")])
 async def test_fall_and_alert_detected_open_the_hold(opener: dict[str, Any]) -> None:
     tv, hub, clock = make()
-    await feed(tv, clock, opener, ev("gesture", name="thumbs_up"), ev("alert", step="call_failed", alert_id="a2"))
+    await feed(tv, clock, opener, ev("gesture", name="raised_hand"), ev("alert", step="call_failed", alert_id="a2"))
     assert said(hub) == ["call_failed"]
 
 
@@ -189,7 +243,7 @@ async def test_observer_schedules_agent_events_and_ignores_say() -> None:
 
 async def test_unknown_pick_emits_nothing() -> None:
     tv, hub, clock = make(pick=lambda _id: None)
-    await feed(tv, clock, ev("gesture", name="thumbs_up"), ev("rep", index=1, quality="good"))
+    await feed(tv, clock, ev("gesture", name="raised_hand"), ev("rep", index=1, quality="good"))
     assert hub.emitted == []
 
 
@@ -247,3 +301,4 @@ async def test_arrived_for_a_new_session_drops_other_sessions() -> None:
     assert set(tv._reps_target) <= {"s_02"} and tv._incident == set() and tv._call_lines_said == {}
     assert {k[0] for k in tv._last_said} == {"s_02"}
     assert said(hub)[-1] == "count_1"
+    await tv.close()

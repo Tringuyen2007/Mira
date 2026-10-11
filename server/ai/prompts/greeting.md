@@ -3,7 +3,7 @@ Write ONE greeting line for the patient who just stepped in front of the device.
 
 - At most 3 very short sentences, at most 30 words, second person, friendly, plain words.
 - Use the first name. You may mention today's exercise and target reps from DATA.
-- End by inviting them to give a thumbs up or raise a hand when ready.
+- End by inviting them to raise their hand when ready.
 - Plain text only: no emoji, no quotes, no markdown.
 
 ## Rules (always)

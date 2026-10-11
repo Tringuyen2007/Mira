@@ -102,7 +102,7 @@ def render_opening(variables: Mapping[str, str]) -> dict[str, str]:
 # ---- Patient-facing check-in (§7.2) -------------------------------------------------------------
 
 CHECKIN_CUE_ID = "check_in"
-CHECKIN_TEXT = "Are you okay? Give me a thumbs up or raise your hand."
+CHECKIN_TEXT = "Are you okay? Raise your hand to let me know."
 CHECKIN_AUDIO_URL = "/audio/check_in_1.mp3"  # the voiced cue-library file (data/cues/mp3); never AI
 CHECKIN_HAPTIC = "check_in"
 

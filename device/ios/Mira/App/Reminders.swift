@@ -33,7 +33,7 @@ enum Reminders {
 
         let content = UNMutableNotificationContent()
         content.title = "Time for your Mira session"
-        content.body = "Your plan is ready. Step on the mat and give Mira a thumbs up."
+        content.body = "Your plan is ready. Step on the mat and raise your hand to Mira."
         content.sound = .default
 
         for weekday in prefs.reminderDays {

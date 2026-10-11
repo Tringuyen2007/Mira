@@ -17,7 +17,7 @@ final class NetworkingTests: XCTestCase {
         let events = [
             #"{"type":"arrived","patient_id":"maya"}"#,
             #"{"type":"greeting","text":"Hello","audio_url":"/audio/a1.mp3"}"#,
-            #"{"type":"awaiting_gesture","gesture":"thumbs_up"}"#,
+            #"{"type":"awaiting_gesture","gesture":"raised_hand"}"#,
             #"{"type":"gesture","name":"crossed_arms"}"#,
             #"{"type":"countdown","n":3}"#,
             #"{"type":"cue","id":"balance","text":"Even out your weight","audio_url":"/audio/balance.mp3"}"#,
