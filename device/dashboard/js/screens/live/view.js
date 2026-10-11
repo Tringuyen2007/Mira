@@ -6,7 +6,7 @@ import { icon } from "../../ui/icons.js";
 
 const QUICK_CUES = ["Even out your weight", "Knees over your toes", "Take a rest", "Great work"];
 
-export function renderHead({ onReplay, onLeave }) {
+export function renderHead({ onReplay, onLeave, onCall = null }) {
   const metaEl = h("p", { class: "meta patient__meta" });
   const titleEl = h("h1", { class: "page-title" }, "Live session");
   const subtitleEl = h("p", { class: "meta live__subtitle" });
@@ -16,10 +16,38 @@ export function renderHead({ onReplay, onLeave }) {
   const modeTabs = h("div", { class: "pill-tabs live__mode", role: "tablist", "aria-label": "Live or replay" },
     liveBtn, replayBtn);
   const leaveBtn = h("button", { class: "btn btn--secondary", type: "button", onclick: onLeave }, "Leave session");
+  // "Call contact": Mira phones the patient's emergency contact with the therapist's note and the live context.
+  // Only when the server has /live/call (caps). One inline panel, no browser dialogs.
+  let callPanel = null, callStatusEl = null, callNoteEl = null;
+  const actions = [modeTabs];
+  if (onCall) {
+    callStatusEl = h("p", { class: "meta live__call-status", "aria-live": "polite" });
+    callNoteEl = h("input", { type: "text", class: "live__call-note", maxlength: "300",
+      placeholder: "What should Mira tell them? (optional)" });
+    const placeBtn = h("button", { class: "btn btn--primary", type: "button" }, "Place call");
+    const cancelBtn = h("button", { class: "btn btn--secondary", type: "button" }, "Cancel");
+    callPanel = h("div", { class: "live__call-panel", hidden: "" }, callNoteEl, placeBtn, cancelBtn, callStatusEl);
+    const callBtn = h("button", { class: "btn btn--secondary live__call-btn", type: "button" }, "Call contact");
+    callBtn.onclick = () => { callPanel.hidden = !callPanel.hidden; if (!callPanel.hidden) callNoteEl.focus(); };
+    cancelBtn.onclick = () => { callPanel.hidden = true; };
+    placeBtn.onclick = async () => {
+      placeBtn.disabled = true; callStatusEl.textContent = "Calling…";
+      try {
+        const res = await onCall(callNoteEl.value.trim() || null);
+        callStatusEl.textContent = res && res.mode === "log_only"
+          ? "Logged only: calls are disabled on this server." : "Mira is calling now.";
+      } catch (err) {
+        callStatusEl.textContent = (err && err.detail) || (err && err.message) || "Call failed.";
+      } finally { placeBtn.disabled = false; }
+    };
+    actions.push(callBtn);
+  }
+  actions.push(leaveBtn);
   const el = h("div", { class: "page-head live__head" },
     h("div", {}, metaEl, titleEl, subtitleEl),
-    h("div", { class: "live__head-actions" }, modeTabs, leaveBtn));
-  return { el, metaEl, titleEl, subtitleEl };
+    h("div", { class: "live__head-actions" }, ...actions),
+    ...(callPanel ? [callPanel] : []));
+  return { el, metaEl, titleEl, subtitleEl, callPanel };
 }
 
 export function renderRoomCard() {

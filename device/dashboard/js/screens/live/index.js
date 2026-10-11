@@ -78,9 +78,11 @@ export const screen = {
     let patient = null;
 
     function mountLiveUi() {
+      const canCall = Boolean(ctx.caps && ctx.caps.has && ctx.caps.has("/live/call"));
       headRefs = renderHead({
         onReplay: () => ctx.navigate(href("patient", { pid })),
         onLeave: () => ctx.navigate(href("patient", { pid })),
+        onCall: canCall ? (note) => ctx.api.callLive(pid, "contact", note) : null,
       });
       roomRefs = renderRoomCard();
       const canSay = Boolean(ctx.caps && ctx.caps.has && ctx.caps.has(SAY_CAP));
