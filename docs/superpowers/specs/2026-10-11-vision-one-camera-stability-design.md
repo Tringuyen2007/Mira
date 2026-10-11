@@ -178,3 +178,36 @@ Also:
 
 - The context doc says B is 0.83 m high. Calibrations from `055039` on put it at ~1.2–1.25 m. Update the
   doc with this work.
+
+## Addendum: what testing the plan's code changed (2026-10-11)
+
+Found while running the plan's code on the three recordings. Decision 1 needs Eric's OK; the rest are
+facts or follow from the spec.
+
+1. **Lag (needs a decision).** Measured to 0.05 frame, the change adds +0.30 / +0.10 / +0.05 frames of hip
+   lag (`060807` / `054226` / `055039`): at most 10 ms. "0 frames behind base" can't be met in whole frames
+   at this resolution. **Proposed criterion: no more than 0.35 frame (~12 ms) behind base.** The cost buys
+   `060807`'s still target: with `GATE_POWER` 0.5 instead of 0.75, lag is +0.1 frame but still p90 stays
+   ~0.63 cm, over the 0.6 target.
+2. **Lag is measured against B's own 2D hip height,** not against a reference run (`--against` is dropped).
+   It's the camera's direct measurement, it needs no second run, and base is measured with the same tool.
+3. **Floating.** Base floated in only 3 / 0 / 12 frames because the anchor pinned the feet to the
+   floor-placed body, whose lowest foot point is on the floor by construction. Without the anchor's pull, the
+   feet floated in 90 frames of `060807`:
+   - around 10–11 s, the entered height disagreeing with the calibration (see 6);
+   - at 37–39 s, the person facing away from B at the back of the mat.
+
+   **Fix:** one-camera floor contact `CONTACT_PX_PER_M` 300 → 600. Floating is now 0 in all three sessions.
+4. **Tuned values:** `GATE_POWER` 0.75 and `GATE_ROOT_MIN` 0.3 (`GATE_MIN_GAIN` unchanged at 0.08).
+   `SINGLE_TEMPORAL_PX` = 8 is new and applies to the angles only. When it covered the position too, walking
+   toward B lagged 9.5 cm, failing the 8 cm walking test. One Euro cutoffs are unchanged.
+5. **`stability_eval` never saves `--height-cm`.** Unlike `debug_view` / `checks`, it's an analysis tool.
+6. **New open issue: the calibrations disagree on scale.** Measured from the picture with the feet on the
+   floor, the same person is 1.77 m tall in `060807` and 1.45–1.47 m in `054226` / `055039`. One entered
+   height can't match both. With the height set to what each calibration implies, every number improves
+   further (`055039` at 147 cm: moving p90 2.2 cm, 2D match 5.7 px). This looks like a zoom/pose calibration
+   problem (`060807` sees only the two near markers) and is the next thing to look at.
+7. **Time to first fit is longer.** Waiting for standing frames lowers the fitted share by 1–4 points per
+   session (97 → 93% on `060807`). The floor-placed body and the "stand straight" hint are shown meanwhile.
+8. **The floor-contact test is a guard,** not seen failing first. "A held body keeps its feet on the floor"
+   already passes on base.
