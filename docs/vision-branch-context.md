@@ -1,7 +1,7 @@
 # Context for branch `vision/cameras-to-3d`
 
 Read this first in a new session. It summarises what this branch is for, where it stands, the decisions
-behind it and what is open. Owner: Eric (vision lead for Mira). Last updated 2026-10-11.
+behind it and what is open. Owner: Eric (vision lead for Mira). Last updated 2026-10-11 (after the steadier one-camera body).
 
 ## What the branch is for
 
@@ -16,32 +16,56 @@ balance / on-mat / falls.
 ## Where it stands now (one camera)
 
 - **The rig uses ONE webcam: camera B** (Logitech, ~48° × 28° at 1280×720), front-diagonal (~45°) to the
-  mat, ~4 m from the mat centre, currently 0.83 m high. Camera A was dropped (see history).
+  mat, ~4 m from the mat centre, ~1.2–1.25 m high in the calibrations from `055039` on (0.83 m before).
+  Camera A was dropped (see history).
 - **3D from one camera**:
   1. Rays through the planted foot meet the calibrated floor: position and scale (`vision/mono.py`,
      `select.floor_feet` trusts the foot nearer the camera, since a lifted foot's ray lands far away).
   2. MediaPipe's world landmarks give shape and depth, rotated into the mat frame. Their lean toward the
      camera is removed by `mono.upright_rotation`: learned from upright frames, at least 15 of them, capped
      at 20°.
+  The body (bone lengths, scale, lean) is measured from the first 40 frames that pass `mono.is_standing`
+  (knees > 150°, trunk over the legs). Until then `FrameResult.body` is `"measuring"` (with
+  `body_progress`), the floor-placed body is shown and the debug view says "stand straight to measure";
+  then `"ready"`. Two-camera triangulation is always `"ready"`. The app should prompt while measuring and
+  not count reps or judge form until ready.
   3. A body model with measured proportions (`vision/tracker.py`, 32 pose parameters, robust LM solver,
      ~5 ms/frame) is fitted to B's 2D points, with a world-shape prior, floor contact, joint limits and
      smoothing.
-  4. **2D-motion gate** (one camera only): a pose parameter only changes as fast as its landmarks move in
-     B's picture. Still in 2D means still in 3D. The root position still passes a lasting change above
-     6 cm (walking toward/away from B).
+  4. **2D-motion gate** (one camera only), inside the solve (`ModelTracker._hold`): each pose number's
+     smooth-motion cost is multiplied by `gain ** -0.75`, where the gain is its landmarks' 2D motion / 8 px
+     (0.08–1; the position never below 0.3, so walking toward B is followed). Angles cost more to move
+     (`SINGLE_TEMPORAL_PX` 8 vs 3) and the floor contact is 600 px/m. Being part of the fit, the hold never
+     lifts a planted foot or breaks the chain.
+  5. **Planted feet are shown only** with one camera: `FootAnchor` reports `feet_locked` on the fitted body
+     and moves nothing (anchors from the floor-placed body pulled the fit and made it jump).
 - **Height** sets the scale: `config/person.yaml` (`height_cm: 170.0`), set with `--height-cm` on
   `debug_view`/`checks`. A 3% error shifts the body ~6 cm in depth.
 - `Pipeline(cams, tracker="auto")`: model tracker with one calibrated camera, triangulation with two.
-- **Measured (B-only replays):**
-  - position vs two-camera triangulation: 5–6 cm median;
+- **Measured** (`python -m vision.stability_eval … --height-cm 170`, base → now):
+
+  | Session | Still p90 (cm) | Moving p90 (cm) | Jumps > 8 cm | Ankle p99 (cm) | Floating | 2D match (px) |
+  |---|---|---|---|---|---|---|
+  | `060807` | 1.70 → 0.56 | 3.54 → 2.32 | 128 → 54 | 10.0 → 6.6 | 3 → 0 | 8.2 → 7.1 |
+  | `054226` | n/a | 7.40 → 2.90 | 125 → 18 | 16.0 → 4.8 | 0 → 0 | 10.5 → 9.1 |
+  | `055039` | 9.09 → 0.79 | 14.35 → 2.31 | 482 → 45 | 55.1 → 3.9 | 12 → 0 | 18.8 → 9.2 |
+
+  - restarts 25 → 0 on `055039`;
+  - lag +0.05 to +0.3 frame (≤ 10 ms; accepted by Eric);
+  - fit ~6 ms;
+  - deepest knee on `055039` now 71° (was 39°, measured with a wrong scale; no ground truth);
   - bones fixed (0 mm);
-  - still jitter: 0.75 / 3.1 cm (median / p90) on `20261011-054226`, 0.40 / 1.5 cm on `022822`;
-  - walking toward B lags about 5–6 cm;
-  - knees read ~3–12° more bent than MediaPipe's own (side effect of the lean correction).
-- **Biggest remaining limit:** camera B is low (0.83 m) and far. It looks down at the feet at only 12°,
+  - earlier numbers: position vs two-camera triangulation 5–6 cm median; walking toward B lags about
+    5–6 cm.
+- **Calibrations disagree on scale (next to look at):** measured from the picture with the feet on the
+  floor, the same person is 1.77 m tall in `060807` and 1.45–1.47 m in `054226` / `055039`. One entered
+  height can't match both. With the height each calibration implies, everything improves further
+  (`055039` at 147 cm: moving p90 2.2 cm, 2D match 5.7 px). Likely zoom/pose calibration; `060807` sees
+  only the two near markers.
+- **Remaining limit:** camera B is low and far (was 0.83 m when this was measured). It looks down at the feet at only 12°,
   so feet-on-floor depth wobbles >6 cm in some frames. **Next physical step: raise B to ~1.6–2 m, tilt it
   down, re-run `calib_extrinsics` seeing a far marker.** Not done yet.
-- 236 tests pass (`.venv/bin/python -m pytest -q`). Nothing merged or pushed; the branch is 90+ commits
+- 245 tests pass (`.venv/bin/python -m pytest -q`). Nothing merged or pushed; the branch is 90+ commits
   ahead of `main`.
 
 ## How to run (repo root, `source .venv/bin/activate`)
@@ -55,6 +79,7 @@ python -m vision.checks [--height-cm 170]     # one-camera check set (fit, jitte
 python -m vision.mono_eval <f>... --height-cm 165   # B-only replay of two-camera recordings vs triangulation
 python -m vision.tracker_eval <f>...          # model tracker vs triangulation (two-camera recordings)
 python -m vision.avatar_eval <f>...           # avatar body-rule metrics
+python -m vision.stability_eval <f>... [--height-cm 170]  # one-camera steadiness (still, spikes, floating, lag)
 ```
 
 The agent shell has no camera permission, so live tools must be run by Eric in his terminal.

@@ -181,10 +181,10 @@ Also:
 
 ## Addendum: what testing the plan's code changed (2026-10-11)
 
-Found while running the plan's code on the three recordings. Decision 1 needs Eric's OK; the rest are
-facts or follow from the spec.
+Found while running the plan's code on the three recordings. Eric accepted decision 1; the rest are facts
+or follow from the spec.
 
-1. **Lag (needs a decision).** Measured to 0.05 frame, the change adds +0.30 / +0.10 / +0.05 frames of hip
+1. **Lag (accepted by Eric, 2026-10-11: fine as long as it isn't noticeable).** Measured to 0.05 frame, the change adds +0.30 / +0.10 / +0.05 frames of hip
    lag (`060807` / `054226` / `055039`): at most 10 ms. "0 frames behind base" can't be met in whole frames
    at this resolution. **Proposed criterion: no more than 0.35 frame (~12 ms) behind base.** The cost buys
    `060807`'s still target: with `GATE_POWER` 0.5 instead of 0.75, lag is +0.1 frame but still p90 stays
