@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field, field_validator
@@ -46,6 +46,63 @@ async def live_media() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="live camera video unavailable")
     return {"session_id": session.session_id,
             "whep_url": cfg.MIRA_WHEP_URL.replace("{session_id}", session.session_id)}
+
+
+class LiveCallIn(BaseModel):
+    patient_id: str = Field(pattern=ID_RE, max_length=64)
+    therapist_id: str = Field(pattern=ID_RE, max_length=64)
+    to: Literal["contact", "patient"] = "contact"
+    note: str | None = Field(default=None, max_length=300)
+
+
+def _live_context(live: Any, first_name: str) -> str:
+    """One spoken sentence about the session right now, from the /ws/live snapshot."""
+    parts = [f"{first_name} is in a session with Mira right now"]
+    if live.exercise_name:
+        parts.append(f"doing {live.exercise_name.lower()}")
+    if live.set and live.sets_target:
+        parts.append(f"set {live.set} of {live.sets_target}")
+    if isinstance(live.rep, int) and live.rep:
+        parts.append(f"rep {live.rep}")
+    flags = [f for f in (live.flags or []) if f != "measuring"]
+    if flags:
+        parts.append("form notes: " + ", ".join(str(f).replace("_", " ") for f in flags[:3]))
+    if live.incident:
+        parts.append("a safety check-in is open")
+    return ", ".join(parts) + "."
+
+
+@router.post("/live/call")
+async def live_call(body: LiveCallIn, db: Database = Depends(require_db)) -> dict[str, Any]:
+    """Therapist's "Call" button on the Live screen: Mira phones the patient's emergency contact (or the demo
+    patient phone) and relays the therapist's note plus the live context. Dashboard-token protected. Real calls
+    need CALLS_DISABLED=0 (`/health` calls = live); otherwise the log-only simulator answers."""
+    from server.config import cfg
+
+    state = get_state()
+    row = await queries.patient_me_row(db, body.patient_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="patient not found")
+    number = row["emergency_contact_phone"] if body.to == "contact" else cfg.DEMO_PATIENT_PHONE
+    if not number:
+        raise HTTPException(status_code=409, detail="no phone number on file for that choice")
+    notifier = state.notifier
+    place = getattr(notifier, "therapist_call", None) if notifier is not None else None
+    if place is None:
+        raise HTTPException(status_code=503, detail="calling is not available on this server")
+    first = (row["name"] or "the patient").split()[0]
+    therapist = row["therapist_name"] or body.therapist_id
+    context = _live_context(state.bridge.live, first)
+    call_id = await place(number, patient_first_name=first,
+                          contact_name=row["emergency_contact_name"] if body.to == "contact" else first,
+                          therapist_name=therapist, note=body.note, context=context)
+    if call_id is None:
+        raise HTTPException(status_code=429, detail="a call to that number was placed in the last 5 minutes")
+    state.hub.emit("say", {"session_id": state.sessions.current.session_id if state.sessions.current else None,
+                           "t": round(datetime.now(UTC).timestamp(), 3), "id": "therapist_call",
+                           "text": f"{therapist} asked me to call {'your contact' if body.to == 'contact' else 'you'}.",
+                           "audio_url": None})
+    return {"call_id": call_id, "mode": getattr(notifier, "mode", "unknown"), "to": body.to, "context": context}
 
 
 def _signals(row: dict[str, Any], live_now: bool) -> Signals:

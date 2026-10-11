@@ -27,6 +27,8 @@ log = get_logger("retell")
 CONTACT = "emergency_contact"
 THERAPIST = "therapist"
 TEST = "test"
+THERAPIST_REQUEST = "therapist_request"  # a call the therapist asked for from the live dashboard
+THERAPIST_REQUEST_EVERY_S = 300
 RETRY_DELAYS_S = (0.0, 2.0, 5.0)
 POLL_INTERVAL_S = 3.0
 MAX_POLLS = 80  # ~4 min at 3 s
@@ -227,6 +229,52 @@ class RetellNotifier:
                                                                          "error": repr(exc)})
                 continue
             log.warning("Retell test call placed", extra={**extra, "call_id": call_id})
+            return call_id
+        return None
+
+    async def therapist_call(self, to_number: str, *, patient_first_name: str | None, contact_name: str | None,
+                             therapist_name: str, note: str | None, context: str) -> str | None:
+        """Place one call the therapist asked for from the live dashboard ("Call contact"): Mira explains that the
+        therapist asked her to call, relays the therapist's note and the live session context. Same create path
+        and agent as an escalation. At most one per number per 5 minutes. Returns the call id or None."""
+        name = patient_first_name or "the patient"
+        bucket = int(time.time() // THERAPIST_REQUEST_EVERY_S)
+        alert_id = f"ask_{bucket}_{''.join(ch for ch in to_number if ch.isdigit())[-10:]}"
+        if not self.ledger.may_call(alert_id, THERAPIST_REQUEST):
+            log.warning("therapist call refused: one per number per 5 min", extra={"to": mask_phone(to_number)})
+            return None
+        self.ledger.record(alert_id, THERAPIST_REQUEST)
+        said = (note or "").strip()
+        situation = (f"{therapist_name} asked me to call you about {name}'s exercise session right now. "
+                     + (f"{therapist_name} says: {said} " if said else "") + "This is not an emergency.")
+        variables = {
+            "contact_name": contact_name or "there",
+            "patient_first_name": name,
+            "patient_phone": f"the number you have for {name}",
+            "situation": situation,
+            "situation_short": f"{therapist_name} asked Mira to call about {name}'s session. Not an emergency.",
+            "current_status": context or f"{name} is in a session with Mira right now.",
+            "context": "This call was started by the therapist from the Mira live dashboard.",
+            "limits": "Mira is relaying the therapist's message; she is not reporting a fall or an emergency.",
+            "therapist_name": therapist_name,
+            "therapist_phone": cfg.DEMO_THERAPIST_PHONE or "not available",
+        }
+        extra = {"alert_id": alert_id, "role": THERAPIST_REQUEST, "to": mask_phone(to_number)}
+        if self.mode == "log_only":
+            call_id = f"sim_{alert_id}"
+            log.warning("CALLS_DISABLED: simulating therapist-requested Retell call (no real call placed)",
+                        extra={**extra, "call_id": call_id, "retell_llm_dynamic_variables": variables})
+            return call_id
+        for attempt, delay in enumerate(self.retry_delays_s):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                call_id = await asyncio.to_thread(self._create_call, alert_id, THERAPIST_REQUEST, to_number, variables, "")
+            except Exception as exc:  # noqa: BLE001 - must never raise into the API
+                log.warning("therapist call create_phone_call failed", extra={**extra, "attempt": attempt,
+                                                                              "error": repr(exc)})
+                continue
+            log.warning("Retell therapist-requested call placed", extra={**extra, "call_id": call_id})
             return call_id
         return None
 
