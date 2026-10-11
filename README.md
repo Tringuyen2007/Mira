@@ -679,6 +679,61 @@ someone last edited in the dashboard). It prints `RETELL_AGENT_ID` and `RETELL_A
 both as `override_agent_id` / `override_agent_version`. The LLM also has an `end_call` tool so the agent
 can hang up once the contact has said what they will do.
 
+## Apple Watch companion
+
+Plan 4 adds a real watchOS target, `MiraWatch` (bundle `com.mira.app.watchkitapp`, embedded in the `Mira`
+iPhone app as "Embed Watch Content"), alongside the design-review mock in `device/watch/` (unchanged — see
+[Watch mockup](device/watch/README.md)). The watch talks to the iPhone over `WatchConnectivity`; the phone
+relays everything onto the normal `/ws/events` socket, so the server never knows the difference between a
+phone tap and a watch tap.
+
+**Relay path:** watch → iPhone (`WCSession`) → `/ws/events` → server, and back: server → `/ws/events` →
+iPhone → watch (`updateApplicationContext`/`sendMessage`). The shared wire codec is
+`device/ios/Mira/Net/WatchWire.swift` (`WatchWire.encode`/`decodeToWatch`/`decodeToPhone`, dictionary ⇄ typed
+messages, JSON-safe scalars only); the iPhone-side relay is `device/ios/Mira/Watch/WatchBridge.swift`
+(`WCSessionDelegate`), driving and driven by `LiveSessionStore`. `AppState.watchPaired` (`watch.isPaired &&
+watch.isWatchAppInstalled`) gates the "Apple Watch tap" toggle in Settings.
+
+**`watch_button` mapping** (server, `server/main.py::_on_client_event`, `WATCH_BUTTON_COMMANDS`): the watch's
+**Ready** tap and **Stop** (hold) arrive as `{"type": "watch_button", "name": "ready" | "stop"}` on
+`/ws/events` and are forwarded as session commands exactly like a phone tap — `ready → command start`,
+`stop → command stop` (`payload: {"source": "watch"}`) — and go through the same `_forward_session_command`
+path, so a Safety Guardian hold blocks a watch `ready` exactly like it blocks a phone `start`. The raw
+`watch_button` event is still broadcast to every connected client either way.
+
+**Haptic coaching** (`server/agents/haptics.py`, `HapticCoach`): subscribes to engine events and emits a
+`haptic` event only while a session is live. `HAPTIC_PATTERNS = ("good_rep", "fix_form", "set_done",
+"check_in")`:
+- `good_rep` — a `rep` event with `quality == "good"`.
+- `fix_form` — a `rep` event with any other quality.
+- `set_done` — a `set_done` event.
+- `check_in` — emitted directly by the Safety Guardian (`templates.CHECKIN_HAPTIC`), not by `HapticCoach`,
+  to avoid a duplicate emit.
+
+`haptic` stays off the LCD kiosk's event allow-list (patients and the dashboard only).
+
+**Heart rate** (`server/db/writes.py::insert_heart_rate`, `server/db/persist.py::SessionPersistence._on_hr`):
+an `hr` event with a numeric `bpm` is now persisted to the `heart_rate` table, throttled to at most one row
+per second per session (`_last_hr_at`).
+
+**What works on the simulator vs. a physical watch:** pairing, Ready/Stop, haptics, live rep/set counts and
+the exercise name all work on a paired Apple Watch *simulator* — nothing there depends on real hardware.
+Heart rate does not: `HKWorkoutSession`/`HKLiveWorkoutBuilder` only deliver live samples from a physical
+Apple Watch being worn. On the simulator the heart-rate field shows "—" (or the status string
+`WorkoutHeartRate` reports when `!HKHealthStore.isHealthDataAvailable()`); on a real watch it streams into
+`WatchSessionModel` and is relayed to the phone as `heartRate` and on to `/ws/events` as `hr`.
+
+**Build and run:**
+1. Open `device/ios/Mira.xcodeproj` (or the `device/Mira.xcworkspace` that also has the mocks) in Xcode.
+2. Select the **MiraWatch** scheme for the watch app standalone, or the **Mira** scheme (which embeds
+   `MiraWatch.app`) to run the iPhone app with the watch companion attached.
+3. Pick an iPhone simulator and a paired Apple Watch simulator. To pair simulators: Xcode →
+   **Window ▸ Devices and Simulators**, or `xcrun simctl pair <watch-udid> <phone-udid>` — see
+   `device/ios/MiraWatch/` for the watch app's own sources once pairing is set up.
+4. Run Tri's server (above, "Try it") and pair the phone as usual (README "Patient identity (phone)"). Once
+   the phone is paired and a session is live, the watch mirrors reps/set/exercise and plays the matching
+   haptic on `good_rep`/`fix_form`/`set_done`/`check_in`.
+
 ## Dashboard notifications
 
 One backend turns alerts, call progress, Insight notes, Copilot proposals, milestones, Coach

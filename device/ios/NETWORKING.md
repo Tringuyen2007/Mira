@@ -255,6 +255,48 @@ IP — no TLS was set up for the hackathon, and `NSAllowsLocalNetworking` alone 
 a public one. This is a deliberate, documented exception, not an oversight: **remove it once the server gets
 HTTPS**, at which point `wss://`/`https://` addresses work without any ATS exception at all.
 
+## Apple Watch companion (WatchConnectivity relay)
+
+The `MiraWatch` watchOS target (Plan 4) never talks to the server directly — it only talks to the iPhone
+app over `WatchConnectivity`, and the iPhone relays that traffic onto the sockets described above. There is
+no new server endpoint and no new auth scope for the watch; from the server's point of view a watch tap or
+heart-rate sample is indistinguishable from one the phone sent itself.
+
+- **Codec:** `Mira/Net/WatchWire.swift` is pure Foundation, built into both the `Mira` and `MiraWatch`
+  targets, and covered by `Tests/WatchWireTests.swift` under plain `swift test` (the watch target itself
+  isn't exercised by `swift test`, only this shared codec). It converts between `[String: Any]` dictionaries
+  (what `WCSession.updateApplicationContext`/`sendMessage` take directly — no `Data`/JSON step) and two typed
+  enums: `ToWatch` (`snapshot`, `haptic(pattern:)`, `summary`) and `ToPhone` (`heartRate(bpm:t:)`,
+  `button(name:)`, `status(workoutActive:)`). Every case round-trips through `encode`/`decodeToWatch` or
+  `decodeToPhone`; an unrecognized `"type"`, a missing required field, or a non-JSON-safe value (e.g. a
+  nested dict where a `Double` is expected) decodes to `nil` on either side.
+- **iPhone-side relay:** `Mira/Watch/WatchBridge.swift` (`@MainActor @Observable final class WatchBridge:
+  NSObject, WCSessionDelegate`), excluded from the `MiraNetworking` SwiftPM package so it's free to import
+  `WatchConnectivity` (unavailable in the plain-macOS `swift test` build, which uses a same-shaped stub in
+  `AppState`). It exposes `isPaired`, `isWatchAppInstalled`, `isReachable`, `lastWatchHR`.
+  - **Phone → watch:** `push(_ live: LiveMessage?)` sends the live snapshot via `updateApplicationContext`
+    (delivered even while the watch app isn't foregrounded), throttled to at least 0.5 s between pushes and
+    skipped when the encoded snapshot hasn't changed. `forward(haptic:)` and `forward(summary:)` use
+    `sendMessage` instead — best-effort, silently dropped when the watch isn't reachable or the send errors,
+    since a missed haptic or summary isn't worth retrying.
+  - **Watch → phone:** incoming `didReceiveMessage` is decoded with `WatchWire.decodeToPhone`. `.heartRate`
+    updates `lastWatchHR` and calls `liveSession.send(.hr(HeartRateMessage(t:bpm:)))`; `.button(name)` calls
+    `liveSession.send(.watchButton(WatchButtonMessage(name:)))`. Both then flow into `/ws/events` exactly like
+    any other client-originated event (see `watch_button`/`hr` in the table above).
+  - `AppState.watch: WatchBridge` is created with the app's `LiveSessionStore` and activated at launch (a
+    no-op when `WCSession.isSupported()` is false, e.g. no Watch paired or an iPad); `AppState.watchPaired`
+    (`watch.isPaired && watch.isWatchAppInstalled`) gates the Settings "Apple Watch tap" toggle.
+- **The `haptic` event:** `{"type": "haptic", "pattern": "good_rep" | "fix_form" | "set_done" |
+  "check_in", "session_id", "t"}` on `/ws/events` (server → app, already listed in the events table above).
+  `LiveSessionStore` decodes it into `haptic: HapticMessage?` plus a `hapticSeq: Int` that increments on every
+  occurrence — including a repeated pattern — so `AppState` can forward each one to the watch even when two
+  consecutive patterns are identical (the watch just replays the same haptic rather than deduping). The watch
+  app maps each pattern to a `WKInterfaceDevice` haptic type (`good_rep → .success`, `fix_form → .retry`,
+  `set_done → .notification`, `check_in → .directionUp`).
+- **Not covered here:** `device/ios/MiraWatch/` (the watch app's own UI and `HKWorkoutSession` heart-rate
+  capture) — see the README "Apple Watch companion" section and, once written, `device/ios/MiraWatch/`'s own
+  sources.
+
 ## Open items
 
 - Session commands (`start/pause/skip/stop`) are forwarded to the engine over the
