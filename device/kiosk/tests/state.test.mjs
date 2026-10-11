@@ -317,3 +317,24 @@ test("the fall screen (with a call) wins over every screen but unpaired", () => 
   const s = run([open, live({ phase: "active" }), ...calling, { channel: "socket", msg: { status: "rejected" } }]);
   assert.equal(view(s, 1000).screen, "unpaired");
 });
+
+test("a live snapshot with no incident clears a stale call status (missed closed alert)", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }),
+    alert("call_ongoing", { message: "Emergency contact is on the call.", show_call_911: true }));
+  s = reduce(s, live({ phase: "active", incident: false }), 1000);
+  assert.equal(s.alertStep, null);
+  assert.equal(s.alertMessage, "");
+  assert.equal(s.show911, false);
+  s = reduce(s, ev({ type: "fall", stage: "confirmed" }), 1000);
+  const v = view(s, 1000);
+  assert.equal(v.screen, "fall");
+  assert.equal(v.callStatus, null);
+  assert.equal(v.show911, false);
+});
+
+test("a live snapshot during the incident keeps the call status", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }));
+  s = reduce(s, live({ phase: "incident", incident: true }), 1000);
+  assert.deepEqual(view(s, 1000).callStatus, { phase: "calling", message: "Calling." });
+  assert.equal(view(s, 1000).show911, true);
+});

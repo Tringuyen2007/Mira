@@ -67,7 +67,8 @@ export function reduce(state, input, now) {
     if (msg.phase === "countdown" || msg.phase === "active") next = { ...next, awaitingGesture: false };
     // The live snapshot is authoritative: once it reports no incident, the alert the kiosk showed early
     // (from a fall/check_in event, ahead of the next 10 Hz snapshot) is stale and must not stick.
-    if (msg.incident !== true && msg.phase !== "incident") next = { ...next, alertOpen: false };
+    // Its call status goes too, so a missed `closed` alert can't leave a stale line on the next fall.
+    if (msg.incident !== true && msg.phase !== "incident") next = { ...next, alertOpen: false, ...NO_ALERT };
     return next;
   }
   switch (msg.type) {
