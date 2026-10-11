@@ -13,7 +13,7 @@
 </head>
 <body>
 <!-- One 1024×600 stage, laid out with the absolute values of the Figma "LCD Hi-Fi" frames. -->
-<div id="stage" data-screen="idle" data-mood="idle" data-offline="false">
+<div id="stage" data-screen="none" data-mood="none" data-offline="false">
 
   <!-- Set Done "Completion bloom" (37:305) -->
   <div class="bloom" aria-hidden="true"></div>
@@ -123,13 +123,13 @@
     </div>
     <div id="balance" class="balance" data-ok="true">
       <div class="balance-labels">
-        <span class="balance-side">L</span>
+        <span class="balance-side">L&nbsp;</span>
         <span class="balance-status">
           <img class="balance-icon icon-ok" src="assets/icons/check.svg" alt="" width="22" height="22">
           <img class="balance-icon icon-warn" src="assets/icons/warning.svg" alt="" width="28" height="26">
           <span id="balance-status">EVEN WEIGHT</span>
         </span>
-        <span class="balance-side">R</span>
+        <span class="balance-side">R&nbsp;</span>
       </div>
       <div class="balance-track">
         <div class="balance-fill"></div>
@@ -191,7 +191,7 @@
   </section>
 
   <!-- Caption bar (24:127): what Mira is saying -->
-  <div id="caption-bar" class="caption-bar">
+  <div id="caption-bar" class="caption-bar" hidden>
     <div class="voice" aria-hidden="true"><img src="assets/icons/voice.svg" alt="" width="28" height="28"></div>
     <p id="caption-text" class="caption-text" aria-live="polite"></p>
   </div>

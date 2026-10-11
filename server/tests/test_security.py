@@ -217,6 +217,24 @@ def test_dashboard_served_and_ios_sources_not(make_client: Callable[..., TestCli
     assert client.get("/device/ios/App.swift").status_code == 404
 
 
+def test_kiosk_served_without_its_dev_preview_tests_or_readme(make_client: Callable[..., TestClient],
+                                                             monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from server import main
+
+    kiosk = tmp_path / "device" / "kiosk"
+    for rel, body in {"index.html": "<h1>kiosk</h1>", "dev/preview.html": "<h1>preview</h1>",
+                      "tests/state.test.mjs": "// test", "assets/README.md": "# notes"}.items():
+        (kiosk / rel).parent.mkdir(parents=True, exist_ok=True)
+        (kiosk / rel).write_text(body)
+    monkeypatch.setattr(main, "STATIC_PAGES", {"dashboard": tmp_path / "device" / "dashboard", "device": kiosk})
+    client = make_client()
+    resp = client.get("/device/")
+    assert resp.status_code == 200 and "kiosk" in resp.text
+    assert client.get("/device/dev/preview.html").status_code == 404
+    assert client.get("/device/tests/state.test.mjs").status_code == 404
+    assert client.get("/device/assets/README.md").status_code == 404
+
+
 def test_cors_allows_separately_hosted_dashboard_but_token_still_required(client: TestClient) -> None:
     origin = "http://localhost:5173"  # e.g. a Vite dev server
     pre = client.options("/patients", headers={"Origin": origin, "Access-Control-Request-Method": "GET",

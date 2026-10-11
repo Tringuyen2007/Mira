@@ -94,15 +94,15 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   background: radial-gradient(circle closest-side, rgba(143, 186, 204, 0.42), rgba(143, 186, 204, 0) 100%);
 }
 .s1 { left: 312px; top: 65px; width: 30px; height: 30px; }
-.s2 { left: 342px; top: 104px; width: 16px; height: 16px; opacity: 0.85; }
-.s3 { left: 96px; top: 330px; width: 12px; height: 12px; opacity: 0.7; }
+.s2 { left: 342px; top: 104px; width: 16px; height: 16px; opacity: 0.85; --o: 0.85; }
+.s3 { left: 96px; top: 330px; width: 12px; height: 12px; opacity: 0.7; --o: 0.7; }
 .r1 { left: 60px; top: 70px; width: 22px; height: 22px; }
 .r2 { left: 372px; top: 250px; width: 14px; height: 14px; }
 .d1 { left: 64px; top: 60px; width: 26px; height: 26px; }
-.d2 { left: 380px; top: 250px; width: 16px; height: 16px; opacity: 0.9; }
-.d3 { left: 400px; top: 60px; width: 20px; height: 20px; opacity: 0.9; }
-.d4 { left: 40px; top: 300px; width: 12px; height: 12px; opacity: 0.8; }
-.d5 { left: 240px; top: 24px; width: 14px; height: 14px; opacity: 0.8; }
+.d2 { left: 380px; top: 250px; width: 16px; height: 16px; opacity: 0.9; --o: 0.9; }
+.d3 { left: 400px; top: 60px; width: 20px; height: 20px; opacity: 0.9; --o: 0.9; }
+.d4 { left: 40px; top: 300px; width: 12px; height: 12px; opacity: 0.8; --o: 0.8; }
+.d5 { left: 240px; top: 24px; width: 14px; height: 14px; opacity: 0.8; --o: 0.8; }
 .c1 { left: 770px; top: 120px; width: 28px; height: 28px; }
 .c2 { left: 808px; top: 170px; width: 16px; height: 16px; }
 .c3 { left: 232px; top: 430px; width: 14px; height: 14px; }
@@ -184,6 +184,9 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   white-space: nowrap;
 }
 
+/* CSS adds tracking after the last letter and Figma does not: pull it back so the pill's right padding is 26px */
+.pill:not(.hr-chip) > span { margin-right: -3.52px; }
+
 .hr-chip {
   margin-left: auto;
   gap: 10px;
@@ -221,6 +224,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   font-weight: 400;
   line-height: normal;
   color: var(--color-dose);
+  letter-spacing: 0.18px; /* 248px as in 24:278 */
   white-space: pre;
 }
 
@@ -240,8 +244,11 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   margin-top: 10px;
   font-size: 72px;
   line-height: 1.1;
-  letter-spacing: -1.44px;
+  /* Figma -1.44px; Inter 4 sets this line ~16px narrower than Figma's Inter, so tracking is opened up
+     to land on the Figma box (35:213, 492px) */
+  letter-spacing: -0.37px;
 }
+.prompt .eyebrow { margin-right: -4.4px; } /* CSS tracks after the last letter, Figma does not */
 .prompt .gestures { margin-top: 30px; }
 .hint {
   margin-top: 26px;
@@ -302,6 +309,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   letter-spacing: 4.84px;
   color: var(--color-accent-text-small);
   white-space: pre;
+  box-sizing: border-box;
+  padding-left: 4.84px; /* balances the trailing tracking so the line centres like Figma's */
 }
 .count-n {
   left: 0;
@@ -326,7 +335,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   font-size: 180px;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: -5.4px;
+  /* Figma -5.4px; widened for Inter 4's narrower figures so "7 / 12" = 433px and "4 / 12" = 447px (36:279, 36:215) */
+  letter-spacing: -2.83px;
   white-space: pre;
 }
 .count-target { font-weight: 300; color: var(--color-ink-soft); }
@@ -450,7 +460,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 .count-done {
   margin-top: 4px;
   font-size: 156px;
-  letter-spacing: -4.68px;
+  /* Figma -4.68px; widened so "12 / 12" = 451px (37:296) */
+  letter-spacing: -1.62px;
 }
 .done-pill { margin-top: 36px; }
 
@@ -490,6 +501,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 .alert .gestures { margin-top: 22px; }
 .bystander {
   margin-top: 22px;
+  letter-spacing: -0.12px; /* 504px as in 37:343 */
   font-size: 26px;
   font-weight: 500;
   line-height: normal;
@@ -510,7 +522,8 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
   font-size: 76px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: 1.52px;
+  /* Figma 1.52px; widened so the label is 352px and the pill 572px (37:346, 37:345) */
+  letter-spacing: 2.78px;
   color: var(--color-surface);
   white-space: nowrap;
 }
@@ -596,7 +609,7 @@ p, h1 { margin: 0; font-weight: inherit; font-size: inherit; }
 @keyframes droop     { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(5px) rotate(-1.5deg); } }
 @keyframes breathe   { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
 @keyframes celebrate { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-12px) scale(1.02); } }
-@keyframes twinkle   { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@keyframes twinkle   { 0%, 100% { opacity: var(--o, 1); transform: scale(1); } 50% { opacity: calc(var(--o, 1) * 0.35); transform: scale(0.7); } }
 @keyframes orbit     { to { transform: rotate(360deg); } }
 @keyframes pulse     { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 

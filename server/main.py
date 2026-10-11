@@ -15,6 +15,9 @@ from typing import Any
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
@@ -66,6 +69,19 @@ class MultiDirStaticFiles(StaticFiles):
     def __init__(self, directories: list[Path]) -> None:
         super().__init__(directory=directories[0])
         self.all_directories = [str(d) for d in directories]
+
+
+class KioskStaticFiles(StaticFiles):
+    """The LCD page, minus what only developers need: the kiosk's dev/ preview, its tests/ and READMEs are
+    never served on the origin that holds the device token. Compared case-insensitively (macOS volumes)."""
+
+    HIDDEN_DIRS = frozenset({"dev", "tests"})
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        parts = [p.lower() for p in Path(path).parts]
+        if (parts and parts[0] in self.HIDDEN_DIRS) or (parts and parts[-1] == "readme.md"):
+            raise HTTPException(status_code=404)
+        return await super().get_response(path, scope)
 
 
 @asynccontextmanager
@@ -291,7 +307,8 @@ def _mount_static(app: FastAPI) -> None:
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
     for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
-            app.mount(f"/{name}", StaticFiles(directory=directory, html=True), name=name)
+            static_cls = KioskStaticFiles if name == "device" else StaticFiles
+            app.mount(f"/{name}", static_cls(directory=directory, html=True), name=name)
 
 
 def create_app() -> FastAPI:
