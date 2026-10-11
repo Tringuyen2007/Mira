@@ -46,6 +46,7 @@ LAG_WARN_P95_MS = 50.0
 FALL_STATUS_EVERY_S = 2.0
 MOCK_FALL_AT_S = 20.0
 MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
+MOCK_GESTURE_AFTER_S = 4.0  # simulated seconds between awaiting_gesture and the mock's thumbs-up
 JOIN_TIMEOUT_S = 2.0
 
 # Reverse-channel message types understood by the mock source (beyond incident_closed).
@@ -352,6 +353,8 @@ class MockSource:
         self._auto_fall_done = False
         self._arrived = False
         self._arrive_due_s = MOCK_ARRIVE_AT_S
+        self._ready = False
+        self._gesture_due_s = 0.0
         self._patient_id = cfg.MOCK_PATIENT_ID
         self._paused = False  # user `pause`/`start` (§ reverse channel); independent of a Guardian `paused`
         self._stopped = False  # user `stop`: the program is over, no more reps for this session
@@ -368,6 +371,12 @@ class MockSource:
             if not self._arrived and self._sim_s >= self._arrive_due_s:
                 self._arrived = True
                 self._emit(emit, {"type": "arrived", "patient_id": self._patient_id})
+                # Like the vision engine: ask for a thumbs-up, and start the program once it is seen.
+                self._emit(emit, {"type": "awaiting_gesture", "gesture": "thumbs_up"})
+                self._gesture_due_s = self._sim_s + MOCK_GESTURE_AFTER_S
+            if self._arrived and not self._ready and self._fall is None and self._sim_s >= self._gesture_due_s:
+                self._ready = True
+                self._emit(emit, {"type": "gesture", "name": "thumbs_up"})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
                 self._auto_fall_done = True
                 self._start_fall(self.responds_at_s)
@@ -383,8 +392,8 @@ class MockSource:
             else:
                 pose = _program_pose(self._program_s)
                 body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
-                events = list(self._events_between(self._prev_program_s, self._program_s)) if self._arrived else []
-                if self._arrived:
+                events = list(self._events_between(self._prev_program_s, self._program_s)) if self._ready else []
+                if self._ready:
                     self._prev_program_s = self._program_s
             self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
             for ev in events:
@@ -393,7 +402,7 @@ class MockSource:
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
             self._sim_s += dt
-            if self._fall is None and self._arrived and not self._paused and not self._stopped:
+            if self._fall is None and self._ready and not self._paused and not self._stopped:
                 self._program_s += dt
             next_tick += dt / self.speed
             delay = next_tick - time.monotonic()
@@ -456,6 +465,7 @@ class MockSource:
         self._patient_id = patient_id or cfg.MOCK_PATIENT_ID
         self._arrived = False
         self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
+        self._ready = False
         self._program_s = 0.0
         self._prev_program_s = -1e-9
         self._paused = False
