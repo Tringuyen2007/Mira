@@ -85,6 +85,7 @@ class SessionPersistence:
         await self._ensure_saved(session.session_id, force=True)
         self._unsaved.pop(session.session_id, None)
         self._retry_after.pop(session.session_id, None)
+        self._last_hr_at.pop(session.session_id, None)
         await writes.end_session(self.db, session.session_id, ended_at, reps_done=reps)
 
     async def _ensure_saved(self, session_id: str, *, force: bool = False) -> None:

@@ -3,8 +3,8 @@ import HealthKit
 
 /// Runs an `HKWorkoutSession` while a Mira set is live so the watch samples heart
 /// rate continuously, and hands each new reading to `onHeartRate` (at most once
-/// every `minInterval`). Every HealthKit failure is swallowed into `status` — the
-/// UI just shows "—" when no sample arrives (always the case on the simulator).
+/// every `minInterval`). Every HealthKit failure is swallowed into `status`, which
+/// the heart-rate card shows under "—": no permission, or no sensor (simulator).
 @MainActor
 final class WorkoutHeartRate: NSObject {
     /// Human-readable reason heart rate is unavailable, or nil when all is well.
@@ -22,10 +22,19 @@ final class WorkoutHeartRate: NSObject {
     private var lastDeliveredAt: Date?
     private let minInterval: TimeInterval = 3
 
+    static let needsPermission = "Heart rate needs permission in the Watch app"
+    static let needsRealWatch = "Heart rate needs a real Apple Watch"
+    static let unavailable = "Heart rate isn't available"
+
     func start() {
         guard !isRunning else { return }
-        guard HKHealthStore.isHealthDataAvailable() else {
-            setStatus("Heart rate needs a real Apple Watch")
+        #if targetEnvironment(simulator)
+        let healthAvailable = false  // the simulator never produces heart-rate samples
+        #else
+        let healthAvailable = HKHealthStore.isHealthDataAvailable()
+        #endif
+        guard healthAvailable else {
+            setStatus(Self.needsRealWatch)
             return
         }
         isRunning = true
@@ -59,11 +68,20 @@ final class WorkoutHeartRate: NSObject {
         do {
             try await store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [heartRate])
         } catch {
-            setStatus("Heart rate isn't available")
+            setStatus(isRunning ? Self.unavailable : nil)
             return
         }
         // `end()` may have been called while the permission sheet was up.
-        guard isRunning, session == nil else { return }
+        guard isRunning else { setStatus(nil); return }
+        guard session == nil else { return }
+        // HealthKit never says whether *read* access was denied, but a denied workout
+        // share means no workout session (so no samples) — say so instead of waiting.
+        if store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingDenied {
+            isRunning = false
+            onStateChange?()
+            setStatus(Self.needsPermission)
+            return
+        }
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = .other
         configuration.locationType = .indoor
@@ -80,7 +98,8 @@ final class WorkoutHeartRate: NSObject {
             try await builder.beginCollection(at: start)
             setStatus(nil)
         } catch {
-            setStatus("Heart rate isn't available")
+            // An `end()` that interrupted the start is not a failure worth showing.
+            setStatus(isRunning ? Self.unavailable : nil)
         }
     }
 
@@ -117,6 +136,6 @@ extension WorkoutHeartRate: HKWorkoutSessionDelegate {
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState, from fromState: HKWorkoutSessionState, date: Date) {}
 
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
-        Task { @MainActor in self.setStatus("Heart rate isn't available") }
+        Task { @MainActor in self.setStatus(self.isRunning ? Self.unavailable : nil) }
     }
 }

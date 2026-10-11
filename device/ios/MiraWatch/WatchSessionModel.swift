@@ -52,9 +52,11 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         sendButton("ready")
     }
 
+    /// Stop ends the workout locally right away; the phone's idle snapshot follows.
     func stop() {
         WKInterfaceDevice.current().play(.stop)
         sendButton("stop")
+        heartRate.end()
     }
 
     func send(heartRate bpm: Double, at date: Date = Date()) {
@@ -96,12 +98,15 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
             lastHaptic = pattern
             playHaptic(pattern)
         case .summary(let formScore, let goodReps, let repsTotal):
+            // The session is over: end the workout and show the done screen.
             summary = Summary(formScore: formScore, goodReps: goodReps, repsTotal: repsTotal)
+            heartRate.end()
         }
     }
 
     private func apply(_ new: WatchWire.LiveSnapshot) {
-        let previousPhase = snapshot?.phase
+        let previous = snapshot
+        let previousPhase = previous?.phase
         snapshot = new
         if new.phase != previousPhase { sendError = nil }
         switch new.phase {
@@ -111,10 +116,19 @@ final class WatchSessionModel: NSObject, WCSessionDelegate {
         case "done", "idle":
             heartRate.end()
             if new.phase == "idle" { localHeartRate = nil }
+            // The phone pushes idle as soon as the session ends (the server clears it
+            // right after `done`); keep the done screen up with the last count until
+            // the summary arrives or the patient taps "Back to Mira".
+            if summary == nil, let previous, Self.sessionPhases.contains(previous.phase) {
+                summary = Summary(formScore: nil, goodReps: nil, repsTotal: previous.rep)
+            }
         default:
             break  // rest / paused / incident keep whatever the workout is doing
         }
     }
+
+    /// Phases during which a session is under way (or just finished).
+    static let sessionPhases: Set<String> = ["countdown", "active", "rest", "paused", "incident", "done"]
 
     private func playHaptic(_ pattern: String) {
         let device = WKInterfaceDevice.current()

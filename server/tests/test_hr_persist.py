@@ -53,3 +53,17 @@ def test_mock_session_persists_hr_at_most_once_per_second(client: TestClient, hr
 
     r = client.get(f"/sessions/{sid}", headers=AUTH)
     assert r.status_code == 200
+
+
+async def test_session_stopped_forgets_the_hr_throttle() -> None:
+    from server.db.persist import SessionPersistence
+    from server.state import LiveSession, default_profile
+
+    persistence = SessionPersistence(None)  # type: ignore[arg-type]  # writes are no-ops without a database
+    session = LiveSession(session_id="hr-throttle", patient_id="maya", exercise_id="squat",
+                          started_at=time.time(), profile=default_profile("maya"))
+    await persistence.session_started(session)
+    await persistence.on_event({"type": "hr", "session_id": session.session_id, "t": time.time(), "bpm": 90})
+    assert session.session_id in persistence._last_hr_at
+    await persistence.session_stopped(session)
+    assert session.session_id not in persistence._last_hr_at

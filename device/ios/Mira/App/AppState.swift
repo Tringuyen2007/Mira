@@ -243,7 +243,12 @@ final class AppState {
         withObservationTracking({ _ = liveSession.live }, onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.watch.push(self.liveSession.live)
+                // The server reports `done` on stop and then clears the session, after
+                // which this patient's `/ws/live` goes quiet — so the end of a session
+                // must be pushed proactively as the idle snapshot (the watch then ends
+                // its workout), not left to a frame that never comes.
+                let live = self.liveSession.live
+                self.watch.push(live?.phase == "done" ? nil : live)
                 self.trackLiveForWatch()
             }
         })
@@ -263,7 +268,13 @@ final class AppState {
         withObservationTracking({ _ = liveSession.sessionSummary }, onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                if let summary = self.liveSession.sessionSummary { self.watch.forward(summary: summary) }
+                if let summary = self.liveSession.sessionSummary {
+                    self.watch.forward(summary: summary)
+                    // The session is over: the idle snapshot ends the watch workout. The
+                    // summary arrives ~2 s late, so leave a session that already restarted alone.
+                    let live = self.liveSession.live
+                    if live == nil || live?.phase == "done" { self.watch.push(nil) }
+                }
                 self.trackSummaryForWatch()
             }
         })

@@ -110,3 +110,42 @@ enum WatchWire {
         }
     }
 }
+
+extension WatchWire.LiveSnapshot {
+    /// What the phone pushes once the session is over (`/ws/live` went quiet or
+    /// reported `done`): the watch ends its workout and leaves the live screen.
+    static let idle = WatchWire.LiveSnapshot(
+        phase: "idle", rep: 0, repsTarget: nil, set: nil, setsTarget: nil,
+        exerciseName: nil, hr: nil, paused: false
+    )
+}
+
+/// Leading-edge throttle with a trailing push: the first change in a quiet period
+/// goes out at once; changes inside the `interval` window wait until it closes,
+/// so the latest state is always delivered (never dropped). Pure value type —
+/// `WatchBridge` owns the clock and the timer.
+struct PushThrottle: Equatable {
+    let interval: TimeInterval
+    private(set) var lastSentAt: Date?
+
+    init(interval: TimeInterval) {
+        self.interval = interval
+    }
+
+    /// True when a push may go out right now (outside the window of the last one).
+    func shouldSend(_ now: Date) -> Bool {
+        guard let lastSentAt else { return true }
+        return now.timeIntervalSince(lastSentAt) >= interval
+    }
+
+    /// Seconds until the window closes, or nil when a push may go out now.
+    func pendingAfter(_ now: Date) -> TimeInterval? {
+        guard let lastSentAt else { return nil }
+        let remaining = interval - now.timeIntervalSince(lastSentAt)
+        return remaining > 0 ? remaining : nil
+    }
+
+    mutating func markSent(_ now: Date) {
+        lastSentAt = now
+    }
+}

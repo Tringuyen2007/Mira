@@ -5,10 +5,16 @@ import SwiftUI
 struct WatchLiveView: View {
     @Environment(WatchSessionModel.self) private var model
     @State private var confirmsStop = false
+    /// Set when the 1 s hold already stopped the session, so the tap that ends the
+    /// same press doesn't also open the confirmation. Reset when the screen changes.
+    @State private var holdFired = false
 
     private enum Screen: Equatable { case ready, live, paused, done }
 
     private var screen: Screen {
+        // A summary (from the phone, or kept from the last count when the idle
+        // snapshot ended the session) holds the done screen until "Back to Mira".
+        if model.summary != nil { return .done }
         guard let snapshot = model.snapshot else { return .ready }
         if snapshot.phase == "done" { return .done }
         if snapshot.phase == "paused" || snapshot.phase == "incident" || snapshot.paused { return .paused }
@@ -35,6 +41,7 @@ struct WatchLiveView: View {
             .padding(.vertical, 8)
         }
         .id(screen)
+        .onChange(of: screen) { holdFired = false }
         .background(Color.black)
         .foregroundStyle(.white)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -125,18 +132,23 @@ struct WatchLiveView: View {
     }
 
     private var paused: some View {
-        VStack(spacing: 12) {
+        // During an incident Mira (and the care team) decide when to carry on, so
+        // there is no Resume — just reassurance.
+        let incident = model.snapshot?.phase == "incident"
+        return VStack(spacing: 12) {
             Image(systemName: "pause.circle.fill")
                 .font(.system(size: 38)).foregroundStyle(WatchStyle.pink)
                 .accessibilityHidden(true)
-            Text("Take a breather").font(.system(size: 18, weight: .medium))
+            Text(incident ? "Mira is checking on you" : "Take a breather").font(.system(size: 18, weight: .medium))
                 .multilineTextAlignment(.center)
             if let snapshot = model.snapshot {
                 Text(snapshot.repsTarget.map { "\(snapshot.rep) of \($0) reps" } ?? "\(snapshot.rep) reps")
                     .font(.system(size: 12)).foregroundStyle(WatchStyle.secondary)
             }
             heartRateCard
-            action("Resume", symbol: "play.fill", color: WatchStyle.mint) { model.ready() }
+            if !incident {
+                action("Resume", symbol: "play.fill", color: WatchStyle.mint) { model.ready() }
+            }
         }
     }
 
@@ -196,6 +208,10 @@ struct WatchLiveView: View {
 
     private var stopButton: some View {
         Button {
+            if holdFired {
+                holdFired = false  // this tap ends the press that already stopped
+                return
+            }
             confirmsStop = true
         } label: {
             Label("Stop", systemImage: "stop.fill")
@@ -206,6 +222,8 @@ struct WatchLiveView: View {
         }
         .buttonStyle(.plain)
         .simultaneousGesture(LongPressGesture(minimumDuration: 1).onEnded { _ in
+            guard !holdFired else { return }
+            holdFired = true
             confirmsStop = false
             model.stop()
         })

@@ -20,10 +20,16 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
     @ObservationIgnored private let liveSession: LiveSessionStore
     @ObservationIgnored private var session: WCSession?
+    /// Whether the watch reports a running `HKWorkoutSession` (its `.status` message).
+    /// Nothing reads it yet; kept for a future Settings row.
+    private(set) var workoutActive = false
+
     @ObservationIgnored private var lastPushedContext: [String: Any]?
-    @ObservationIgnored private var lastPushAt: Date?
-    /// A snapshot push must wait at least this long after the previous one.
-    @ObservationIgnored private let pushInterval: TimeInterval = 0.5
+    /// Snapshot pushes go out at most once every 0.5 s; a change inside the window
+    /// is held in `pendingContext` and sent by `trailingPush` when it closes.
+    @ObservationIgnored private var throttle = PushThrottle(interval: 0.5)
+    @ObservationIgnored private var pendingContext: [String: Any]?
+    @ObservationIgnored private var trailingPush: Task<Void, Never>?
 
     init(liveSession: LiveSessionStore) {
         self.liveSession = liveSession
@@ -39,27 +45,57 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     /// Pushes the current `/ws/live` state to the watch via `updateApplicationContext`,
-    /// which the system delivers even while the watch app isn't running. Throttled to
-    /// at most once every `pushInterval`, and skipped entirely when nothing changed —
-    /// a dropped update is fine since the next live frame supersedes it.
+    /// which the system delivers even while the watch app isn't running. `nil` (the
+    /// session ended) pushes the idle snapshot so the watch ends its workout. Skipped
+    /// when nothing changed; throttled with a trailing push so the final state of a
+    /// burst (e.g. the last rep, or the end of the session) always reaches the watch.
     func push(_ live: LiveMessage?) {
         guard let session, session.activationState == .activated else { return }
-        guard let live else { return }
-        let snapshot = WatchWire.LiveSnapshot(
-            phase: live.phase, rep: live.rep, repsTarget: live.repsTarget,
-            set: live.set, setsTarget: live.setsTarget, exerciseName: live.exerciseName,
-            hr: live.hr, paused: live.paused
-        )
+        let snapshot = live.map {
+            WatchWire.LiveSnapshot(
+                phase: $0.phase, rep: $0.rep, repsTarget: $0.repsTarget,
+                set: $0.set, setsTarget: $0.setsTarget, exerciseName: $0.exerciseName,
+                hr: $0.hr, paused: $0.paused
+            )
+        } ?? .idle
         let context = WatchWire.encode(.snapshot(snapshot))
-        if let lastPushedContext, NSDictionary(dictionary: context).isEqual(to: lastPushedContext) { return }
-        if let lastPushAt, Date().timeIntervalSince(lastPushAt) < pushInterval { return }
+        if let lastPushedContext, NSDictionary(dictionary: context).isEqual(to: lastPushedContext) {
+            cancelTrailingPush()
+            return
+        }
+        let now = Date()
+        if throttle.shouldSend(now) {
+            cancelTrailingPush()
+            send(context, at: now)
+            return
+        }
+        pendingContext = context
+        guard trailingPush == nil, let delay = throttle.pendingAfter(now) else { return }
+        trailingPush = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.trailingPush = nil
+            guard let context = self.pendingContext else { return }
+            self.pendingContext = nil
+            self.send(context, at: Date())
+        }
+    }
+
+    private func send(_ context: [String: Any], at now: Date) {
+        guard let session, session.activationState == .activated else { return }
         do {
             try session.updateApplicationContext(context)
             lastPushedContext = context
-            lastPushAt = Date()
+            throttle.markSent(now)
         } catch {
             // Best-effort; the next push (or the watch's own retry) catches up.
         }
+    }
+
+    private func cancelTrailingPush() {
+        pendingContext = nil
+        trailingPush?.cancel()
+        trailingPush = nil
     }
 
     /// Best-effort coaching haptic, only while the watch is reachable (foreground app).
@@ -77,11 +113,17 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
     // MARK: WCSessionDelegate
 
+    // Each callback copies the `WCSession` values it needs before hopping to the
+    // main actor, so no non-Sendable `WCSession` crosses the isolation boundary.
+
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        let paired = session.isPaired
+        let installed = session.isWatchAppInstalled
+        let reachable = session.isReachable
         Task { @MainActor in
-            self.isPaired = session.isPaired
-            self.isWatchAppInstalled = session.isWatchAppInstalled
-            self.isReachable = session.isReachable
+            self.isPaired = paired
+            self.isWatchAppInstalled = installed
+            self.isReachable = reachable
         }
     }
 
@@ -94,13 +136,16 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-        Task { @MainActor in self.isReachable = session.isReachable }
+        let reachable = session.isReachable
+        Task { @MainActor in self.isReachable = reachable }
     }
 
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        let paired = session.isPaired
+        let installed = session.isWatchAppInstalled
         Task { @MainActor in
-            self.isPaired = session.isPaired
-            self.isWatchAppInstalled = session.isWatchAppInstalled
+            self.isPaired = paired
+            self.isWatchAppInstalled = installed
         }
     }
 
@@ -113,8 +158,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
                 try? await self.liveSession.send(.hr(HeartRateMessage(t: t, bpm: bpm)))
             case .button(let name):
                 try? await self.liveSession.send(.watchButton(WatchButtonMessage(name: name)))
-            case .status:
-                break
+            case .status(let workoutActive):
+                self.workoutActive = workoutActive
             }
         }
     }

@@ -97,3 +97,46 @@ final class WatchWireTests: XCTestCase {
         XCTAssertNil(WatchWire.decodeToPhone(dict))
     }
 }
+
+final class PushThrottleTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000)
+
+    func testFirstPushGoesOutImmediately() {
+        let throttle = PushThrottle(interval: 0.5)
+        XCTAssertTrue(throttle.shouldSend(t0))
+        XCTAssertNil(throttle.pendingAfter(t0))
+    }
+
+    func testPushInsideTheWindowWaitsForTheTrailingEdge() throws {
+        var throttle = PushThrottle(interval: 0.5)
+        throttle.markSent(t0)
+        let now = t0.addingTimeInterval(0.2)
+        XCTAssertFalse(throttle.shouldSend(now))
+        let delay = try XCTUnwrap(throttle.pendingAfter(now))
+        XCTAssertEqual(delay, 0.3, accuracy: 1e-6)
+    }
+
+    func testPushAfterTheWindowGoesOutAtOnce() {
+        var throttle = PushThrottle(interval: 0.5)
+        throttle.markSent(t0)
+        let now = t0.addingTimeInterval(0.5)
+        XCTAssertTrue(throttle.shouldSend(now))
+        XCTAssertNil(throttle.pendingAfter(now))
+    }
+
+    func testTrailingPushReopensTheWindow() {
+        var throttle = PushThrottle(interval: 0.5)
+        throttle.markSent(t0)
+        let trailing = t0.addingTimeInterval(0.5)
+        throttle.markSent(trailing)
+        XCTAssertFalse(throttle.shouldSend(trailing.addingTimeInterval(0.1)))
+        XCTAssertEqual(throttle.pendingAfter(trailing.addingTimeInterval(0.1)) ?? -1, 0.4, accuracy: 1e-6)
+    }
+
+    func testIdleSnapshotRoundTrips() throws {
+        let encoded = WatchWire.encode(.snapshot(.idle))
+        XCTAssertEqual(encoded["phase"] as? String, "idle")
+        XCTAssertEqual(encoded["rep"] as? Int, 0)
+        XCTAssertEqual(try XCTUnwrap(WatchWire.decodeToWatch(encoded)), .snapshot(.idle))
+    }
+}
