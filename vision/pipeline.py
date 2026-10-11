@@ -12,6 +12,7 @@ from vision.filters import OneEuroFilter
 from vision.frames import world_to_mat
 from vision.triangulate import Triangulation, triangulate_pair
 from vision.select import PersonSelector
+from vision.mono import mono_joints
 from vision.tracker import ModelTracker
 from vision.types import LEFT_HIP, RIGHT_HIP, CameraPeople, FrameResult, PoseResult, swap_left_right
 
@@ -91,11 +92,16 @@ def _evidence(views: dict[str, PoseResult | None]) -> np.ndarray:
 class Pipeline:
     def __init__(self, cams: dict[str, CameraConfig], smoothing: bool = True,
                  min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None,
-                 anchor_feet: bool = True, tracker: str = "triangulate"):
+                 anchor_feet: bool = True, tracker: str = "auto", height_m: float | None = None):
         """tracker: "model" fits a body to both cameras (falls back to triangulation while the body is
         being measured or when a fit fails); "triangulate" is the triangulate-and-clean pipeline."""
         self.cams = cams
-        self._model = ModelTracker(cams) if tracker == "model" else None
+        calibrated = [n for n, c in cams.items() if c is not None and c.calibrated]
+        self._single = calibrated[0] if len(calibrated) == 1 else None  # one camera: 3D from floor + MediaPipe
+        if tracker == "auto":
+            tracker = "model" if self._single else "triangulate"
+        self._model = ModelTracker(cams, height_m=height_m) if tracker == "model" else None
+        self._last_xz = None
         self._anchor = FootAnchor() if anchor_feet else None
         self._selector = PersonSelector(cams, mat or MatConfig())
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
@@ -131,8 +137,18 @@ class Pipeline:
                 cost = _labelling_cost(tri2, [a2, b2], self.cams)
                 if cost < best:
                     best, swapped, a, b, tri = cost, name, a2, b2, tri2
-        usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
-        joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
+        if self._single is not None:  # one camera: shape from MediaPipe's 3D, position from the feet on the floor
+            pose = {"A": a, "B": b}.get(self._single)
+            scale = self._model.world_scale if self._model is not None else 1.0
+            mono = mono_joints(pose, self.cams[self._single], scale, self._last_xz) if pose is not None else None
+            if mono is None:
+                joints, conf, tracking = np.full((33, 3), np.nan), np.zeros(33), "lost"
+            else:
+                joints, conf, tracking = mono, pose.vis.copy(), f"single_cam_{self._single}"
+                self._last_xz = ((mono[23] + mono[24]) / 2)[[0, 2]]
+        else:
+            usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
+            joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})
         feet_locked = None
         if self._anchor is not None:
             if tracking == "lost":

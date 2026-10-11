@@ -48,6 +48,8 @@ SIGMA_POS_M, SIGMA_ROT = 0.04, 0.25
 LIMIT_PX_PER_RAD = 200.0
 FLOOR_PX_PER_M = 400.0
 ANCHOR_PX_PER_M = 200.0
+WORLD_PX_PER_M = 150.0  # one camera: pull toward MediaPipe's own 3D shape (the depth cue), px per metre
+CONTACT_PX_PER_M = 300.0  # one camera: the lowest foot point is pulled onto the floor
 
 
 def _unit(v, fallback=None):
@@ -105,6 +107,10 @@ class BodyShape:
     face: np.ndarray  # (11, 3) offsets from the ear midpoint in the head frame
     hand: dict  # side -> (3, 3) offsets from the wrist in the forearm frame
     foot: dict  # side -> (2, 3) heel, toe offsets from the ankle in the shin frame
+
+    def scaled(self, k: float) -> "BodyShape":
+        return BodyShape({n: v * k for n, v in self.lengths.items()}, self.face * k,
+                         {s: v * k for s, v in self.hand.items()}, {s: v * k for s, v in self.foot.items()})
 
 
 def segment_frames(J: np.ndarray) -> dict | None:
@@ -247,8 +253,10 @@ FD_GROUPS = [[j] for j in range(12)] + [[limb[i] for limb in _LIMBS if i < len(l
 ITERATIONS = 3
 RECOVER_PX = 20.0  # a fit whose median 2D residual is above this also tries a fresh start from triangulation
 SMOOTH_MIN_CUTOFF = 0.7  # Hz: One Euro on the pose numbers (0 = off)
-SMOOTH_BETA = 6.0  # how much faster it follows when the pose changes quickly
-ROOT_MIN_CUTOFF = 3.0  # Hz: the body's position is pinned well by both cameras, so it is smoothed less
+SMOOTH_BETA = 6.0  # two cameras: how much faster it follows when the pose changes quickly
+ROOT_MIN_CUTOFF = 3.0  # Hz: two cameras pin the body's position well, so it is smoothed less
+SINGLE_BETA = 2.0  # one camera: noisier depth, so follow speed-ups more cautiously
+SINGLE_ROOT_MIN_CUTOFF = 1.0  # one camera: the floor position wobbles ~2 cm, smooth it more
 
 
 class _Cam:
@@ -270,9 +278,15 @@ def _undistorted(pose: PoseResult, cfg: CameraConfig) -> np.ndarray:
 
 
 class ModelTracker:
-    def __init__(self, cams: dict[str, CameraConfig], frames_needed: int = FRAMES_NEEDED, max_nfev: int = 6):
+    def __init__(self, cams: dict[str, CameraConfig], frames_needed: int = FRAMES_NEEDED, max_nfev: int = 6,
+                 height_m: float | None = None):
+        """height_m: the person's height; with one camera it fixes the body's scale (MediaPipe's world
+        landmarks are only roughly metric)."""
         self.cams = {n: _Cam(c) for n, c in cams.items() if c is not None and c.calibrated}
         self.cfgs = cams
+        self.single = len(self.cams) == 1
+        self.height_m = height_m
+        self.world_scale = 1.0
         self.frames_needed, self.max_nfev = frames_needed, max_nfev
         self.reset()
 
@@ -284,18 +298,24 @@ class ModelTracker:
         self.last_ms = 0.0
         self.last_cost = np.nan
         self.recoveries = 0
-        cutoff = np.r_[[ROOT_MIN_CUTOFF] * 3, [SMOOTH_MIN_CUTOFF] * (N_PARAMS - 3)]
-        self._smooth = OneEuroFilter(cutoff, SMOOTH_BETA) if SMOOTH_MIN_CUTOFF else None
+        root, beta = (SINGLE_ROOT_MIN_CUTOFF, SINGLE_BETA) if self.single else (ROOT_MIN_CUTOFF, SMOOTH_BETA)
+        cutoff = np.r_[[root] * 3, [SMOOTH_MIN_CUTOFF] * (N_PARAMS - 3)]
+        self._smooth = OneEuroFilter(cutoff, beta) if SMOOTH_MIN_CUTOFF else None
 
     @property
     def progress(self) -> float:
         return 1.0 if self.shape is not None else min(len(self._samples) / self.frames_needed, 1.0)
 
-    def _residuals(self, p, obs, prev, anchors):
+    def _residuals(self, p, obs, prev, anchors, world=None):
         X = forward(p, self.shape)
         parts = []
         for cam, uv, w in obs:
             parts.append(((cam.project(X) - uv) * w[:, None]).ravel())
+        if world is not None:  # one camera: MediaPipe's 3D shape, relative to the hips, is the depth cue
+            W, ww = world
+            rel = X - (X[23] + X[24]) / 2
+            parts.append((WORLD_PX_PER_M * (rel - W) * ww[:, None]).ravel())
+            parts.append(np.array([CONTACT_PX_PER_M * np.min(X[[29, 30, 31, 32], 1])]))
         parts.append((p - prev) / SIGMA * TEMPORAL_PX)
         lim = []
         for s in SIDE:
@@ -307,6 +327,20 @@ class ModelTracker:
             parts.append(ANCHOR_PX_PER_M * (X[k] - pos))
         return np.concatenate(parts)
 
+    def _world(self, views):
+        """(hip-relative world shape scaled to the body, weights) from the one camera, or None."""
+        if not self.single:
+            return None
+        from vision.mono import world_shape
+
+        n = next(iter(self.cams))
+        v = views.get(n)
+        W = world_shape(v, self.cfgs[n]) if v is not None else None
+        if W is None:
+            return None
+        ww = np.where(v.vis >= 0.5, 1.0, 0.2) * np.where(np.isfinite(W).all(axis=1), 1.0, 0.0)
+        return np.nan_to_num(W * self.world_scale), ww
+
     def _median_residual(self, p, obs) -> float:
         """Median 2D distance (px) between the posed model and the detections it is fitted to."""
         X = forward(p, self.shape)
@@ -314,11 +348,11 @@ class ModelTracker:
         d = np.concatenate(d) if d else np.empty(0)
         return float(np.median(d)) if d.size else 0.0
 
-    def _solve(self, p0, obs, prev, anchors, S: np.ndarray) -> tuple[np.ndarray, float]:
+    def _solve(self, p0, obs, prev, anchors, S: np.ndarray, world=None) -> tuple[np.ndarray, float]:
         """Robust (soft-L1) Levenberg-Marquardt from p0, Jacobian by grouped finite differences."""
         p = p0.copy()
         lam = 1e-3
-        r = self._residuals(p, obs, prev, anchors)
+        r = self._residuals(p, obs, prev, anchors, world)
 
         def robust(res):
             z = (res / ROBUST_PX) ** 2
@@ -331,14 +365,14 @@ class ModelTracker:
             for g in FD_GROUPS:
                 dp = np.zeros(N_PARAMS)
                 dp[g] = h[g]
-                dr = (self._residuals(p + dp, obs, prev, anchors) - r)
+                dr = (self._residuals(p + dp, obs, prev, anchors, world) - r)
                 for j in g:
                     J[:, j] = np.where(S[:, j], dr / h[j], 0.0)
             Jw, rw = J * sw[:, None] * SIGMA, r * sw  # scaled parameters: steps measured in sigmas
             A, g_ = Jw.T @ Jw, Jw.T @ rw
             for _ in range(4):
                 step = -np.linalg.solve(A + lam * (np.diag(np.diag(A)) + 1e-6 * np.eye(N_PARAMS)), g_) * SIGMA
-                r_new = self._residuals(p + step, obs, prev, anchors)
+                r_new = self._residuals(p + step, obs, prev, anchors, world)
                 cost_new, sw_new = robust(r_new)
                 if cost_new < cost:
                     p, r, cost, sw = p + step, r_new, cost_new, sw_new
@@ -349,10 +383,14 @@ class ModelTracker:
                 break
         return p, cost
 
-    def _sparsity(self, obs, anchors):
+    def _sparsity(self, obs, anchors, world=None):
         rows = []
         for _ in obs:
             rows.append(np.repeat(DEPENDS, 2, axis=0))
+        if world is not None:
+            rel = DEPENDS | DEPENDS[[23]] | DEPENDS[[24]]
+            rows.append(np.repeat(rel, 3, axis=0))
+            rows.append(DEPENDS[[29, 30, 31, 32]].any(axis=0, keepdims=True))
         rows.append(np.eye(N_PARAMS, dtype=bool))
         lim = np.zeros((4, N_PARAMS), bool)
         for i, s in enumerate(SIDE):
@@ -377,10 +415,17 @@ class ModelTracker:
             return None
         self._last_seen = t
         if self.shape is None:
-            if tracking == "3d" and joints is not None and np.isfinite(joints[NEEDED]).all():
+            usable = tracking == "3d" or (self.single and tracking.startswith("single_cam"))
+            if usable and joints is not None and np.isfinite(joints[NEEDED]).all():
                 self._samples.append(np.array(joints, float))
                 if len(self._samples) >= self.frames_needed:
                     self.shape = measure(self._samples)
+                    if self.shape is not None and self.single and self.height_m:
+                        from vision.mono import stature
+
+                        est = float(np.median([stature(J - (J[23] + J[24]) / 2) for J in self._samples]))
+                        self.world_scale = self.height_m / est
+                        self.shape = self.shape.scaled(self.world_scale)
             if self.shape is None:
                 return None
         obs = []
@@ -406,13 +451,14 @@ class ModelTracker:
         import time
 
         t0 = time.perf_counter()
-        S = self._sparsity(obs, anc).toarray().astype(bool)
-        x, cost = self._solve(prev, obs, prev, anc, S)
+        world = self._world(views)
+        S = self._sparsity(obs, anc, world).toarray().astype(bool)
+        x, cost = self._solve(prev, obs, prev, anc, S, world)
         # stuck in a wrong pose? restart from this frame's triangulated joints and keep the better fit
         if self._median_residual(x, obs) > RECOVER_PX:
             fresh = params_from_joints(np.asarray(joints, float), self.shape)
             if fresh is not None:
-                x2, _ = self._solve(fresh, obs, fresh, anc, S)
+                x2, _ = self._solve(fresh, obs, fresh, anc, S, world)
                 if self._median_residual(x2, obs) < self._median_residual(x, obs):
                     x = x2
                     self._smooth.reset() if self._smooth is not None else None

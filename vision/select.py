@@ -25,8 +25,9 @@ from vision.types import PoseResult
 FOOT_HEIGHTS = {27: 0.08, 28: 0.08, 29: 0.04, 30: 0.04}  # ankles, heels: metres above the mat surface
 MIDPOINTS = ((23, 24), (11, 12), (27, 28))  # hips first: its triangulation is the person's position
 MIN_VIS = 0.5
+FEET_AGREE_M = 0.6  # two feet placed closer than this are taken as both planted
 STICK_M = 0.5  # the tracked person is the candidate within this distance of where they were
-HEIGHT_RANGE_M = (0.8, 2.4)  # implied feet-to-head height of a person seen by one camera (squats allowed)
+HEIGHT_RANGE_M = (0.5, 2.4)  # implied feet-to-head height of a person seen by one camera (squats allowed)
 
 
 @dataclass
@@ -59,10 +60,16 @@ def floor_position(person: PoseResult, cam: CameraConfig) -> np.ndarray | None:
     heights = np.array([FOOT_HEIGHTS[j] for j in idx])
     with np.errstate(divide="ignore", invalid="ignore"):
         s = (heights - c[1]) / dirs[:, 1]
-    hits = [c + si * d for si, d in zip(s, dirs) if np.isfinite(si) and si > 0]
+    hits = {j: (c + si * d)[[0, 2]] for j, si, d in zip(idx, s, dirs) if np.isfinite(si) and si > 0}
     if not hits:
         return None
-    return np.median(np.array(hits)[:, [0, 2]], axis=0)
+    # each foot on its own: a lifted foot's ray meets the floor far behind it, so trust the foot nearer the
+    # camera; average the two when they agree (both planted)
+    feet = [np.median([hits[j] for j in side if j in hits], axis=0) for side in ((27, 29), (28, 30))
+            if any(j in hits for j in side)]
+    if len(feet) == 2 and np.linalg.norm(feet[0] - feet[1]) < FEET_AGREE_M:
+        return (feet[0] + feet[1]) / 2
+    return min(feet, key=lambda f: np.linalg.norm(f - c[[0, 2]]))
 
 
 def plausible_height(person: PoseResult, cam: CameraConfig, xz) -> bool:
@@ -147,14 +154,36 @@ class PersonSelector:
         self._pos = np.asarray(cands[pick][0], float)
         return cands[pick]
 
+    def _select_one(self, t: float, name: str, people: list[PoseResult]) -> Selection:
+        cam = self.cams[name]
+        if self._pos is not None and t - self._last_pick_t > self.forget_s:
+            self._pos, self._challenge_since = None, None
+        cands = []
+        for k, p in enumerate(people):
+            xz = floor_position(p, cam)
+            if xz is not None and mat_distance(self.mat, xz) <= self.vicinity_m and plausible_height(p, cam, xz):
+                cands.append((xz, k))
+        if not cands:
+            self._challenge_since = None
+            return Selection(None, None, {"A": [], "B": [], name: people})
+        xz, k = self._choose(t, cands)
+        self._last_pick_t = t
+        chosen = people[k]
+        sel = {"A": None, "B": None, name: chosen}
+        ignored = {"A": [], "B": [], name: [p for p in people if p is not chosen]}
+        return Selection(sel["A"], sel["B"], ignored, None, np.asarray(xz, float))
+
     def select(self, t: float, a_people: list[PoseResult], b_people: list[PoseResult]) -> Selection:
         a_people = [p for p in a_people if p is not None and p.detected]
         b_people = [p for p in b_people if p is not None and p.detected]
         ca, cb = self.cams.get("A"), self.cams.get("B")
-        if not (ca is not None and cb is not None and ca.calibrated and cb.calibrated):
+        calibrated = [n for n, c in (("A", ca), ("B", cb)) if c is not None and c.calibrated]
+        if not calibrated:
             a = a_people[0] if a_people else None
             b = b_people[0] if b_people else None
             return Selection(a, b, {"A": a_people[1:], "B": b_people[1:]})
+        if len(calibrated) == 1:  # one camera: people placed on the floor by their feet, closest to the centre
+            return self._select_one(t, calibrated[0], a_people if calibrated[0] == "A" else b_people)
         if self._pos is not None and t - self._last_pick_t > self.forget_s:
             self._pos, self._challenge_since = None, None  # gone too long: start afresh
 

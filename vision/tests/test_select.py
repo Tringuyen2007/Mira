@@ -92,13 +92,14 @@ def test_hand_over_one_lens_drops_that_camera():
     assert sel.ignored["A"] == [junk]
 
 
-def test_uncalibrated_falls_back_to_first_person():
+def test_only_one_calibrated_camera_selects_from_that_camera_by_the_floor():
     cams = _cams()
-    a, b = _person(cams, 0.0, 0.0)
-    cams["B"].R = None
-    sel = PersonSelector(cams, MAT).select(0.0, [a], [b])
-    assert sel.a is a and sel.b is b
-
+    on_a, on_b = _person(cams, 0.0, 0.2)
+    by_a, by_b = _person(cams, 2.6, 0.0)
+    cams["A"].R = None  # A not calibrated (or unplugged): B alone
+    sel = PersonSelector(cams, MAT).select(0.0, [on_a], [by_b, on_b])
+    assert sel.a is None and sel.b is on_b and sel.ignored["B"] == [by_b]
+    np.testing.assert_allclose(sel.position, [0.0, 0.2], atol=0.08)
 
 def _giant(cam, x=0.0, z=0.0, scale=2.0):
     """A skeleton standing at (x, z) in one view, blown up about its feet: far too tall for a person
@@ -117,8 +118,10 @@ def test_plausible_height():
     assert plausible_height(a, cams["A"], floor_position(a, cams["A"]))
     giant = _giant(cams["A"])
     assert not plausible_height(giant, cams["A"], floor_position(giant, cams["A"]))
-    tiny = _giant(cams["A"], scale=0.4)
+    tiny = _giant(cams["A"], scale=0.25)  # ~0.4 m: not a person
     assert not plausible_height(tiny, cams["A"], floor_position(tiny, cams["A"]))
+    squat = _giant(cams["A"], scale=0.42)  # ~0.7 m tall: the bottom of a deep squat is still a person
+    assert plausible_height(squat, cams["A"], floor_position(squat, cams["A"]))
     headless = pose_from_points(cams["A"], standing_skeleton())
     headless.vis[[0, 2, 5]] = 0.0
     assert not plausible_height(headless, cams["A"], floor_position(headless, cams["A"]))
@@ -158,3 +161,12 @@ def test_one_empty_frame_keeps_the_track_but_a_long_gap_forgets_it():
     for k in range(1, 37):  # 1.2 s of nobody
         sel.select(k / 30, [], [])
     assert sel.select(1.2, [ch_a, tr_a], [tr_b, ch_b]).a is ch_a  # track forgotten: centre wins at once
+
+
+def test_floor_position_trusts_the_planted_foot_not_the_lifted_one():
+    cams = _cams()
+    X = standing_skeleton()
+    X[[27, 29, 31], 1] += 0.25  # left foot lifted 25 cm (a step)
+    a = pose_from_points(cams["A"], X)
+    xz = floor_position(a, cams["A"])
+    np.testing.assert_allclose(xz, X[[28, 30], :][:, [0, 2]].mean(axis=0), atol=0.06)  # the right (planted) foot
