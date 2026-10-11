@@ -1,8 +1,9 @@
 """Refine both camera poses from body observations, pinned to the floor markers.
 
 Parameters: each camera's pose (Rodrigues vector + translation, mat -> camera) and one 3D point
-per selected (frame, joint). Residuals: pinhole reprojection of the body points in both views and
-of the fixed marker corners (weighted), on undistorted pixel observations. Intrinsics are fixed.
+per selected (frame, joint), plus each camera's focal-length scale. Residuals: pinhole reprojection of
+the body points in both views and of the fixed marker corners (weighted), on undistorted pixel
+observations. The principal point and distortion are fixed.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from vision.triangulate import triangulate_points
 BA_JOINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
 NAMES = ("A", "B")
 MIN_POINTS = 50
+N_CAM = 7  # Rodrigues vector, translation, focal scale
 
 
 @dataclass
@@ -35,6 +37,9 @@ class BundleReport:
     centers: dict[str, np.ndarray]
     moved_m: dict[str, float]
     rotated_deg: dict[str, float]
+    K: dict[str, np.ndarray]
+    focal_before: dict[str, float]
+    focal_after: dict[str, float]
     baseline_m: float
     median_angle_deg: float
     n_frames: int
@@ -50,7 +55,8 @@ class BundleReport:
             mb, ma = self.marker_rms_before.get(n), self.marker_rms_after.get(n)
             markers = f"marker RMS {mb:.2f} -> {ma:.2f} px, " if mb is not None else "no markers, "
             lines.append(f"camera {n}: {markers}centre ({c[0]:+.3f}, {c[1]:.3f}, {c[2]:+.3f}) m, "
-                         f"moved {self.moved_m[n] * 100:.1f} cm, rotated {self.rotated_deg[n]:.2f}°")
+                         f"moved {self.moved_m[n] * 100:.1f} cm, rotated {self.rotated_deg[n]:.2f}°, "
+                         f"focal {self.focal_before[n]:.0f} -> {self.focal_after[n]:.0f} px")
         lines.append(f"baseline {self.baseline_m:.3f} m, median triangulation angle {self.median_angle_deg:.1f}°")
         lines.append("OK" if self.ok else "REJECTED: " + "; ".join(self.reasons))
         return "\n".join(lines)
@@ -64,6 +70,13 @@ def rodrigues(r) -> np.ndarray:
     k = r / theta
     Kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
     return np.eye(3) + np.sin(theta) * Kx + (1 - np.cos(theta)) * Kx @ Kx
+
+
+def _scaled(K, s: float) -> np.ndarray:
+    K = np.array(K, float)
+    K[0, 0] *= s
+    K[1, 1] *= s
+    return K
 
 
 def _pinhole(P, K, R, t) -> np.ndarray:
@@ -81,7 +94,8 @@ def _rms(err2d: np.ndarray) -> float:
 
 
 def evaluate_guards(body_before, body_after, moved_m, rotated_deg, marker_before, marker_after,
-                    max_move_m: float = 0.5, max_rot_deg: float = 15.0) -> list[str]:
+                    focal_scale: dict[str, float] | None = None, max_move_m: float = 0.5,
+                    max_rot_deg: float = 15.0, max_focal_change: float = 0.15) -> list[str]:
     reasons = []
     if not body_after < body_before:
         reasons.append(f"body reprojection did not improve ({body_before:.2f} -> {body_after:.2f} px)")
@@ -95,6 +109,9 @@ def evaluate_guards(body_before, body_after, moved_m, rotated_deg, marker_before
         limit = max(2 * marker_before[n], 1.0)
         if after > limit:
             reasons.append(f"camera {n} marker RMS grew to {after:.2f} px (limit {limit:.2f} px)")
+    for n, s in (focal_scale or {}).items():
+        if abs(s - 1) > max_focal_change:
+            reasons.append(f"camera {n} focal length changed {abs(s - 1) * 100:.0f}% (limit {max_focal_change * 100:.0f}%)")
     return reasons
 
 
@@ -115,26 +132,27 @@ def _collect(pairs, min_vis, max_frames):
 def _sparsity(n_pts: int, marker_rows: dict[str, int]) -> coo_matrix:
     rows, cols = [], []
     i = np.arange(n_pts)
-    for k, off in enumerate((0, 6)):  # body residuals of camera A then B
-        base = k * 2 * n_pts
+    first = 2 * N_CAM
+    for k in range(2):  # body residuals of camera A then B
+        off, base = k * N_CAM, k * 2 * n_pts
         for r in (0, 1):
             rr = base + 2 * i + r
-            for c in range(6):
+            for c in range(N_CAM):
                 rows.append(rr)
                 cols.append(np.full(n_pts, off + c))
             for c in range(3):
                 rows.append(rr)
-                cols.append(12 + 3 * i + c)
+                cols.append(first + 3 * i + c)
     row = 4 * n_pts
-    for n in NAMES:
+    for k, n in enumerate(NAMES):
         m = marker_rows.get(n, 0)
         if m:
-            off = 0 if n == "A" else 6
-            rows.append(np.repeat(np.arange(row, row + m), 6))
-            cols.append(np.tile(np.arange(off, off + 6), m))
+            off = k * N_CAM
+            rows.append(np.repeat(np.arange(row, row + m), N_CAM))
+            cols.append(np.tile(np.arange(off, off + N_CAM), m))
             row += m
     r, c = np.concatenate(rows), np.concatenate(cols)
-    return coo_matrix((np.ones(len(r)), (r, c)), shape=(row, 12 + 3 * n_pts))
+    return coo_matrix((np.ones(len(r)), (r, c)), shape=(row, first + 3 * n_pts))
 
 
 def refine_extrinsics(cams: dict[str, CameraConfig], mat: MatConfig, pairs, marker_weight: float = 5.0,
@@ -169,14 +187,16 @@ def refine_extrinsics(cams: dict[str, CameraConfig], mat: MatConfig, pairs, mark
 
     obs = {"A": _undistort(uv_a, ca), "B": _undistort(uv_b, cb)}
     K = {n: cams[n].K for n in NAMES}
-    x0 = np.concatenate([cv2.Rodrigues(ca.R)[0].ravel(), np.ravel(ca.t),
-                         cv2.Rodrigues(cb.R)[0].ravel(), np.ravel(cb.t), X0.ravel()])
+    x0 = np.concatenate([cv2.Rodrigues(ca.R)[0].ravel(), np.ravel(ca.t), [1.0],
+                         cv2.Rodrigues(cb.R)[0].ravel(), np.ravel(cb.t), [1.0], X0.ravel()])
 
     def pieces(x):
-        poses = {"A": (rodrigues(x[0:3]), x[3:6]), "B": (rodrigues(x[6:9]), x[9:12])}
-        P = x[12:].reshape(-1, 3)
-        body = {n: _pinhole(P, K[n], *poses[n]) - obs[n] for n in NAMES}
-        mark = {n: _pinhole(M3, K[n], *poses[n]) - m2 for n, (M3, m2) in markers.items()}
+        cam = {n: x[k * N_CAM:(k + 1) * N_CAM] for k, n in enumerate(NAMES)}
+        poses = {n: (rodrigues(c[0:3]), c[3:6]) for n, c in cam.items()}
+        Ks = {n: _scaled(K[n], c[6]) for n, c in cam.items()}
+        P = x[2 * N_CAM:].reshape(-1, 3)
+        body = {n: _pinhole(P, Ks[n], *poses[n]) - obs[n] for n in NAMES}
+        mark = {n: _pinhole(M3, Ks[n], *poses[n]) - m2 for n, (M3, m2) in markers.items()}
         return body, mark, poses
 
     def residuals(x):
@@ -199,15 +219,19 @@ def refine_extrinsics(cams: dict[str, CameraConfig], mat: MatConfig, pairs, mark
     centers = {n: cam_center(R[n], t[n]) for n in NAMES}
     moved = {n: float(np.linalg.norm(centers[n] - cam_center(*poses0[n]))) for n in NAMES}
     rotated = {n: rotation_angle_deg(R[n], poses0[n][0]) for n in NAMES}
-    P = result.x[12:].reshape(-1, 3)
+    scale = {n: float(result.x[k * N_CAM + 6]) for k, n in enumerate(NAMES)}
+    P = result.x[2 * N_CAM:].reshape(-1, 3)
     ra, rb = P - centers["A"], P - centers["B"]
     cos = np.sum(ra * rb, axis=1) / (np.linalg.norm(ra, axis=1) * np.linalg.norm(rb, axis=1))
-    reasons = evaluate_guards(body_before, body_after, moved, rotated, marker_before, marker_after)
+    reasons = evaluate_guards(body_before, body_after, moved, rotated, marker_before, marker_after, scale)
     return BundleReport(
         ok=not reasons, reasons=reasons, R=R, t=t,
         body_rms_before=body_before, body_rms_after=body_after,
         marker_rms_before=marker_before, marker_rms_after=marker_after,
         centers=centers, moved_m=moved, rotated_deg=rotated,
+        K={n: _scaled(K[n], scale[n]) for n in NAMES},
+        focal_before={n: float(K[n][0, 0]) for n in NAMES},
+        focal_after={n: float(K[n][0, 0] * scale[n]) for n in NAMES},
         baseline_m=float(np.linalg.norm(centers["A"] - centers["B"])),
         median_angle_deg=float(np.degrees(np.median(np.arccos(np.clip(cos, -1, 1))))),
         n_frames=int(len(np.unique(frame))), n_points=n_pts,

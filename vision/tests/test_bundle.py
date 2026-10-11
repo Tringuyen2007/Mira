@@ -76,3 +76,30 @@ def test_guards():
     assert ok == []
     bad = evaluate_guards(2.0, 3.0, {"A": 0.7}, {"A": 20.0}, {"A": 0.5}, {"A": 3.0})
     assert len(bad) == 4
+
+
+def _with_focal(K, s):
+    K = np.array(K, float)
+    K[0, 0] *= s
+    K[1, 1] *= s
+    return K
+
+
+def test_refine_recovers_wrong_focal_length():
+    truth, pairs, rng = _scene()
+    start = {n: _perturbed(c, rng, 0.05, 1.5) for n, c in truth.items()}
+    start["A"] = replace(start["A"], K=_with_focal(truth["A"].K, 1.08))
+    start["B"] = replace(start["B"], K=_with_focal(truth["B"].K, 0.95))
+    report = refine_extrinsics(start, MAT, pairs)
+    assert report.ok, report.reasons
+    for n in ("A", "B"):
+        assert abs(report.focal_after[n] / truth[n].K[0, 0] - 1) < 0.02
+        np.testing.assert_allclose(report.K[n][:2, 2], truth[n].K[:2, 2])
+        assert np.linalg.norm(report.centers[n] - cam_center(truth[n].R, truth[n].t)) < 0.03
+    assert "focal" in report.summary()
+
+
+def test_focal_guard():
+    assert evaluate_guards(5.0, 2.0, {}, {}, {}, {}, {"A": 1.10}) == []
+    bad = evaluate_guards(5.0, 2.0, {}, {}, {}, {}, {"A": 1.20})
+    assert len(bad) == 1 and "focal" in bad[0]
