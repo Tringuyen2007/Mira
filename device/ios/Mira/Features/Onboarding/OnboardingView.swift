@@ -59,7 +59,9 @@ struct OnboardingView: View {
 
     private func continueTapped() {
         if returningToReview { returningToReview = false; state.onboarding.step = .review; return }
-        if state.onboarding.step == .therapist && canPairNow {
+        // Once a pairing attempt has failed, the button reads "Set up later": tapping it again must advance
+        // without retrying the same pair() call, not trap the user on this step.
+        if state.onboarding.step == .therapist && canPairNow && state.pairingError == nil {
             Task {
                 if await state.pair() { state.advanceOnboarding() }
                 // on failure the step shows state.pairingError and the button reads "Set up later"

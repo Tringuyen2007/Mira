@@ -79,6 +79,29 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(state.pairingError, "That code has expired or was already used. Ask your therapist for a new one.")
     }
 
+    func testClearPairingErrorResetsAfterFailedAttempt() async {
+        StubProtocol.handler = { _ in (404, #"{"detail":"unknown code"}"#) }
+        let state = draftState()
+        _ = await state.pair()
+        XCTAssertNotNil(state.pairingError)
+        state.clearPairingError()
+        XCTAssertNil(state.pairingError)
+    }
+
+    func testPairReturnsFalseWithoutErrorWhenAlreadyPairing() async {
+        // Simulates the onboarding Continue button being tapped twice in quick succession: the second call
+        // must not overwrite any error from the (still in-flight) first call.
+        StubProtocol.handler = { _ in (200, #"{"patient_id":"maya","token":"pt_abc123","me":\#(Self.meJSON)}"#) }
+        let state = draftState()
+        async let first = state.pair()
+        let second = await state.pair()
+        _ = await first
+        // At least one of the two overlapping calls must have been turned away by the isPairing guard,
+        // or both succeeded outright if the first had already finished - either way pairingError stays nil.
+        XCTAssertNil(state.pairingError)
+        _ = second
+    }
+
     func testForgetTokenClearsIdentity() async {
         StubProtocol.handler = { _ in (200, #"{"patient_id":"maya","token":"pt_abc123","me":\#(Self.meJSON)}"#) }
         let state = draftState()

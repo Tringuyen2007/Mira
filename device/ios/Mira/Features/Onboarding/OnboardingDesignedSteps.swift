@@ -153,7 +153,9 @@ struct OnboardingDesignedSteps: View {
         let linked = preview || state.me != nil
         return VStack(alignment: .leading, spacing: 24) {
             MiraIntro(eyebrow: "YOUR THERAPIST", title: "Link your therapist", detail: "Type the code your therapist\ngave you.")
-            TherapistCodeInput(code: $state.onboarding.therapistCode)
+            TherapistCodeInput(code: Binding(
+                get: { state.onboarding.therapistCode },
+                set: { state.onboarding.therapistCode = $0; state.clearPairingError() }))
                 .frame(height: 72)
                 .accessibilityIdentifier("therapistCode")
             Text("Letters and numbers, 6 in all.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
@@ -197,8 +199,8 @@ struct OnboardingDesignedSteps: View {
     }
     private func goalDescription(for me: MeResponse) -> String {
         for prescription in me.prescriptions {
-            if case .object(let targets)? = prescription.targets,
-               case .number(let deg)? = targets["kneeDeg"] ?? targets["knee_deg"] {
+            let key = prescription.targetKey ?? "knee_deg"
+            if case .object(let targets)? = prescription.targets, case .number(let deg)? = targets[key] {
                 return "Bend your knee to \(Int(deg))°"
             }
         }
@@ -480,8 +482,8 @@ struct OnboardingReviewView: View {
     }
     private func reviewGoal(for me: MeResponse) -> String {
         for prescription in me.prescriptions {
-            if case .object(let targets)? = prescription.targets,
-               case .number(let deg)? = targets["kneeDeg"] ?? targets["knee_deg"] {
+            let key = prescription.targetKey ?? "knee_deg"
+            if case .object(let targets)? = prescription.targets, case .number(let deg)? = targets[key] {
                 return "Bend your knee to \(Int(deg))°"
             }
         }

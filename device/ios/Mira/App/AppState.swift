@@ -257,10 +257,16 @@ final class AppState {
                            emergencyContact: contact, alertTherapist: preferences.alertTherapist)
     }
 
+    /// Clears a stale pairing error, e.g. once the user edits the therapist code after a failed attempt.
+    func clearPairingError() {
+        pairingError = nil
+    }
+
     /// POST /pair with the draft; on success the patient token replaces any saved token and sockets reconnect.
     @discardableResult
     func pair(deviceName: String = "iPhone") async -> Bool {
-        guard !isPairing, let body = pairRequest(deviceName: deviceName) else {
+        guard !isPairing else { return false }
+        guard let body = pairRequest(deviceName: deviceName) else {
             pairingError = "Enter your name, height, weight and the 6-character code first."
             return false
         }
