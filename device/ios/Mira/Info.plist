@@ -13,9 +13,9 @@
     <string>Mira connects to the Mira server on your local network for live exercise feedback.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsLocalNetworking</key>
-        <true/>
-        <!-- Demo server is plain HTTP on a public IP (no TLS chosen for the hackathon). Remove when the server gets HTTPS. -->
+        <!-- Demo server is plain HTTP on a public IP (no TLS chosen for the hackathon). Remove when the server gets HTTPS.
+             Do NOT add NSAllowsLocalNetworking next to this: on iOS 10+ its presence makes iOS ignore
+             NSAllowsArbitraryLoads, and every non-local http:// address fails with "requires a secure connection". -->
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
