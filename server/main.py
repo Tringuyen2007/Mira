@@ -23,6 +23,7 @@ from starlette.types import Scope
 
 from server.agents.haptics import HapticCoach
 from server.agents.recovery import RecoveryAgent
+from server.agents.rotation import RotationCoach
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
 from server.agents.session_analyst import SessionAnalyst
@@ -49,7 +50,7 @@ from server.db.pool import Database, DBError
 from server.db.wrist import WristRecorder
 from server.db.writer import WRIST_COPY_SQL, WRIST_MAX_QUEUE, FrameWriter, wrist_row
 from server.devices import DEVICE_EVENT_TYPES, DEVICE_HEALTH_KEYS, DeviceRegistry
-from server.engine_bridge import EngineBridge
+from server.engine_bridge import MOCK_WRIST_EXERCISE_ID, EngineBridge
 from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
 from server.notify import webhooks
@@ -103,6 +104,12 @@ class KioskStaticFiles(StaticFiles):
         if (parts and parts[0] in self.HIDDEN_DIRS) or (parts and parts[-1] == "readme.md"):
             raise HTTPException(status_code=404)
         return await super().get_response(path, scope)
+
+
+def _mock_exercise_id(c: Config) -> str:
+    """The boot/auto-restart demo session's exercise: squats, or forearm turns when MOCK_WRIST=1 (the mock then
+    synthesises the watch's rotation). Maya's seeded plan is untouched either way."""
+    return MOCK_WRIST_EXERCISE_ID if c.MOCK_WRIST else MOCK_EXERCISE_ID
 
 
 def _mock_loops(c: Config) -> bool:
@@ -210,12 +217,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge.subscribe_events(haptics.on_event)
     recovery = RecoveryAgent(hub, sessions)
     bridge.subscribe_events(recovery.on_event)
+    rotation = RotationCoach(hub, bridge, sessions)
+    bridge.subscribe_events(rotation.on_event)
+    bridge.subscribe_frames(rotation.on_frame)
 
     ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
     auto_restart: MockAutoRestart | None = None
     if cfg.MIRA_SOURCE.startswith("mock") and not _mock_loops(cfg):
-        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S,
+        auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, _mock_exercise_id(cfg), cfg.MOCK_AUTO_RESTART_S,
                                        incident_open=lambda: bool(guardian.incidents))
         sessions.on_stop.append(auto_restart.on_stop)
     # Every ended session gets a whole-session analysis (session_summary event, session_analyses row).
@@ -228,11 +238,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sessions.on_start.append(lambda session: bridge.live.on_session_start(session.profile.first_name,
                                                                         session.exercise_id,
                                                                         session.profile.device_prefs))
-    sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id))
+    sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id, session.exercise_id))
     sessions.on_start.append(voice.prepare_greeting)
 
     if cfg.MIRA_SOURCE.startswith("mock"):
-        await sessions.start(cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, origin="boot")
+        await sessions.start(cfg.MOCK_PATIENT_ID, _mock_exercise_id(cfg), origin="boot")
     await bridge.start()
     try:
         yield
