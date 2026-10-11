@@ -12,6 +12,11 @@ with exactly these fields:
   "Knee bend reached 84°, up 6° from last time". Only numbers from DATA.
 - "next_focus": one short phrase for the next session (e.g. "Keep your left knee over your toes"), or null.
 
+DATA may also include `hr_recovery` (per set: the peak heart rate and how far it fell one minute into the rest; a
+bigger drop_bpm is a faster recovery), `rotation_sets` (Apple Watch turn angles per set: best_deg and avg_deg against
+goal_deg) and `tremor_7d` (minutes per tremor level per day from the watch). Rows with `"source": "simulated"` are demo
+data: if you mention them, call them simulated. Mention these only when present and relevant.
+
 Return only the JSON object.
 
 ## Rules (always)
