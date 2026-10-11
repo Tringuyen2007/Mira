@@ -55,6 +55,9 @@ log = get_logger("main")
 # Client → server message types accepted on /ws/events (§4.3); anything else is dropped. Engine events
 # (fall, fall_status, gesture, …) can never come from a client.
 CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "device_health"})
+
+# A patient's phone may steer the session and relay its watch; it is never the LCD.
+PATIENT_CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button"})
 # `command` names that control the session itself (as opposed to pain/im_ok, which the Guardian/Coach
 # handle off the broadcast event). These are forwarded to the engine over the reverse channel.
 SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
@@ -326,11 +329,33 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
             devices.disconnected()
 
 
+def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
+    """Per-client hub filter: a phone sees frames and events only while the live session is its patient's."""
+    def accept(_msg: dict[str, Any]) -> bool:
+        current = get_state().sessions.current
+        return current is not None and current.patient_id == patient_id
+
+    return accept
+
+
+def _patient_event_handler(patient_id: str) -> Callable[[dict[str, Any]], None]:
+    """Like _client_event_handler, minus device_health, and only while the session is the patient's own."""
+    limiter = RateLimiter(CLIENT_MSGS_PER_S)
+    owns = _patient_accepts(patient_id)
+
+    def handle(msg: dict[str, Any]) -> None:
+        if not limiter.allow() or msg.get("type") not in PATIENT_CLIENT_EVENT_TYPES or not owns(msg):
+            return
+        _on_client_event(msg)
+
+    return handle
+
+
 async def _serve_patient_ws(ws: WebSocket, channel: str, principal: Principal) -> None:
-    """Placeholder until Task 7: a patient socket behaves like a full one. Task 7 adds the own-session filter and
-    the restricted client handler."""
+    assert principal.patient_id is not None
     hub = get_state().hub
-    await hub.connect(channel, ws, _client_event_handler() if channel == "events" else None)
+    handler = _patient_event_handler(principal.patient_id) if channel == "events" else None
+    await hub.connect(channel, ws, handler, accept=_patient_accepts(principal.patient_id))
 
 
 def _mount_static(app: FastAPI) -> None:
