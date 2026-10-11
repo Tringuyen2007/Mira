@@ -15,9 +15,9 @@ Rig testing showed three problems:
 
 Calibrate with no checkerboard and no tape measure: mount the cameras roughly, let the floor markers measure each camera's zoom and pose, follow an on-screen overlay to a saved symmetric target, refine with ~20 s of movement, and get warned if a camera moves later.
 
-**In scope:** focal length from markers; focal refinement in the bundle adjustment; placement overlay (crosshair, aim dot, ghost mat, move/turn instructions, A/B comparison); lock-target key; camera-moved alarm in the live tools; height check.
+**In scope:** removing checkerboard lens calibration; focal length from markers; focal refinement in the bundle adjustment; placement overlay (crosshair, aim dot, ghost mat, move/turn instructions, A/B comparison); lock-target key; camera-moved alarm in the live tools; height check.
 
-**Out of scope:** estimating lens distortion or principal point without a checkerboard; automatic re-calibration when a camera moves; portrait camera mounting.
+**Out of scope:** estimating lens distortion or principal point; automatic re-calibration when a camera moves; portrait camera mounting.
 
 ## Success criteria
 
@@ -30,7 +30,7 @@ Calibrate with no checkerboard and no tape measure: mount the cameras roughly, l
 ## Decisions
 
 1. **Zoom (focal length) from the markers.** Model: one focal length f (fx = fy), principal point at the image centre, zero distortion. These webcams are narrow (~48° wide) with little distortion, so the expected cost versus a checkerboard is ≲ 1 cm in joint position, below MediaPipe jitter.
-2. **Checkerboard results win.** A camera whose intrinsics came from `calib_intrinsics` keeps them; nothing in this design overwrites them. `CameraConfig` gains `intrinsics_source: "checkerboard" | "markers"`; an existing config with K but no source is treated as `"checkerboard"`.
+2. **Checkerboard calibration is removed.** The markers are the only source of K. Deleted: `vision/calib_intrinsics.py`, `vision/tests/test_calib_intrinsics.py`, the `intrinsics_rms` field and the "lens RMS" checks, and the README step. Any K/dist already stored in `config/cameras.yaml` (camera A has one from a checkerboard run) is ignored and replaced on the next `calib_extrinsics` save; `calib_extrinsics` always estimates K itself.
 3. **Exact placement does not affect accuracy** (calibration measures where the cameras actually are). Placement targets exist for consistency between sessions and left/right symmetry. Tolerance tightens to **5 cm and 2°** (`config/mat.yaml`).
 4. **Targets are locked from the current camera positions,** not typed in. Locked targets live in `config/cameras.yaml` (local to the room), per camera as `target_eye`. Until locked, `mat.yaml`'s `camera_targets` are used.
 5. **Alarm warns, never auto-corrects.** Re-solving from partly occluded markers mid-session could make the skeleton jump; re-running `calib_extrinsics` takes ~30 s.
@@ -51,11 +51,10 @@ Calibrate with no checkerboard and no tape measure: mount the cameras roughly, l
 
 - No longer requires prior lens calibration.
 - Every solve (every 0.5 s), per camera:
-  - if `intrinsics_source == "checkerboard"`: use the stored K and dist (as today);
-  - else: `estimate_focal` on the averaged corners; on success use its K with zero dist; on failure fall back to the last good estimate this session, else the nominal 55° guess, labelled "zoom guessed (see more markers)". Poses solved with the guess are shown for placement but cannot be saved.
+  - `estimate_focal` on the averaged corners; on success use its K with zero dist; on failure fall back to the last good estimate this session, else the nominal 55° guess, labelled "zoom guessed (see more markers)". Poses solved with the guess are shown for placement but cannot be saved.
   - then `solve_camera_pose` as today.
-- Display per camera: `zoom 48.4° × 28.4° (markers)` or `(checkerboard)`.
-- On `s`: requires both cameras solved with a non-guessed K. Saves K, dist (zeros for markers), `intrinsics_source`, R, t, `marker_obs`, `extrinsics_source = "markers"`.
+- Display per camera: `zoom 48.4° × 28.4°` (or `zoom guessed`).
+- On `s`: requires both cameras solved with a non-guessed K. Saves K, dist (zeros), R, t, `marker_obs`, `extrinsics_source = "markers"`.
 
 ### 3. Placement overlay — `vision/placement.py` (new), drawn by `calib_extrinsics`
 
@@ -80,7 +79,7 @@ Pure functions (testable without cameras) plus a draw function.
 
 ### 5. Focal refinement in the bundle adjustment — `vision/bundle.py`
 
-- For each camera with `intrinsics_source == "markers"`, one extra parameter: a focal scale s (K' = K with fx, fy multiplied by s; principal point fixed). Checkerboard cameras keep K fixed.
+- For each camera, one extra parameter: a focal scale s (K' = K with fx, fy multiplied by s; principal point fixed).
 - Sparsity updated: body and marker residuals of that camera depend on its focal column.
 - New guard: focal change ≤ 15% per camera. `BundleReport` gains `focal_before`, `focal_after` per camera and reports them in `summary()`.
 - `calib_refine` saves the refined K along with R and t.
@@ -103,11 +102,11 @@ Pure functions (testable without cameras) plus a draw function.
 
 - `--height-cm H` (optional). Estimate = median over 3D frames of mean eye height (landmarks 2, 5; y above the mat surface) / 0.936.
 - Check "estimated height": value cm, target `H ± 5%`. Omitted when `--height-cm` is not given.
-- The "lens RMS" checks become n/a with target "markers" for marker-calibrated cameras instead of failing.
+- The "lens RMS" checks are removed.
 
 ## Data / config changes
 
-- `CameraConfig`: add `intrinsics_source: str | None`, `target_eye: np.ndarray | None`; both round-trip through `to_dict`/`from_dict`. `calib_intrinsics` sets `intrinsics_source = "checkerboard"`.
+- `CameraConfig`: add `target_eye: np.ndarray | None` (round-trips through `to_dict`/`from_dict`); remove `intrinsics_rms` (ignored if present in an old file). `has_intrinsics` stays (K and dist present) for the downstream tools.
 - `config/mat.yaml`: `placement_tolerance: {position_m: 0.05, angle_deg: 2.0}`; `camera_targets` stay as defaults.
 - Recording header already carries the cameras dict; new fields ride along.
 
@@ -121,7 +120,7 @@ First time:
 
 Every session after: step 2 without `t`, then step 3. If the debug view shows "Camera X has moved", repeat steps 2–3.
 
-`calib_intrinsics` remains as an optional upgrade.
+There is no lens-calibration step.
 
 ## Error handling
 
@@ -136,7 +135,7 @@ Every session after: step 2 without `t`, then step 3. If the debug view shows "C
 - `lock_targets`: output exactly mirror-symmetric; equals inputs when inputs already symmetric.
 - `placement_hint`: camera displaced left → "move right"; too far → "closer"; rolled clockwise → "rotate counter-clockwise"; at target → both OK.
 - Ghost: projecting the target-pose ghost with the camera at the target equals the projected markers (< 0.01 px).
-- Bundle: focal starting 8% wrong recovers within 2%; checkerboard camera's K unchanged; 20% focal change rejected by the guard.
+- Bundle: focal starting 8% wrong recovers within 2%; 20% focal change rejected by the guard.
 - `MoveMonitor`: steady 5 px shift → "moved" after 3 checks; single-check outliers and missing markers → not moved; all hidden 10 s → "blind"; rate limit respected.
 - Height estimate on a synthetic skeleton of known height within 1%.
-- Config round-trip of the new fields; legacy config without `intrinsics_source` reads as checkerboard.
+- Config round-trip of `target_eye`; an old file with `intrinsics_rms` still loads.
