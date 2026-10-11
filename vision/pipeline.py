@@ -143,9 +143,10 @@ class Pipeline:
             mono = mono_joints(pose, self.cams[self._single], scale, self._last_xz) if pose is not None else None
             if mono is None:
                 joints, conf, tracking = np.full((33, 3), np.nan), np.zeros(33), "lost"
+                self._last_xz = None  # lost: a new person or session must not be held at the old spot
             else:
                 joints, conf, tracking = mono, pose.vis.copy(), f"single_cam_{self._single}"
-                self._last_xz = ((mono[23] + mono[24]) / 2)[[0, 2]]
+                self._last_xz = ((mono[27] + mono[28]) / 2)[[0, 2]]  # what mono_joints holds when feet hide
         else:
             usable = tri if tri is not None and int(tri.ok.sum()) >= MIN_3D_JOINTS else None
             joints, conf, tracking = self._cleaner.update(t, usable, {"A": a, "B": b})

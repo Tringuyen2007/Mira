@@ -67,7 +67,7 @@ def _feet_hidden_run(bystander_x=None, good=30, hidden=20, lean=0.0):
     cam = _cam_b()
     X = standing_skeleton()
     X[:, 2] += lean * np.clip(X[:, 1] - 0.09, 0, None)  # top leaning forward (hips not over the ankles)
-    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=1.75)
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
     outs = []
     for k in range(good + hidden):
         p = pose_from_points(cam, X, t=k / 30)
@@ -96,3 +96,10 @@ def test_one_camera_feet_hidden_stays_tracked_and_does_not_jump_to_a_bystander()
 def test_one_camera_feet_hidden_without_bystander_stays_tracked():
     outs = _feet_hidden_run(bystander_x=2.0)
     assert all(o.frame.tracking != "lost" for o in outs[30:])
+
+
+def test_one_camera_hold_with_feet_hidden_does_not_drift():
+    outs = _feet_hidden_run(lean=0.15)  # hips ~13 cm in front of the ankles
+    held = np.array([_hip_xz(o) for o in outs[30:]])
+    start = _hip_xz(outs[29])
+    assert np.max(np.linalg.norm(held - start, axis=1)) < 0.01

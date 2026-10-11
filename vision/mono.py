@@ -29,18 +29,20 @@ def world_shape(pose: PoseResult, cam: CameraConfig) -> np.ndarray | None:
 
 def mono_joints(pose: PoseResult, cam: CameraConfig, scale: float = 1.0, last_xz=None) -> np.ndarray | None:
     """Full 33-joint body in the mat frame from one camera: the world-landmark shape (times scale), moved so
-    the feet stand where their rays meet the floor (or at last_xz when the feet aren't visible)."""
+    the feet stand where their rays meet the floor (or, when the feet aren't visible, with the ankle midpoint
+    at last_xz: pass the previous result's ankle midpoint (x, z) to hold it in place)."""
     body = world_shape(pose, cam)
     if body is None:
         return None
     body = body * scale
     feet_xz = floor_position(pose, cam)
-    if feet_xz is None:
+    if feet_xz is None:  # holding: last_xz is the ankle midpoint of the last placed body
         if last_xz is None:
             return None
-        feet_xz = np.asarray(last_xz, float)
-    vis = [k for k in (27, 28, 29, 30) if pose.vis[k] >= 0.5]
-    body_feet_xz = body[vis or [27, 28]][:, [0, 2]].mean(axis=0)
+        feet_xz, used = np.asarray(last_xz, float), [27, 28]
+    else:
+        used = [k for k in (27, 28, 29, 30) if pose.vis[k] >= 0.5] or [27, 28]
+    body_feet_xz = body[used][:, [0, 2]].mean(axis=0)
     off_xz = feet_xz - body_feet_xz
     return body + np.array([off_xz[0], -np.min(body[FEET, 1]), off_xz[1]])
 
