@@ -146,6 +146,7 @@ Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" b
 | `GEMINI_DISABLED=1` | 0 | every AI caller uses its fallback (templates, SQL-only notes, cached demo answer) |
 | `ELEVEN_DISABLED=1` | 0 | no ElevenLabs requests; captions and already-recorded MP3s only |
 | `CALLS_DISABLED=1` | 1 | log-only call simulator, no Retell calls, no credits spent |
+| `ALLOW_TEST_CALLS=1` | 0 | `POST /me/test-alert` may place a real call (still needs `CALLS_DISABLED=0` too; else it only logs a notification) |
 | `INSIGHT_ENABLED=0` | 1 | no scheduled Insight agent / milestones |
 | `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
 | `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
@@ -293,6 +294,48 @@ clients may send `command`/`hr`/`wrist`/`watch_button`, not `device_health`.
 
 Migrations (`server/db/migrations/NNN_name.sql`, idempotent) run at `server/db/setup.py` step 1b, via
 `make db-migrate DSN=…`, and at server start when `DB_AUTO_MIGRATE=1` (default on).
+
+## Care API
+
+Plan 3: the therapist card, notes, AI-draft highlights, milestones and the patient/therapist message thread
+(`server/api/care.py`), plus a "send a test alert" button. All routes take the same principal as `/me`
+(patient token, or `full` with `?patient_id=`), via the shared `patient_for()` helper (`server/api/scope.py`).
+
+| route | body → response |
+|---|---|
+| `GET /me/care` | `{therapist, next_visit_at, hr_limit, emergency_contact, alert_therapist, notes, highlights, unread_messages}` |
+| `GET /me/messages?since_id=` | `{messages: [{id, sender, kind, body, created_at, read_at}, …]}` (ascending by id, `kind='message'` only); marks every unread message not sent by the patient as read |
+| `POST /me/messages {body}` | `{message}` (sender forced to `"patient"`); emits the `message` event and notifies the therapist |
+| `POST /patients/{id}/messages {body, kind?}` | full-token only; `kind` is `message`\|`note`\|`visit_highlight` (default `message`); `{message}`, sender `"therapist"` |
+| `GET /patients/{id}/milestones` | `{patient_id, milestones: [{id, time, message, evidence}, …]}` from `memory_events` kind `milestone`, newest first |
+| `POST /me/test-alert` | `{logged, called, note}` — always logs a therapist notification; only places a real call when `CALLS_DISABLED=0` **and** `ALLOW_TEST_CALLS=1` **and** the notifier supports it **and** the patient has an emergency contact phone |
+
+The `message` event (`/ws/events`, filtered like every other patient-tagged event):
+`{"type": "message", "patient_id": "...", "message": {id, sender, kind, body, created_at, read_at}}`.
+
+The `messages` table (`server/db/migrations/003_messages.sql`): `id bigserial`, `patient_id` (FK
+`patients.id`), `sender` (`patient`\|`therapist`\|`mira`), `kind` (`message`\|`note`\|`visit_highlight`,
+default `message`), `body`, `created_at`, `read_at`; indexed on `(patient_id, id)`. `DELETE /me` purges a
+patient's own rows along with the rest of their history.
+
+## Device prefs
+
+`PUT /me {device_prefs: {...}}` saves the patient's device preferences (captions, volume, slower speech) to
+the `patients` row and, if that patient has a live session right now, pushes them straight onto the running
+`/ws/live` stream (`server/api/me.py::put_me` sets `state.bridge.live.device_prefs`, no session restart
+needed) — the next `/ws/live` tick already carries `device_prefs` (`server/engine_bridge.py`). The Mira LCD
+kiosk reads it on every tick: `device/kiosk/js/state.js`'s `view()` sets `captionsOn = live.device_prefs?.captions
+!== false`, hiding `#caption-bar` when false, and `main.js` applies `device_prefs.volume` (clamped 0..1,
+default 1) to the audio player before each clip.
+
+## Patient app data flow
+
+The iOS app's `PatientStore` (`device/ios/Mira/App/PatientStore.swift`) loads `GET /me`, `GET /me/care`, the
+patient's sessions, per-exercise progress, milestones and messages in parallel, and keeps each piece's
+failure independent so a down endpoint doesn't blank the rest of the screen. `AppState.refreshMe()` drives
+it and is called on app foreground, right after pairing, and whenever a `session_summary` event arrives on
+`/ws/events` (session end) — so Home, Progress and Care stay in sync with the server without the patient
+doing anything.
 
 ## Frame contract: joint angles
 

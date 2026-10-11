@@ -226,6 +226,35 @@ next `online:true`. Sample: `server/samples/ws_events_device_status.json`.
 | `exercise_name` | `string \| null` | display name for `exercise_id` (e.g. "Mini squats" for `squat`) |
 | `incident` | `boolean` | true while a fall/check-in/open alert is active, until it's resolved or closed |
 
+## PatientStore (care, progress, messaging)
+
+`device/ios/Mira/App/PatientStore.swift` (`@MainActor @Observable`) is the app's read model for Plan 3's
+Home/Progress/Care screens: `refreshAll(api:patientID:)` fetches `/me`, `/me/care`, the patient's sessions,
+milestones and messages in parallel, then per-exercise progress, each independently fault-tolerant (one
+endpoint failing doesn't blank the others — see `lastError`). `AppState.refreshMe()` calls it on foreground,
+right after `pair()` completes, and on every `session_summary` event, and exposes the typed results
+(`me`, `care`, `sessions`, `progress`, `milestones`, `messages`) plus pure helpers (`streakDays`, `weekDots`,
+`kneeTrend`, `forecast`, `balanceSeries`) used by the screens. `send(_:api:)` posts a new message
+(`POST /me/messages`) and `appendIncoming(_:)` folds an incoming `message` event from `/ws/events` into the
+thread — see below.
+
+### Messaging over `/ws/events`
+
+The patient/therapist message thread is both a REST resource and a live event. `GET /me/messages` and
+`POST /me/messages` carry the full history and send the patient's own messages; a `message` event on
+`/ws/events` (`{"type": "message", "patient_id", "message": {id, sender, kind, body, created_at, read_at}}`)
+delivers anything sent from the dashboard side (`POST /patients/{id}/messages`) or by the patient from
+another device, in real time. `LiveSessionStore.onMessageEvent` is wired to `PatientStore.appendIncoming` in
+`AppState.init`, so a therapist's message shows up in Care without a manual refresh.
+
+### ATS exception (plain-HTTP demo server)
+
+`Info.plist`'s `NSAppTransportSecurity` sets `NSAllowsArbitraryLoads = true` (alongside the existing
+`NSAllowsLocalNetworking`) because the demo server (Vultr, README "Deploy (Vultr)") is plain HTTP on a public
+IP — no TLS was set up for the hackathon, and `NSAllowsLocalNetworking` alone only covers LAN addresses, not
+a public one. This is a deliberate, documented exception, not an oversight: **remove it once the server gets
+HTTPS**, at which point `wss://`/`https://` addresses work without any ATS exception at all.
+
 ## Open items
 
 - Session commands (`start/pause/skip/stop`) are forwarded to the engine over the
