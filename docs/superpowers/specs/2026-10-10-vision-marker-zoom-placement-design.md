@@ -40,12 +40,12 @@ Calibrate with no checkerboard and no tape measure: mount the cameras roughly, l
 
 ### 1. Focal length from markers — `vision/markers.py`
 
-`estimate_focal(obs, mat, image_size) -> FocalEstimate | None`
+`estimate_focal(obs, mat, image_size) -> (FocalEstimate | None, reason | None)`
 
 - Input: averaged marker corners (`average_detections`, as today) for one camera.
-- Requires ≥ 3 markers, including at least one at each end of the mat (one of IDs 0/1 and one of 2/3); otherwise returns None with a reason ("need markers at both ends of the mat to measure zoom"). Two markers at one end give almost no perspective, so f is unreliable.
-- Method: `cv2.calibrateCameraExtended` on the single planar view with `CALIB_USE_INTRINSIC_GUESS | CALIB_FIX_PRINCIPAL_POINT | CALIB_FIX_ASPECT_RATIO | CALIB_ZERO_TANGENT_DIST | CALIB_FIX_K1..K6`, initial f from a nominal 55° diagonal field of view, principal point at image centre.
-- Output: `FocalEstimate(K, f, f_std, hfov_deg, vfov_deg, rms)`. Rejected (None + reason) if `f_std / f > 3%` or the horizontal field of view falls outside 30–100°.
+- Requires markers at both ends of the mat (one of IDs 0/1 and one of 2/3); otherwise returns a reason ("need markers at both ends of the mat to measure zoom"). Markers at one end only give almost no perspective, so f is unreliable.
+- Method: start from a nominal 55° diagonal field of view and the IPPE marker pose, then least-squares over (f, rotation, translation) with the principal point fixed at the image centre and no distortion. The standard deviation of f comes from the fit's covariance (verified on synthetic data to match the observed spread).
+- Output: `FocalEstimate(K, f, f_std, hfov_deg, vfov_deg, rms)`. Rejected (reason) if `f_std / f > 3%` or the horizontal field of view falls outside 30–100°.
 
 ### 2. `calib_extrinsics` changes — `vision/calib_extrinsics.py`
 
@@ -131,7 +131,7 @@ There is no lens-calibration step.
 
 ## Testing (synthetic, no hardware)
 
-- `estimate_focal`: markers projected with known K/pose at ~4.5 m, 0.3 px noise → f within 3%; only one end visible → None with reason; fov sanity bounds.
+- `estimate_focal`: markers projected with known K/pose at ~4.5 m, 0.3 px noise → f within 3%; only one end visible → reason; very noisy two-marker view → "too uncertain".
 - `lock_targets`: output exactly mirror-symmetric; equals inputs when inputs already symmetric.
 - `placement_hint`: camera displaced left → "move right"; too far → "closer"; rolled clockwise → "rotate counter-clockwise"; at target → both OK.
 - Ghost: projecting the target-pose ghost with the camera at the target equals the projected markers (< 0.01 px).
