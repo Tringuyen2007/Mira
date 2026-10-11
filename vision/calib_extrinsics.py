@@ -26,6 +26,21 @@ from vision.placement import comparison_lines, draw_overlay, layout, lock_target
 TILE = (640, 360)
 
 
+def lock_problems(results: dict[str, tuple]) -> list[str]:
+    """Why the current poses can't be locked as targets: a target saved from a guessed zoom or a
+    nonsense pose (wrong marker IDs) would mislead every later session."""
+    problems = []
+    for n in ("A", "B"):
+        if n not in results:
+            problems.append(f"camera {n} has no marker solution")
+            continue
+        sol, _, _, warns = results[n]
+        if sol.guessed:
+            problems.append(f"camera {n} needs a measured zoom (markers at both ends of the mat)")
+        problems += [f"camera {n}: {w}" for w in warns]
+    return problems
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--seconds", type=float, default=3.0, help="averaging window")
@@ -113,8 +128,9 @@ def main() -> int:
             if key in (ord("q"), 27):
                 return 0
             if key == ord("t"):
-                if set(results) != {"A", "B"}:
-                    print("both cameras need a marker solution before locking targets")
+                problems = lock_problems(results)
+                if problems:
+                    print("cannot lock targets: " + "; ".join(problems))
                     continue
                 eye_a, eye_b = lock_targets(*(cam_center(results[n][0].R, results[n][0].t) for n in ("A", "B")))
                 cams["A"].target_eye, cams["B"].target_eye = eye_a, eye_b

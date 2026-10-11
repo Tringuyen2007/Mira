@@ -24,7 +24,7 @@ def test_marker_corners_order_and_size():
 def test_load_mat_reads_repo_file():
     mat = load_mat()
     assert mat.length_m == 1.73
-    np.testing.assert_allclose(mat.camera_targets["A"], [1.98, 0.85, 1.98])
+    np.testing.assert_allclose(mat.camera_targets["A"], [3.18, 0.85, 3.18])
     np.testing.assert_allclose(mat.aim_point, [0.0, 0.8, 0.0])
 
 
