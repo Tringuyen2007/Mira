@@ -7,21 +7,26 @@ import time
 import numpy as np
 
 from vision.capture import Camera, camera_problem, resolution_warning
-from vision.config import CameraConfig
+from vision.config import CameraConfig, MatConfig
 from vision.pairing import Pair, Pairer, SkewStats
-from vision.pose import PoseWorker, model_path
-from vision.types import PoseResult
+from vision.pose import NUM_POSES, PoseWorker, model_path
+from vision.roi import mat_roi
+from vision.types import CameraPeople
 
 
 class LiveSource:
-    def __init__(self, cams: dict[str, CameraConfig], model: str = "full"):
+    def __init__(self, cams: dict[str, CameraConfig], model: str = "full", mat: MatConfig | None = None,
+                 num_poses: int = NUM_POSES):
         if not cams:
             raise SystemExit("No cameras configured: run python -m vision.cams first")
         model_path(model)  # fail fast if the model is missing
         self.cams = cams
         self._queue: queue.Queue = queue.Queue()
         self.cameras = {n: Camera(n, c.index, c.width, c.height) for n, c in cams.items()}
-        self.workers = {n: PoseWorker(cam, self._queue, model) for n, cam in self.cameras.items()}
+        # pose only searches the area around the mat (full frame when uncalibrated or no mat given)
+        self.rois = {n: (mat_roi(cams[n], mat) if mat is not None else None) for n in cams}
+        self.workers = {n: PoseWorker(cam, self._queue, model, self.rois[n], num_poses)
+                        for n, cam in self.cameras.items()}
         names = sorted(cams)
         self.pairer = Pairer(anchor=names[0], other=names[1] if len(names) > 1 else None)
         self.skew = SkewStats()
@@ -72,7 +77,7 @@ class LiveSource:
             except queue.Empty:
                 return out
 
-    def latest_frames(self) -> dict[str, tuple[np.ndarray, PoseResult] | None]:
+    def latest_frames(self) -> dict[str, tuple[np.ndarray, CameraPeople] | None]:
         return {n: w.latest for n, w in self.workers.items()}
 
     def stats(self) -> dict[str, dict]:
@@ -82,6 +87,7 @@ class LiveSource:
                 "pose_ms": self.workers[n].ms,
                 "error": cam.error or self.workers[n].error,
                 "warning": resolution_warning(self.cams[n], cam.actual_size),
+                "roi": self.rois.get(n),
             }
             for n, cam in self.cameras.items()
         }

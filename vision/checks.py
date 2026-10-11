@@ -151,8 +151,8 @@ def _live_outputs(cams, mat, model: str, seconds: float):
 
     outputs = []
     monitor = MoveMonitor(cams, MarkerDetector(mat), interval_s=0.25)
-    pipeline = Pipeline(cams, smoothing=False)  # smoothing would hide the jitter these checks measure
-    with LiveSource(cams, model) as src:
+    pipeline = Pipeline(cams, smoothing=False, mat=mat)  # smoothing would hide the jitter these checks measure
+    with LiveSource(cams, model, mat) as src:
         problems = src.wait_ready()
         if problems:
             raise SystemExit("cannot run checks: " + "; ".join(problems))

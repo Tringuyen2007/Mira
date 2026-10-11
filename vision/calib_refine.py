@@ -55,8 +55,8 @@ def capture_live(cams, mat, model: str, seconds: float, force: bool = False):
 
     pairs = []
     path = default_path("refine-")
-    pipeline = Pipeline(cams)
-    with LiveSource(cams, model) as src:
+    pipeline = Pipeline(cams, mat=mat)
+    with LiveSource(cams, model, mat) as src:
         problems = src.wait_ready()
         if problems:
             print("cannot capture: " + "; ".join(problems))
@@ -78,16 +78,17 @@ def _capture(src, rec, pipeline, pairs, seconds: float) -> None:
         capturing = elapsed >= COUNTDOWN_S
         for pair in src.poll(0.005):
             if capturing:
-                rec.write(pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s))
-                pairs.append((pair.a, pair.b))
+                out = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s)
+                rec.write(out)
+                pairs.append((out.raw["A"], out.raw["B"]))  # the person at the mat, as detected
         tiles = []
         for n, v in sorted(src.latest_frames().items()):
             if v is None:
                 tiles.append(np.zeros((360, 640, 3), np.uint8))
                 continue
-            frame, pose = v
+            frame, found = v
             tile = fit(frame, (640, 360))
-            if pose.detected:
+            for pose in found.people:
                 draw_skeleton(tile, pose.lm2d * [640 / frame.shape[1], 360 / frame.shape[0]],
                               ok=pose.vis >= 0.5, color=GREEN)
             tiles.append(tile)

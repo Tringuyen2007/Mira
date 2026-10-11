@@ -60,8 +60,13 @@ def _blank() -> np.ndarray:
     return np.full((PANEL_H, PANEL_W, 3), BG, np.uint8)
 
 
+ROI_COLOR = (255, 255, 0)  # cyan: the area pose detection pays attention to
+IGNORED_COLOR = (130, 130, 130)
+
+
 def render_camera(image, pose: PoseResult | None, frame: FrameResult | None, cam: CameraConfig | None,
-                  detector: MarkerDetector | None = None) -> np.ndarray:
+                  detector: MarkerDetector | None = None, ignored: list[PoseResult] | None = None,
+                  roi=None) -> np.ndarray:
     if image is not None:
         h, w = image.shape[:2]
         panel = fit(image, (PANEL_W, PANEL_H))
@@ -75,6 +80,15 @@ def render_camera(image, pose: PoseResult | None, frame: FrameResult | None, cam
             poly = (c * scale).astype(np.int32)
             cv2.polylines(panel, [poly], True, YELLOW, 2)
             draw_text(panel, str(i), pt(poly[0]), YELLOW)
+    if roi is not None:
+        x0, y0, x1, y1 = roi
+        cv2.rectangle(panel, pt(np.array([x0, y0]) * scale), pt(np.array([x1, y1]) * scale), ROI_COLOR, 2)
+        draw_text(panel, "tracking area", pt(np.array([x0, y1]) * scale + [4, -6]), ROI_COLOR, 0.45)
+    for other in ignored or []:
+        if other.detected:
+            draw_skeleton(panel, other.lm2d * scale, ok=other.vis >= 0.5, color=IGNORED_COLOR)
+            top = other.lm2d[np.argmin(other.lm2d[:, 1])] * scale
+            draw_text(panel, "ignored", pt(top + [-25, -8]), IGNORED_COLOR, 0.45)
     if pose is not None and pose.detected:
         draw_skeleton(panel, pose.lm2d * scale, ok=pose.vis >= 0.5, color=GREEN)
     if frame is not None and cam is not None and cam.calibrated:
@@ -138,7 +152,9 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     panels = []
     for name in ("A", "B"):
         cam = cams.get(name)
-        panel = render_camera(images.get(name), poses.get(name), frame, cam, detector)
+        panel = render_camera(images.get(name), poses.get(name), frame, cam, detector,
+                              (out.ignored or {}).get(name) if out is not None else None,
+                              ((stats or {}).get(name) or {}).get("roi"))
         s = (stats or {}).get(name)
         draw_text(panel, f"{name}  {s['fps']:.0f} fps  pose {s['pose_ms']:.0f} ms" if s else name, (8, 20))
         y = 40
@@ -159,6 +175,11 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     if out is not None and out.tri is not None and out.tri.ok.any():
         err = float(np.nanmean(out.tri.reproj_err[out.tri.ok]))
         hud.append(f"3D reprojection {err:.1f} px  ({int(out.tri.ok.sum())}/33 joints)")
+    if out is not None and out.people is not None:
+        n_seen = max((len(v) for v in out.people.values()), default=0)
+        hud.append(f"{n_seen} people seen, tracking {'1' if out.frame.tracking != 'lost' else 'nobody'}")
+    if out is not None and out.dropped:
+        hud.append(f"ignoring camera {out.dropped} (disagrees)")
     if out is not None and out.swapped:
         hud.append(f"undid a left/right flip ({out.swapped})")
     if recording:
@@ -172,12 +193,12 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
     from vision.live import LiveSource  # imports MediaPipe; keep replay usable without it
 
     detector, show_markers = MarkerDetector(mat), False
-    pipeline = Pipeline(cams)
+    pipeline = Pipeline(cams, mat=mat)
     monitor = MoveMonitor(cams, detector)
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
     last_draw = 0.0
-    with LiveSource(cams, model) as src:
+    with LiveSource(cams, model, mat) as src:
         try:
             while True:
                 for pair in src.poll(0.005):
@@ -189,7 +210,7 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str) -> None:
                     last_draw = now
                     latest = src.latest_frames()
                     images = {n: v[0] for n, v in latest.items() if v}
-                    poses = {n: v[1] for n, v in latest.items() if v}
+                    poses = last.raw if last is not None else {}  # the tracked person per camera
                     for n, image in images.items():
                         monitor.update(n, image, now)
                     alarms = {n: monitor.message(n) for n in cams}
