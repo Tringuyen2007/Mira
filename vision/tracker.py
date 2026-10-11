@@ -258,9 +258,8 @@ ROOT_MIN_CUTOFF = 3.0  # Hz: two cameras pin the body's position well, so it is 
 SINGLE_SMOOTH_TOO = True  # one camera: One Euro on the pose numbers before the 2D-motion gate
 GATE_FULL_PX = 8.0  # one camera: a landmark moving this many px per frame passes its change through fully
 GATE_MIN_GAIN = 0.08  # ... a landmark still in 2D lets only this fraction of a depth change through per frame
-GATE_PASS_M = 0.06  # ... but a position held back this far (m) passes through fully (walking along the line of sight)
-GATE_PASS_RAD = 0.15  # ... and so does an angle held back this far (rad)
-GATE_PASS = np.r_[[GATE_PASS_M] * 3, [GATE_PASS_RAD] * (N_PARAMS - 3)]
+GATE_PASS_M = 0.06  # ... but a position held back this far (m) passes through fully (walking along the line of sight);
+# angles get no such pass: MediaPipe's depth noise alone moves them by more than any useful threshold
 GATE_GAP_S = 0.2  # ... after a gap longer than this (s) the gate and smoother start afresh
 SINGLE_BETA = 2.0  # one camera: noisier depth, so follow speed-ups more cautiously
 SINGLE_ROOT_MIN_CUTOFF = 1.0  # one camera: the floor position wobbles ~2 cm, smooth it more
@@ -500,8 +499,9 @@ class ModelTracker:
         """One camera: a pose number may only change as fast as the landmarks it moves are moving in the
         camera's 2D view. The camera sees side-to-side and up-down motion precisely; only depth is noisy,
         so joints that are still in 2D are held still in 3D, and real movement (which shows in 2D) passes.
-        A lasting change that barely shows in 2D (walking toward the camera) builds up against the held
-        value and passes too: the further it is held back, the more of it comes through (fully at GATE_PASS)."""
+        A lasting position change that barely shows in 2D (walking toward the camera) builds up against the
+        held value and passes too: the further it is held back, the more of it comes through (fully at
+        GATE_PASS_M). Angles have no such pass."""
         _, uv, w = ob
         prev_uv, prev_w, prev_out = self._gate_uv, self._gate_w, self._gate_out
         self._gate_uv, self._gate_w = uv.copy(), w.copy()
@@ -516,6 +516,6 @@ class ModelTracker:
             m = m[np.isfinite(m)]
             if m.size:
                 gain[j] = float(np.clip(np.median(m) / GATE_FULL_PX, GATE_MIN_GAIN, 1.0))
-        gain = np.maximum(gain, np.clip(np.abs(x - prev_out) / GATE_PASS, 0.0, 1.0))
+        gain[ROOT] = np.maximum(gain[ROOT], np.clip(np.abs(x[ROOT] - prev_out[ROOT]) / GATE_PASS_M, 0.0, 1.0))
         self._gate_out = prev_out + gain * (x - prev_out)
         return self._gate_out

@@ -330,3 +330,17 @@ def _walk_toward_camera_errors(speed):
 def test_one_camera_walking_toward_the_camera_keeps_up():
     assert _walk_toward_camera_errors(0.5) < 0.08
     assert _walk_toward_camera_errors(1.2) < 0.12
+
+
+def test_one_camera_gate_passes_a_held_back_position_but_still_holds_an_angle():
+    import vision.tracker as T
+
+    tr = T.ModelTracker({"B": _cam_b()})
+    uv, w = np.zeros((33, 2)), np.ones(33)
+    tr._gate(np.zeros(T.N_PARAMS), (None, uv, w))  # first frame: taken as is
+    x = np.zeros(T.N_PARAMS)
+    x[0] = 0.10  # the hips 10 cm along the line of sight (barely moves in 2D)
+    x[T.SPINE.start] = 0.3  # a large one-off bend from a noisy depth guess, with nothing moving in 2D
+    out = tr._gate(x, (None, uv, w))
+    assert abs(out[0] - 0.10) < 1e-9  # a lasting position change passes through
+    assert abs(out[T.SPINE.start] - T.GATE_MIN_GAIN * 0.3) < 1e-9  # an angle is still held
