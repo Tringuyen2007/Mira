@@ -45,17 +45,28 @@ struct OnboardingView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if !isWelcome && state.onboarding.step != .review {
-                    MiraButton(title: continueTitle) {
-                        if returningToReview { returningToReview = false; state.onboarding.step = .review }
-                        else { state.advanceOnboarding() }
-                    }
-                    .disabled(!state.onboarding.canContinue)
+                    MiraButton(title: continueTitle, action: continueTapped)
+                    .disabled(!state.onboarding.canContinue || state.isPairing)
                     .accessibilityIdentifier("onboardingContinue")
                     .padding(.horizontal, 32).padding(.vertical, 16)
 
                 }
             }
         }
+    }
+
+    private var canPairNow: Bool { state.onboarding.therapistCode.count == 6 && !state.isLinked }
+
+    private func continueTapped() {
+        if returningToReview { returningToReview = false; state.onboarding.step = .review; return }
+        if state.onboarding.step == .therapist && canPairNow {
+            Task {
+                if await state.pair() { state.advanceOnboarding() }
+                // on failure the step shows state.pairingError and the button reads "Set up later"
+            }
+            return
+        }
+        state.advanceOnboarding()
     }
 
     private var isDesignedStep: Bool { [.profile, .therapist, .device, .emergencyContact, .review].contains(state.onboarding.step) }
@@ -75,8 +86,10 @@ struct OnboardingView: View {
         if returningToReview { return "Save changes" }
         switch state.onboarding.step {
         case .welcome: return "Get started"
-        case .therapist: return preview ? "Continue" : "Set up later"
-        case .device: return preview ? "Connect Mira" : "Set up later"
+        case .therapist:
+            if state.isLinked { return "Continue" }
+            return canPairNow && state.pairingError == nil ? "Link therapist" : "Set up later"
+        case .device: return state.isLinked ? "Continue" : (preview ? "Connect Mira" : "Set up later")
         case .review: return "Yes, this is right"
         default: return "Continue"
         }

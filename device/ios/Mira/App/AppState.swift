@@ -142,6 +142,15 @@ final class AppState {
     var isPaired: Bool { token != nil }
     var isLinked: Bool { patientID != nil && isPaired }
 
+    static let demoServerAddress = "http://45.76.255.253:8000"
+    private static var defaultServerAddress: String {
+        #if MIRA_DEMO
+        return demoServerAddress
+        #else
+        return "http://localhost:8000"
+        #endif
+    }
+
     init(defaults: UserDefaults = .standard, tokenStore: TokenStore = KeychainTokenStore(), urlSession: URLSession = .shared) {
         self.defaults = defaults
         self.tokenStore = tokenStore
@@ -153,7 +162,7 @@ final class AppState {
         onboarding = draft
         // The old welcome-only screen must not count as a completed profile.
         hasCompletedOnboarding = defaults.bool(forKey: "hasCompletedOnboarding.v2") && draft.canFinish
-        serverAddress = defaults.string(forKey: "serverAddress") ?? "http://localhost:8000"
+        serverAddress = defaults.string(forKey: "serverAddress") ?? Self.defaultServerAddress
         connectionEnabled = defaults.bool(forKey: "connectionEnabled")
         token = tokenStore.load()
         tokenHint = token.map(PairingToken.masked)

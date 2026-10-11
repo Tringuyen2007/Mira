@@ -150,6 +150,7 @@ struct OnboardingDesignedSteps: View {
 
     private var therapist: some View {
         @Bindable var state = state
+        let linked = preview || state.me != nil
         return VStack(alignment: .leading, spacing: 24) {
             MiraIntro(eyebrow: "YOUR THERAPIST", title: "Link your therapist", detail: "Type the code your therapist\ngave you.")
             TherapistCodeInput(code: $state.onboarding.therapistCode)
@@ -159,20 +160,49 @@ struct OnboardingDesignedSteps: View {
             MiraCard {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 16) {
-                        if preview { FigmaIcon(screen: "therapist", slot: "imgIconCheckCircle", size: 30).padding(11).background(MiraUI.mist, in: Circle()) }
+                        if linked { FigmaIcon(screen: "therapist", slot: "imgIconCheckCircle", size: 30).padding(11).background(MiraUI.mist, in: Circle()) }
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(preview ? "Your plan is ready" : "Your plan will appear here").font(MiraUI.font(20, "SemiBold"))
-                            Text(preview ? "From Dr. Sam Lee, PT" : "Therapist linking isn’t available yet.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                            Text(linked ? "Your plan is ready" : "Your plan will appear here").font(MiraUI.font(20, "SemiBold"))
+                            Text(therapistSubtitle).font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                         }
                     }
                     Divider()
-                    planRow("imgIconExercises", preview ? "3 exercises" : "Your exercises", preview ? "About 15 minutes a day" : "Prescribed by your therapist")
-                    planRow("imgIconGoal", "Your goal", preview ? "Bend your knee further, to 110°" : "Targets from your care plan")
-                    planRow("imgIconCheckin", "Weekly check-in", preview ? "Dr. Lee checks in each week" : "Your care team’s check-ins")
+                    if let me = state.me {
+                        planRow("imgIconExercises", "\(me.prescriptions.count) exercises", "About \(estimatedMinutes(for: me)) minutes a day")
+                        planRow("imgIconGoal", "Your goal", goalDescription(for: me))
+                        planRow("imgIconCheckin", "Weekly check-in", "Your care team’s check-ins")
+                    } else {
+                        planRow("imgIconExercises", preview ? "3 exercises" : "Your exercises", preview ? "About 15 minutes a day" : "Prescribed by your therapist")
+                        planRow("imgIconGoal", "Your goal", preview ? "Bend your knee further, to 110°" : "Targets from your care plan")
+                        planRow("imgIconCheckin", "Weekly check-in", preview ? "Dr. Lee checks in each week" : "Your care team’s check-ins")
+                    }
                 }
             }
-            if !preview { Text("You can save your code for later. This does not link a therapist or load a plan.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft) }
+            if let error = state.pairingError {
+                Text(error).font(MiraUI.font(15)).foregroundStyle(MiraUI.alert)
+            } else if !state.isLinked {
+                Text("Tap Link therapist to load your plan, or save the code for later.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
+            }
+            if state.isPairing { ProgressView("Linking…") }
         }
+    }
+    private var therapistSubtitle: String {
+        if let me = state.me, let therapist = me.therapist {
+            return "From \(therapist.name)" + (therapist.clinic.map { ", \($0)" } ?? "")
+        }
+        return preview ? "From Dr. Sam Lee, PT" : "Enter your code to link your therapist."
+    }
+    private func estimatedMinutes(for me: MeResponse) -> Int {
+        max(5, me.prescriptions.reduce(0) { $0 + ($1.sets ?? 1) * (($1.reps ?? 10) * 4 + 30) } / 60)
+    }
+    private func goalDescription(for me: MeResponse) -> String {
+        for prescription in me.prescriptions {
+            if case .object(let targets)? = prescription.targets,
+               case .number(let deg)? = targets["kneeDeg"] ?? targets["knee_deg"] {
+                return "Bend your knee to \(Int(deg))°"
+            }
+        }
+        return "Targets from your care plan"
     }
     private func planRow(_ icon: String, _ title: String, _ detail: String) -> some View {
         HStack(spacing: 14) {
@@ -184,7 +214,8 @@ struct OnboardingDesignedSteps: View {
         }
     }
     private var device: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        let online = state.me?.lcd?.online ?? false
+        return VStack(alignment: .leading, spacing: 28) {
             MiraIntro(eyebrow: "YOUR MIRA", title: "Connect your Mira", detail: "Plug in Mira and set it\nin front of your mat.")
             FigmaIllustration(name: "device")
                 .background(MiraUI.mist).clipShape(RoundedRectangle(cornerRadius: 32))
@@ -193,16 +224,33 @@ struct OnboardingDesignedSteps: View {
                 HStack(spacing: 16) {
                     Image(systemName: "desktopcomputer").foregroundStyle(MiraUI.ink).padding(15).background(MiraUI.mist, in: Circle())
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(preview ? "Mira found" : "Mira setup pending").font(MiraUI.font(20, "SemiBold"))
-                        Text(preview ? "Living room" : "Pairing is not available yet").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                        Text(deviceTitle(online: online)).font(MiraUI.font(20, "SemiBold"))
+                        Text(deviceSubtitle(online: online)).font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                     }
                     Spacer()
-                    if preview { FigmaIcon(screen: "device", slot: "imgIconCheckCircle", size: 32) }
+                    if online || (preview && state.me == nil) { FigmaIcon(screen: "device", slot: "imgIconCheckCircle", size: 32) }
+                    if state.isLinked {
+                        Button("Refresh") { Task { await state.refreshMe() } }
+                            .font(MiraUI.font(16, "Medium")).foregroundStyle(MiraUI.accent)
+                    }
                 }
             }
-            .overlay { RoundedRectangle(cornerRadius: 28).stroke(preview ? MiraUI.accent : .clear, lineWidth: 2) }
-            if !preview { Text("You can finish your profile now and connect Mira later.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) }
+            .overlay { RoundedRectangle(cornerRadius: 28).stroke((online || (preview && state.me == nil)) ? MiraUI.accent : .clear, lineWidth: 2) }
+            if !online { Text("You can finish your profile now and connect Mira later.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) }
         }
+    }
+    private func deviceTitle(online: Bool) -> String {
+        if preview && state.me == nil { return "Mira found" }
+        return state.isLinked ? (online ? "Mira is online" : "Mira's screen is offline") : "Mira setup pending"
+    }
+    private func deviceSubtitle(online: Bool) -> String {
+        if preview && state.me == nil { return "Living room" }
+        guard state.isLinked else { return "Link your therapist first" }
+        if online {
+            let clinic = state.me?.therapist?.clinic ?? state.me?.therapist?.name ?? "your clinic"
+            return "Paired through \(clinic)"
+        }
+        return "Plug Mira in; this updates on its own."
     }
     private func beginEditing(_ measurement: Measurement) {
         editingName = false
@@ -408,17 +456,36 @@ struct OnboardingReviewView: View {
                 row(preview ? "Alert Dr. Lee" : "Therapist alerts", state.preferences.alertTherapist ? (preview ? "✓ On" : "On when connected") : "Off")
             }
             reviewCard("Your therapist", icon: "imgIconHeart", step: .therapist, color: MiraUI.blush) {
-                row("Therapist", preview ? "Dr. Sam Lee, PT" : "Not linked yet")
-                row("Plan", preview ? "3 exercises, 15 min a day" : "Waiting for your care team")
-                row("Goal", preview ? "Bend knee to 110°" : "Not provided yet")
+                if let me = state.me {
+                    row("Therapist", me.therapist?.name ?? "Not linked yet")
+                    row("Plan", "\(me.prescriptions.count) exercises")
+                    row("Goal", reviewGoal(for: me))
+                } else {
+                    row("Therapist", preview ? "Dr. Sam Lee, PT" : "Not linked yet")
+                    row("Plan", preview ? "3 exercises, 15 min a day" : "Waiting for your care team")
+                    row("Goal", preview ? "Bend knee to 110°" : "Not provided yet")
+                }
             }
             reviewCard("Your Mira", icon: "imgIconDevice", step: .device) {
-                row("Status", preview ? "✓ Connected" : "Setup pending")
-                if preview { row("Room", "Living room") }
+                row("Status", state.me?.lcd?.online == true ? "✓ Online" : state.isLinked ? "Paired · screen offline" : (preview ? "✓ Connected" : "Setup pending"))
+                if preview && state.me == nil { row("Room", "Living room") }
             }
             MiraButton(title: "Yes, this is right") { state.advanceOnboarding() }.disabled(!state.onboarding.canFinish).accessibilityIdentifier("onboardingContinue")
-            if !preview { Text("Your details are saved on this phone. Therapist linking, device pairing and emergency alerts still need to be connected.").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft) }
+            if state.isLinked {
+                Text("Your details are saved with your care team. You can change them any time in Settings.").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft)
+            } else if !preview {
+                Text("Your details are saved on this phone. Therapist linking, device pairing and emergency alerts still need to be connected.").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft)
+            }
         }
+    }
+    private func reviewGoal(for me: MeResponse) -> String {
+        for prescription in me.prescriptions {
+            if case .object(let targets)? = prescription.targets,
+               case .number(let deg)? = targets["kneeDeg"] ?? targets["knee_deg"] {
+                return "Bend your knee to \(Int(deg))°"
+            }
+        }
+        return "Targets from your care plan"
     }
     private var contactName: String {
         let relationship = state.preferences.contactRelationship.trimmingCharacters(in: .whitespacesAndNewlines)

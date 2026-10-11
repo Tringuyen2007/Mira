@@ -192,10 +192,12 @@ private struct NetworkDiagnosticsView: View {
             Section("Developer · Mira server") {
                 TextField("http://laptop.local:8000", text: $address).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     .accessibilityIdentifier("serverAddress")
+                Button("Use demo server (Vultr)") { address = AppState.demoServerAddress }
                 SecureField(state.isPaired ? "Token saved — enter to replace" : "Pairing token (MIRA_API_TOKEN)", text: $token)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityIdentifier("serverToken")
                 if let hint = state.tokenHint { LabeledContent("Token", value: hint) }
+                Text(state.patientID.map { "Patient: \($0)" } ?? "Not paired to a patient")
                 Button("Save & connect") {
                     if state.connect(address: address, token: token) { address = state.serverAddress }
                     token = ""
