@@ -76,25 +76,32 @@ def _knee_deg(J: np.ndarray, hip: int, knee: int, ankle: int) -> float:
     return _angle_deg(J[hip], J[knee], J[ankle])
 
 
+def is_standing(J) -> bool:
+    """Roughly standing straight: both knees above UPRIGHT_KNEE_DEG (MediaPipe's own knees rarely look
+    fully straight) and not bent at the waist (shoulders, hips and knees in line within UPRIGHT_HIP_DEG).
+    False when a needed joint is missing."""
+    J = np.asarray(J, float)
+    if not np.isfinite(J[[11, 12, 23, 24, 25, 26, 27, 28]]).all():
+        return False
+    if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= UPRIGHT_KNEE_DEG:
+        return False
+    hip_mid = (J[23] + J[24]) / 2
+    return _angle_deg((J[11] + J[12]) / 2, hip_mid, (J[25] + J[26]) / 2) > UPRIGHT_HIP_DEG
+
+
 def upright_rotation(shapes, min_frames: int = UPRIGHT_MIN_FRAMES, max_deg: float = UPRIGHT_MAX_DEG
                      ) -> np.ndarray | None:
     """Rotation (tilt only, about a horizontal axis) that makes the median ankles-to-shoulders line of
-    `shapes` (bodies in the mat frame) vertical, from frames where the person is roughly standing (both
-    knees above UPRIGHT_KNEE_DEG, MediaPipe's own knees rarely look fully straight; and not bent at the
-    waist: shoulders, hips and knees in line within UPRIGHT_HIP_DEG). MediaPipe's world shape leans (mostly
-    toward the camera); this takes the lean out. None with fewer than `min_frames` such frames, or when they
-    disagree (median angle to their median up-direction above UPRIGHT_SPREAD_DEG); the tilt is capped at
-    `max_deg` so one odd session can't tip the body over."""
+    `shapes` (bodies in the mat frame) vertical, from frames where the person is roughly standing
+    (is_standing). MediaPipe's world shape leans (mostly toward the camera); this takes the lean out. None
+    with fewer than `min_frames` such frames, or when they disagree (median angle to their median
+    up-direction above UPRIGHT_SPREAD_DEG); the tilt is capped at `max_deg` so one odd session can't tip
+    the body over."""
     ups = []
     for J in shapes:
         J = np.asarray(J, float)
-        if not np.isfinite(J[[11, 12, 23, 24, 25, 26, 27, 28]]).all():
+        if not is_standing(J):
             continue
-        if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= UPRIGHT_KNEE_DEG:
-            continue
-        hip_mid = (J[23] + J[24]) / 2
-        if _angle_deg((J[11] + J[12]) / 2, hip_mid, (J[25] + J[26]) / 2) <= UPRIGHT_HIP_DEG:
-            continue  # bent over: the trunk isn't over the legs
         v = (J[11] + J[12]) / 2 - (J[27] + J[28]) / 2
         n = float(np.linalg.norm(v))
         if n > 1e-6:

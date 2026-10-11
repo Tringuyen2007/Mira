@@ -312,6 +312,11 @@ class ModelTracker:
         self._gate_t: float | None = None  # time of the last gated frame
 
     @property
+    def ready(self) -> bool:
+        """The body has been measured: the fit is in use."""
+        return self.shape is not None
+
+    @property
     def progress(self) -> float:
         return 1.0 if self.shape is not None else min(len(self._samples) / self.frames_needed, 1.0)
 
@@ -428,6 +433,10 @@ class ModelTracker:
         self._last_seen = t
         if self.shape is None:
             usable = tracking == "3d" or (self.single and tracking.startswith("single_cam"))
+            if usable and self.single:  # one camera: measured only while standing straight (scale, lean)
+                from vision.mono import is_standing
+
+                usable = is_standing(joints)
             if usable and joints is not None and np.isfinite(joints[NEEDED]).all():
                 # measured at scale 1: one-camera joints come scaled by world_scale (1 until measured)
                 self._samples.append(np.array(joints, float) / (produced_at if self.single else 1.0))

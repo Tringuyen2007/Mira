@@ -344,3 +344,31 @@ def test_one_camera_gate_passes_a_held_back_position_but_still_holds_an_angle():
     out = tr._gate(x, (None, uv, w))
     assert abs(out[0] - 0.10) < 1e-9  # a lasting position change passes through
     assert abs(out[T.SPINE.start] - T.GATE_MIN_GAIN * 0.3) < 1e-9  # an angle is still held
+
+
+def _crouched():
+    """Knees bent ~90°: hips 0.35 m lower and back, shins forward (a squat)."""
+    X = standing_skeleton()
+    drop = np.array([0.0, -0.35, -0.2])
+    upper = list(range(25))  # head, arms, hips
+    X[upper] += drop
+    X[[25, 26]] += [0.0, -0.08, 0.15]
+    return X
+
+
+def test_one_camera_body_crouching_at_first_is_measured_at_the_right_scale_once_standing():
+    cam, X = _cam_b(), standing_skeleton()
+    h = stature(X - (X[23] + X[24]) / 2)
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=h)
+    t = 0.0
+    for _ in range(60):  # 2 s crouched: nothing measured
+        out = pipe.process(t, None, pose_from_points(cam, _crouched(), t=t))
+        t += 1 / 30
+        assert out.tracker != "model"
+    for _ in range(60):
+        out = pipe.process(t, None, pose_from_points(cam, X, t=t))
+        t += 1 / 30
+    assert out.tracker == "model"
+    assert abs(pipe._model.world_scale - 1.0) < 0.02  # the synthetic world shape is already metric
+    J = out.frame.joints
+    assert abs(stature(J - (J[23] + J[24]) / 2) / h - 1) < 0.02
