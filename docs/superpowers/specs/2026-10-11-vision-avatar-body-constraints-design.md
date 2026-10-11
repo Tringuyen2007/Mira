@@ -100,3 +100,11 @@ self-collision beyond arms vs torso; head/neck limits beyond the spine direction
 - Fix in the existing rig: the frame that completes measuring is posed, not raw (it was the only source of non-zero bone std).
 - `avatar_eval` passes `feet_locked` like `debug_view` does.
 - Measured, constrained vs plain, on the three recordings: arm-in-torso 1.0/0.0/0.8% (plain 7.6/29.0/7.5%); hinge 0% (plain ≤1%); foot yaw p95 8/5/8° (plain 19/16/20°), max 16/16/9° (plain 141/129/75°); bone std 0 mm; truth mean 1.2–2.7 cm; ≤ 0.5 ms/frame. Targets revised to what was reached: arm-in-torso **≤ 1%**, foot yaw p95 **≤ 9°**.
+
+## Addendum: after the final review
+
+- Torso push: a point in front of the torso's mid-plane leaves through the front face, behind through its own arm's side; the last face is kept unless another is ≥ 2 cm cheaper (no flicker, crossed hands never flip sides).
+- Elbows: only the 0–150° flexion range; the bend direction is the tracked elbow (no chest-fixed half-plane — it mirrored curls and hand-to-face poses). Medial elbows are handled by the torso push.
+- Feet: a locked foot is dragged along by the body past ±35°; an unsure foot eases back toward the body's facing (50%/s) instead of holding forever.
+- avatar_eval: replays with each recording's own calibration (`--current-calibration` for config/cameras.yaml); arm-in-torso includes hands; new columns truth mid/held and foot-vs-tracked p95.
+- Not built (accepted): full shoulder/hip cones and per-bone speed caps.
