@@ -155,7 +155,7 @@ async def list_patients(db: Database) -> list[dict[str, Any]]:
 
 async def get_patient(db: Database, patient_id: str) -> dict[str, Any] | None:
     return await db.fetchrow("""
-        SELECT p.*, t.name AS therapist_name
+        SELECT p.*, t.name AS therapist_name, t.clinic AS therapist_clinic, t.phone AS therapist_phone
         FROM patients p LEFT JOIN therapists t ON t.id = p.therapist_id
         WHERE p.id = %s""", (patient_id,))
 
@@ -197,6 +197,25 @@ async def patient_device(db: Database, token_hash: str, timeout_s: float = 1.5) 
     """The phone that owns a patient token (by hash), including revoked_at so the caller can refuse it."""
     return await db.fetchrow("SELECT token_hash, patient_id, device_name, last_seen, revoked_at FROM patient_devices "
                              "WHERE token_hash = %s", (token_hash,), timeout_s=timeout_s)
+
+
+async def pairing_code(db: Database, code: str) -> dict[str, Any] | None:
+    return await db.fetchrow("SELECT code, patient_id, therapist_id, expires_at, used_at, reusable FROM pairing_codes "
+                             "WHERE code = %s", (code,))
+
+
+ME_SQL = """
+    SELECT p.id, p.name, p.age, p.height_cm, p.mass_kg, p.affected_side, p.condition, p.hr_limit,
+           p.emergency_contact_name, p.emergency_contact_phone, p.emergency_contact_relationship,
+           p.alert_therapist, p.share_by_default, p.device_prefs, p.next_visit_at, p.simulated,
+           t.id AS therapist_id, t.name AS therapist_name, t.clinic AS therapist_clinic, t.phone AS therapist_phone
+    FROM patients p LEFT JOIN therapists t ON t.id = p.therapist_id
+    WHERE p.id = %s"""
+
+
+async def patient_me_row(db: Database, patient_id: str) -> dict[str, Any] | None:
+    """Everything GET /me shows about the patient and their therapist, in one round trip."""
+    return await db.fetchrow(ME_SQL, (patient_id,))
 
 
 async def prescriptions(db: Database, patient_id: str, history: bool = False) -> list[dict[str, Any]]:

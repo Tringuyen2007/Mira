@@ -29,6 +29,7 @@ from server.api import alerts, calibration, demo, health, lcd_link, patients, pr
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
 from server.api import insight as insight_api
+from server.api import pair as pair_api
 from server.api import proposals
 from server.api import sessions as sessions_api
 from server.api.db_dep import db_error_handler
@@ -357,6 +358,7 @@ def create_app() -> FastAPI:
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token
+    app.include_router(pair_api.router)  # /pair is public; its two admin routes carry their own require_token
 
     @app.websocket("/ws/pose")
     async def ws_pose(ws: WebSocket) -> None:

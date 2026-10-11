@@ -371,6 +371,58 @@ async def touch_patient_device(db: Database | None, token_hash: str) -> bool:
     return await _safe(db, "touch_patient_device", lambda d: _ok(d.execute(sql, (token_hash,))), False)
 
 
+async def insert_patient_device(db: Database | None, token_hash: str, patient_id: str,
+                                device_name: str | None) -> bool:
+    sql = "INSERT INTO patient_devices (token_hash, patient_id, device_name) VALUES (%s, %s, %s)"
+    return await _safe(db, "insert_patient_device", lambda d: _ok(d.execute(sql, (token_hash, patient_id,
+                                                                                 device_name))), False,
+                       patient_id=patient_id)
+
+
+async def revoke_patient_devices(db: Database | None, patient_id: str) -> int | None:
+    sql = "UPDATE patient_devices SET revoked_at = now() WHERE patient_id = %s AND revoked_at IS NULL"
+    return await _safe(db, "revoke_patient_devices", lambda d: d.execute(sql, (patient_id,)), None,
+                       patient_id=patient_id)
+
+
+async def upsert_pairing_code(db: Database | None, code: str, patient_id: str, therapist_id: str | None,
+                              expires_at: Timestamp = None, reusable: bool = False) -> bool:
+    sql = ("INSERT INTO pairing_codes (code, patient_id, therapist_id, expires_at, reusable) "
+           "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (code) DO UPDATE SET patient_id = EXCLUDED.patient_id, "
+           "therapist_id = EXCLUDED.therapist_id, expires_at = EXCLUDED.expires_at, reusable = EXCLUDED.reusable, "
+           "used_at = NULL")
+    return await _safe(db, "upsert_pairing_code", lambda d: _done(d.execute(
+        sql, (code, patient_id, therapist_id, ts(expires_at) if expires_at is not None else None, reusable))),
+        False, patient_id=patient_id)
+
+
+async def mark_pairing_code_used(db: Database | None, code: str) -> bool:
+    sql = "UPDATE pairing_codes SET used_at = now() WHERE code = %s AND NOT reusable"
+    return await _safe(db, "mark_pairing_code_used", lambda d: _done(d.execute(sql, (code,))), False)
+
+
+PROFILE_FIELDS = ("name", "height_cm", "mass_kg", "affected_side", "condition", "emergency_contact_name",
+                  "emergency_contact_phone", "emergency_contact_relationship", "alert_therapist",
+                  "share_by_default", "device_prefs")
+
+
+async def update_patient_profile(db: Database | None, patient_id: str, **fields: Any) -> bool:
+    """Partial update of the patient's own fields (PROFILE_FIELDS); None leaves a column unchanged. Raises
+    InvalidInput for unknown fields."""
+    unknown = set(fields) - set(PROFILE_FIELDS)
+    if unknown:
+        raise InvalidInput(f"unknown profile fields: {sorted(unknown)}")
+    changes = {k: v for k, v in fields.items() if v is not None}
+    if not changes:
+        return True
+    assignments = ", ".join(f"{k} = %({k})s" for k in changes)
+    params: dict[str, Any] = {k: (_jsonb(v) if k == "device_prefs" else v) for k, v in changes.items()}
+    params["pid"] = patient_id
+    sql = f"UPDATE patients SET {assignments} WHERE id = %(pid)s"
+    return await _safe(db, "update_patient_profile", lambda d: _ok(d.execute(sql, params)), False,
+                       patient_id=patient_id)
+
+
 # ---- helpers ---------------------------------------------------------------------------------------------
 
 async def _ok(count: Awaitable[int]) -> bool:
