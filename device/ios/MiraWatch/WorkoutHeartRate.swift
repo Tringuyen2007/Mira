@@ -26,6 +26,19 @@ final class WorkoutHeartRate: NSObject {
     static let needsRealWatch = "Heart rate needs a real Apple Watch"
     static let unavailable = "Heart rate isn't available"
 
+    /// Setup 2 "Allow": asks for the same HealthKit access a workout needs (heart-rate read, workout share).
+    /// True when the request completed (HealthKit never reveals whether *read* access was granted);
+    /// false when health data is unavailable or the request failed.
+    func requestAuthorization() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        do {
+            try await store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [HKQuantityType(.heartRate)])
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func start() {
         guard !isRunning else { return }
         #if targetEnvironment(simulator)

@@ -237,3 +237,47 @@ CREATE TABLE IF NOT EXISTS messages (
   read_at     timestamptz
 );
 CREATE INDEX IF NOT EXISTS messages_patient_id_idx ON messages (patient_id, id);
+
+-- tri-watch (2026-10-11): Apple Watch. Mirrors db/migrations/007_watch.sql (grants are in roles.sql).
+ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS patient_id text;
+ALTER TABLE wrist_motion ADD COLUMN IF NOT EXISTS accel real[];
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS tremor_monitoring boolean NOT NULL DEFAULT false;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS hr_limit_set_by text;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS watch_clock_offset_ms int;
+CREATE TABLE IF NOT EXISTS hr_recovery (
+  session_id  uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  patient_id  text NOT NULL REFERENCES patients(id),
+  set_index   int  NOT NULL,
+  peak_bpm    smallint NOT NULL,
+  bpm_60s     smallint NOT NULL,
+  drop_bpm    smallint NOT NULL,
+  time        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, set_index)
+);
+CREATE INDEX IF NOT EXISTS hr_recovery_patient_idx ON hr_recovery (patient_id, time DESC);
+CREATE TABLE IF NOT EXISTS rotation_sets (
+  session_id  uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  patient_id  text NOT NULL REFERENCES patients(id),
+  exercise_id text NOT NULL,
+  set_index   int  NOT NULL,
+  angles      real[] NOT NULL,
+  best_deg    real,
+  avg_deg     real,
+  goal_deg    real,
+  time        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, exercise_id, set_index)
+);
+CREATE INDEX IF NOT EXISTS rotation_sets_patient_idx ON rotation_sets (patient_id, time DESC);
+CREATE TABLE IF NOT EXISTS tremor_daily (
+  patient_id  text NOT NULL REFERENCES patients(id),
+  day         date NOT NULL,
+  none_min    int NOT NULL DEFAULT 0,
+  slight_min  int NOT NULL DEFAULT 0,
+  mild_min    int NOT NULL DEFAULT 0,
+  strong_min  int NOT NULL DEFAULT 0,
+  unknown_min int NOT NULL DEFAULT 0,
+  dyskinesia  text CHECK (dyskinesia IN ('none','few','some','many')),
+  source      text NOT NULL CHECK (source IN ('device','simulated')),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (patient_id, day)
+);

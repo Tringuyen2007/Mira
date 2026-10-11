@@ -16,7 +16,7 @@ from server.state import LiveSession, PatientProfile, default_profile
 log = get_logger("db.persist")
 
 # Rep events carry quality as a word (§4.3); reps.quality is a number.
-QUALITY_SCORES = {"good": 1.0, "fix_form": 0.5, "poor": 0.0}
+QUALITY_SCORES = {"good": 1.0, "fix_form": 0.5, "partial": 0.5, "poor": 0.0}  # partial: a watch turn short of the goal
 REP_METRICS = ("peak_angle", "rom", "hold_s", "asym_avg", "asym_max", "smoothness")
 FORM_EVENT_SEVERITY = "warning"
 UNSAVED_RETRY_S = 2.0  # how often to retry a session row that couldn't be inserted

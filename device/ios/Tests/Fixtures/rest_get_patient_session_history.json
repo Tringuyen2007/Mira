@@ -1,0 +1,9 @@
+{
+  "patient_id": "maya",
+  "exercise_id": "squat",
+  "sessions": [
+    {"id": "6f0c3c1e-2b1a-4f53-9d0e-6b8a8f1d2a11", "started_at": "2026-10-11T14:10:00Z", "exercise_id": "squat", "reps_done": 12},
+    {"id": "0b9e6c55-3a7d-4b8e-8f1c-2d4e5f6a7b8c", "started_at": "2026-10-08T14:05:00Z", "exercise_id": "squat", "reps_done": 12},
+    {"id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d", "started_at": "2026-07-23T15:00:00Z", "exercise_id": "squat", "reps_done": 10}
+  ]
+}

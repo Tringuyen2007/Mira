@@ -1,0 +1,38 @@
+{
+  "patient_id": "maya",
+  "days": 21,
+  "events": [
+    {
+      "id": 1,
+      "time": "2026-10-11T00:31:34.592872Z",
+      "kind": "compensation",
+      "message": "Bending deeper, but taking weight off her right leg",
+      "evidence": {
+        "side": "right",
+        "load_to": 36.0,
+        "load_from": 47.0
+      },
+      "acknowledged": false
+    },
+    {
+      "id": 2,
+      "time": "2026-10-10T18:31:34.593466Z",
+      "kind": "depth_gain",
+      "message": "Squat depth up 6 degrees over 3 weeks (86 degrees to 92 degrees).",
+      "evidence": {
+        "gain_deg": 6
+      },
+      "acknowledged": false
+    },
+    {
+      "id": 3,
+      "time": "2026-10-10T04:31:34.593795Z",
+      "kind": "pain",
+      "message": "Pain after exercise reached 6/10 in the last 7 days (1 session at 5 or more).",
+      "evidence": {
+        "max_pain_recent": 6
+      },
+      "acknowledged": false
+    }
+  ]
+}

@@ -96,6 +96,60 @@ final class WatchWireTests: XCTestCase {
         let dict: [String: Any] = ["type": "button", "name": 42]
         XCTAssertNil(WatchWire.decodeToPhone(dict))
     }
+
+    // MARK: W1 — new snapshot keys, setup, new ToWatch/ToPhone kinds
+
+    func testSnapshotNewKeysRoundTrip() throws {
+        var s = WatchWire.LiveSnapshot(phase: "rest", rep: 10, repsTarget: 10, set: 2, setsTarget: 3,
+                                       exerciseName: "Forearm turns", hr: 104, paused: false)
+        s.exerciseId = "forearm_rotation"; s.goodReps = 8; s.restRemaining = 42; s.countdown = nil; s.isWatchExercise = true
+        let d = WatchWire.encode(.snapshot(s))
+        XCTAssertEqual(d["restRemaining"] as? Int, 42); XCTAssertNil(d["countdown"])
+        XCTAssertEqual(WatchWire.decodeToWatch(d), .snapshot(s))
+    }
+
+    func testOldSnapshotStillDecodes() {   // a Plan-4 phone talking to a new watch
+        let d: [String: Any] = ["type": "snapshot", "phase": "active", "rep": 3, "paused": false]
+        guard case .snapshot(let s)? = WatchWire.decodeToWatch(d) else { return XCTFail() }
+        XCTAssertNil(s.goodReps); XCTAssertNil(s.isWatchExercise)
+    }
+
+    func testSetupRoundTrip() throws {
+        let setup = WatchWire.Setup(firstName: "Maya", hrLimit: 120, hrLimitSetBy: "Dr. Lee", therapistName: "Dr. Lee",
+            tremorMonitoring: false, prefs: .init(taps: "strong", arm: "right", doubleTap: true, captions: true),
+            plan: [.init(id: "forearm_rotation", name: "Forearm turns", sets: 3, reps: 10, doneSets: 0, watch: true, goalDeg: 80)])
+        let d = WatchWire.encode(.setup(setup))
+        XCTAssertEqual(d["type"] as? String, "setup")
+        XCTAssertEqual(WatchWire.decodeToWatch(d), .setup(setup))
+    }
+
+    func testEveryNewToWatchKindRoundTrips() {
+        let all: [WatchWire.ToWatch] = [
+            .breather(state: "start", bpm: 128, limit: 120), .breather(state: "end", bpm: nil, limit: nil),
+            .recovery(setIndex: 2, peakBpm: 126, bpm60: 104, drop: 22),
+            .rotationRep(exerciseId: "forearm_rotation", rep: 4, repsTarget: 10, angle: 68, goal: 80, reached: false),
+            .rotationSet(exerciseId: "forearm_rotation", setIndex: 1, angles: [62, 70.5, 82], best: 82, avg: 71.5, goal: 80),
+            .sync(progress: 0.6, locked: false), .caption(text: "Nice and slow"),
+            .formCue(text: "Keep your elbow at your side", rep: 4), .formCue(text: "Knees out", rep: nil),
+            .haptic(pattern: "countdown_tick"), .haptic(pattern: "breather")]
+        for m in all { XCTAssertEqual(WatchWire.decodeToWatch(WatchWire.encode(m)), m, "\(m)") }
+    }
+
+    func testEveryNewToPhoneKindRoundTrips() {
+        let all: [WatchWire.ToPhone] = [
+            .button(name: "resume"),
+            .wrist(t: 1.5, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15], deg: 41.5),
+            .wrist(t: 1.6, quat: [1, 0, 0, 0], accel: [0, 0, 0], deg: nil),
+            .syncWindow(t0: 100, dtMs: 20, mags: [0.1, 0.4]),
+            .tremor(days: [.init(day: "2026-10-11", noneMin: 420, slightMin: 190, mildMin: 25, strongMin: 0, unknownMin: 60, dyskinesia: "few", source: "simulated")]),
+            .prefs(taps: "strong", arm: nil, doubleTap: nil, captions: false), .setupDone]
+        for m in all { XCTAssertEqual(WatchWire.decodeToPhone(WatchWire.encode(m)), m, "\(m)") }
+    }
+
+    func testIntegersArrivingAsDoublesStillDecode() {  // WC/NSNumber bridging
+        let d: [String: Any] = ["type": "recovery", "setIndex": 2.0, "peakBpm": 126.0, "bpm60": 104, "drop": 22]
+        XCTAssertEqual(WatchWire.decodeToWatch(d), .recovery(setIndex: 2, peakBpm: 126, bpm60: 104, drop: 22))
+    }
 }
 
 final class PushThrottleTests: XCTestCase {

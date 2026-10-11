@@ -1,0 +1,12 @@
+{
+  "first_name": "Maya",
+  "hr_limit": 120,
+  "hr_limit_set_by_name": "Dr. Lee",
+  "therapist_name": "Dr. Lee",
+  "tremor_monitoring": false,
+  "prefs": {"watch_taps": "strong", "watch_arm": "right", "watch_double_tap": true, "watch_captions": true},
+  "plan": [
+    {"exercise_id": "squat", "name": "Mini squats", "sets": 3, "reps": 12, "done_sets": 2, "watch": false},
+    {"exercise_id": "forearm_rotation", "name": "Forearm turns", "sets": 3, "reps": 10, "done_sets": 0, "watch": true, "goal_deg": 80}
+  ]
+}

@@ -4,10 +4,11 @@
 // Cleanup on unmount/route change: the player's rAF loop, the frames AbortController, and the live/pose
 // socket subscriptions are the three things that leak if this isn't careful (self-review note in the brief).
 import { h, clear } from "../../core/dom.js";
-import { MESSAGE_MAX_CHARS } from "../../net/endpoints.js";
+import { MESSAGE_MAX_CHARS, WATCH_CAP, WATCH_FEATURES_CAP } from "../../net/endpoints.js";
 import { href } from "../../core/router.js";
 import { firstName, fmtWhenAt, capitalize, patientMeta } from "../../core/format.js";
 import { exerciseName } from "../../core/exercises.js";
+import { loading, errorState } from "../../ui/states.js";
 import { createAvatarView, hasRegisteredRenderer } from "../../avatar/avatarView.js";
 import { lerpJoints, isValidJoints } from "../../three/joints.js";
 import { createPlayer, loadSessionFrames } from "./player.js";
@@ -16,6 +17,10 @@ import {
   renderHead, renderSessionPicker, renderRoomCard, setFlagCallout, renderSessionCard, renderTimelineCard,
   renderReps, setCurrentRep, renderTrendCard, renderMemoryCard, renderNoteCard, cardLoading, cardError, noSessions,
 } from "./view.js";
+import { watchGroupModel, tremorModel, tremorMonitoringOf, watchFeaturesFromEvent } from "./watchModel.js";
+import {
+  renderWatchGroup, renderWatchEmpty, renderHrRecoveryCard, renderRotationCard, renderTremorCard,
+} from "./watchView.js";
 
 const MESSAGES_CAP = "/patients/{patient_id}/messages";
 const POSE_LERP_T = 0.4; // ~60ms-behind smoothing per frame (decisions: "lerp ~60 ms behind")
@@ -49,6 +54,8 @@ export const screen = {
     let messagePopoverEl = null;
     let unsubLive = null;
     let unsubPose = null;
+    let unsubWatchEvents = null;
+    const watchState = { json: null, monitoring: false, refs: null, tremorHost: null, busy: false };
 
     const headRefs = renderHead({
       onModeChange: (mode) => setMode(mode),
@@ -61,11 +68,13 @@ export const screen = {
     const trendHost = h("div", {});
     const memoryHost = h("div", {});
     const noteHost = h("div", {});
+    const watchHost = h("div", {}); // "Apple Watch" group, only when the server has GET /patients/{id}/watch
     // Figma: room + "This session" on top, the rep timeline full width, then trend / memory / note in one row.
     const gridEl = h("div", { class: "patient__layout" },
       h("div", { class: "patient__grid" }, roomRefs.el, sessionHost),
       timelineHost,
-      h("div", { class: "patient__bottom-grid" }, trendHost, memoryHost, noteHost));
+      h("div", { class: "patient__bottom-grid" }, trendHost, memoryHost, noteHost),
+      watchHost);
     const bodyHost = h("div", {});
     root.append(headRefs.el, bodyHost);
 
@@ -343,6 +352,89 @@ export const screen = {
       loadTrendCard();
       loadMemoryCard();
       loadNoteCard();
+      loadWatchGroup();
+    }
+
+    // ---- Apple Watch group ----
+    const hasCap = (path) => Boolean(ctx.caps && ctx.caps.has && ctx.caps.has(path));
+
+    function renderWatchBody() {
+      const refs = watchState.refs;
+      if (!refs) return;
+      refs.setMonitoring(watchState.monitoring);
+      const m = watchGroupModel(watchState.json, { patient: { tremor_monitoring: watchState.monitoring } });
+      if (m.empty) {
+        watchState.tremorHost = null;
+        refs.bodyHost.replaceChildren(renderWatchEmpty(), h("p", { class: "meta watch__monitoring-note" },
+          watchState.monitoring ? "Tremor monitoring is on." : "Tremor monitoring is off."));
+        return;
+      }
+      watchState.tremorHost = h("div", {}, renderTremorCard(m.tremor));
+      refs.bodyHost.replaceChildren(h("div", { class: "watch__grid" },
+        renderHrRecoveryCard(m.hr), renderRotationCard(m.rotation), watchState.tremorHost));
+    }
+
+    function setMonitoring(on) {
+      watchState.monitoring = on;
+      watchState.refs?.setMonitoring(on);
+      if (watchState.tremorHost) {
+        watchState.tremorHost.replaceChildren(renderTremorCard(tremorModel(watchState.json, { monitoring: on })));
+      } else {
+        renderWatchBody();
+      }
+    }
+
+    async function toggleTremorMonitoring() {
+      if (watchState.busy) return;
+      const next = !watchState.monitoring;
+      const name = firstName(state.patientJson && state.patientJson.patient && state.patientJson.patient.name);
+      watchState.busy = true;
+      watchState.refs?.setBusy(true);
+      try {
+        const res = await ctx.api.setWatchFeatures(state.pid, { tremorMonitoring: next });
+        if (!alive) return;
+        setMonitoring(res && typeof res.tremor_monitoring === "boolean" ? res.tremor_monitoring : next);
+        watchState.refs.toggleStatusEl.textContent = watchState.monitoring
+          ? `Tremor monitoring on. ${name || "The patient"}'s watch starts sharing tremor minutes.`
+          : "Tremor monitoring off.";
+      } catch {
+        if (!alive) return;
+        ctx.toast({ kind: "error", text: "Couldn't change tremor monitoring. Try again." });
+      } finally {
+        watchState.busy = false;
+        if (alive) watchState.refs?.setBusy(false);
+      }
+    }
+
+    async function loadWatchGroup() {
+      if (!hasCap(WATCH_CAP) || !state.pid) { watchHost.replaceChildren(); return; }
+      watchState.monitoring = tremorMonitoringOf(state.patientJson);
+      watchState.refs = renderWatchGroup({ canToggle: hasCap(WATCH_FEATURES_CAP), onToggle: toggleTremorMonitoring });
+      watchHost.replaceChildren(watchState.refs.el);
+      watchState.refs.setMonitoring(watchState.monitoring);
+      watchState.refs.bodyHost.replaceChildren(h("div", { class: "card" }, loading("Loading watch data…")));
+      if (!unsubWatchEvents) {
+        // Another tab (or the Assistant) may flip the switch: the server pushes watch_features_changed.
+        unsubWatchEvents = ctx.sockets.subscribe("events", (msg) => {
+          if (!alive) return;
+          const on = watchFeaturesFromEvent(msg, state.pid);
+          if (on === null || on === watchState.monitoring) return;
+          setMonitoring(on);
+          if (watchState.refs) {
+            watchState.refs.toggleStatusEl.textContent = `Tremor monitoring turned ${on ? "on" : "off"}.`;
+          }
+        });
+      }
+      try {
+        const res = await ctx.api.patientWatch(state.pid);
+        if (!alive) return;
+        watchState.json = res;
+        renderWatchBody();
+      } catch (err) {
+        if (alive) {
+          watchState.refs.bodyHost.replaceChildren(h("div", { class: "card" }, errorState(err, loadWatchGroup)));
+        }
+      }
     }
 
     // ---- boot ----
@@ -370,8 +462,9 @@ export const screen = {
           const recent = (patientRes.recent_sessions || []);
           if (recent.length === 0) {
             state.noSessions = true;
-            bodyHost.replaceChildren(noSessions());
+            bodyHost.replaceChildren(noSessions(), watchHost);
             renderHeadUi();
+            loadWatchGroup();
             return;
           }
           sid = recent[0].id;
@@ -401,6 +494,7 @@ export const screen = {
       alive = false;
       document.removeEventListener("click", onDocClick, true);
       stopLive();
+      unsubWatchEvents?.(); unsubWatchEvents = null;
       framesAbort?.abort();
       player?.dispose();
       avatar?.dispose();

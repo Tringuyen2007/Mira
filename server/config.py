@@ -58,6 +58,7 @@ class Config:
     MOCK_FALL_RESPONDS_AT: float | None = None
     DEMO_TOOLS_ENABLED: bool = False
     MOCK_LOOP: bool = False  # True: the mock squat program repeats forever (pre-Plan-2 behaviour)
+    MOCK_WRIST: bool = False  # mock mode: the demo runs forearm turns and synthesises the watch's wrist rotation
     MOCK_AUTO_RESTART_S: float = 60.0  # mock mode: start the next demo session this long after one ends (0 = off)
     AUTO_STOP_AFTER_LAST_SET: bool = True  # end the session when set == sets_target (engines without `stopped`)
     ANALYST_DELAY_S: float = 2.0  # SessionAnalyst waits this long after a session ends for rep writes to land

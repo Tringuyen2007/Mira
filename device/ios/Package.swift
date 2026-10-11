@@ -13,6 +13,9 @@ let package = Package(
         // Fixtures/ is a copy of server/samples/*.json (the server's contract);
         // ContractFixtureTests fails when the copy drifts from the server's files.
         .testTarget(name: "MiraNetworkingTests", dependencies: ["MiraNetworking"], path: "Tests",
-                    resources: [.copy("Fixtures")])
+                    resources: [.copy("Fixtures")]),
+        // Watch state machine + maths (Foundation-only), shared with the MiraWatch Xcode target.
+        .target(name: "MiraWatchCore", path: "MiraWatch/Core"),
+        .testTarget(name: "MiraWatchCoreTests", dependencies: ["MiraWatchCore"], path: "WatchCoreTests"),
     ]
 )

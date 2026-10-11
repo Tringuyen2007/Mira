@@ -11,7 +11,20 @@ const EXERCISE_NAMES = {
   straight_leg_raise: "Straight leg raises",
   sit_to_stand: "Sit to stand",
   step_up: "Step-ups",
+  // Apple Watch exercises (server/exercises.py, watch=True): counted from the watch's rotation, not the cameras.
+  forearm_rotation: "Forearm turns",
+  shoulder_rotation: "Shoulder turns",
+  wrist_flexion: "Wrist bends",
 };
+
+// The exercises that need the Apple Watch (server/exercises.py WATCH_EXERCISES). Their goal is the prescription's
+// `targets.rotation_deg` (default 80°, 10-180°).
+export const WATCH_EXERCISE_IDS = Object.freeze(["forearm_rotation", "shoulder_rotation", "wrist_flexion"]);
+export const DEFAULT_ROTATION_GOAL_DEG = 80;
+
+export function isWatchExercise(id) {
+  return WATCH_EXERCISE_IDS.includes(id);
+}
 
 export function exerciseName(id) {
   if (EXERCISE_NAMES[id]) return EXERCISE_NAMES[id];

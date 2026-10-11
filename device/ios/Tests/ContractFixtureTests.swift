@@ -97,7 +97,7 @@ final class ContractFixtureTests: XCTestCase {
         let cases: [(String, SocketEvent)] = [
             ("ws_events_client_command", .command(CommandMessage(name: .pause))),
             ("ws_events_client_hr", .hr(HeartRateMessage(t: 1791662259.706, bpm: 97))),
-            ("ws_events_client_wrist", .wrist(WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15]))),
+            ("ws_events_client_wrist", .wrist(WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15], rotationDeg: 41.5))),
             ("ws_events_client_watch_button", .watchButton(WatchButtonMessage(name: "ready"))),
             ("ws_events_client_device_health", .deviceHealth(DeviceHealthMessage(t: 1791662259.706, batteryPct: 81, app: "watch"))),
         ]
@@ -189,5 +189,60 @@ final class ContractFixtureTests: XCTestCase {
         XCTAssertEqual(event.patientId, "maya")
         XCTAssertEqual(event.message.sender, "therapist")
         XCTAssertEqual(event.message.body, "How's the knee feeling?")
+    }
+
+    // MARK: W1 — Apple Watch contract (device/ios/.../watch-contract.md)
+
+    func testWatchContract() throws {
+        // New server → client events over /ws/events.
+        guard case .breather(let breather) = try decode(SocketEvent.self, "ws_events_breather") else { return XCTFail("breather") }
+        XCTAssertEqual(breather.state, "start")
+        XCTAssertEqual(breather.bpm, 128)
+        guard case .hrRecovery(let recovery) = try decode(SocketEvent.self, "ws_events_hr_recovery") else { return XCTFail("hr_recovery") }
+        XCTAssertEqual(recovery.dropBpm, 22)
+        guard case .rotationRep(let rep) = try decode(SocketEvent.self, "ws_events_rotation_rep") else { return XCTFail("rotation_rep") }
+        XCTAssertEqual(rep.rep, 4)
+        XCTAssertEqual(rep.reached, false)
+        guard case .rotationSet(let set) = try decode(SocketEvent.self, "ws_events_rotation_set") else { return XCTFail("rotation_set") }
+        XCTAssertEqual(set.angles.count, 5)
+        guard case .syncProgress(let progress) = try decode(SocketEvent.self, "ws_events_sync_progress") else { return XCTFail("sync_progress") }
+        XCTAssertEqual(progress.locked, false)
+        guard case .limitsChanged(let limits) = try decode(SocketEvent.self, "ws_events_limits_changed") else { return XCTFail("limits_changed") }
+        XCTAssertEqual(limits.setByName, "Dr. Lee")
+        guard case .watchFeaturesChanged(let features) = try decode(SocketEvent.self, "ws_events_watch_features_changed") else {
+            return XCTFail("watch_features_changed")
+        }
+        XCTAssertTrue(features.tremorMonitoring)
+
+        // Client → server events the phone sends on behalf of the watch.
+        guard case .watchButton(let button) = try decode(SocketEvent.self, "ws_events_client_watch_button_resume") else {
+            return XCTFail("watch_button_resume")
+        }
+        XCTAssertEqual(button.name, "resume")
+        guard case .watchSync(let sync) = try decode(SocketEvent.self, "ws_events_client_watch_sync") else { return XCTFail("watch_sync") }
+        XCTAssertEqual(sync.dtMs, 20)
+        XCTAssertEqual(sync.accelMag.count, 6)
+
+        // The server's `ws_events_client_wrist` sample now carries the watch's rotation_deg; an older
+        // phone/watch that sends no angle is still valid, so that case is built here.
+        let plainWrist = WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15])
+        XCTAssertEqual(try decode(WristMessage.self, "ws_events_client_wrist").rotationDeg, 41.5)
+        let wrist = try decode(WristMessage.self, "ws_events_client_wrist_rotation")
+        XCTAssertEqual(wrist.rotationDeg, 41.5)
+
+        // rotation_deg is emitted on the wire only when set.
+        let encodedWithRotation = try JSONDecoder().decode(JSONValue.self, from: WireJSON.encoder().encode(wrist))
+        guard case .object(let withFields) = encodedWithRotation else { return XCTFail() }
+        XCTAssertNotNil(withFields["rotation_deg"])
+        let encodedWithoutRotation = try JSONDecoder().decode(JSONValue.self, from: WireJSON.encoder().encode(plainWrist))
+        guard case .object(let withoutFields) = encodedWithoutRotation else { return XCTFail() }
+        XCTAssertNil(withoutFields["rotation_deg"])
+
+        // REST: /me/watch, /me/tremor.
+        let meWatch = try decode(MeWatchResponse.self, "rest_get_me_watch")
+        XCTAssertEqual(meWatch.plan[1].goalDeg, 80)
+        XCTAssertEqual(meWatch.prefs.watchTaps, "strong")
+        let tremor = try decode(TremorUpload.self, "rest_post_me_tremor_request")
+        XCTAssertEqual(tremor.days[0].slightMin, 190)
     }
 }

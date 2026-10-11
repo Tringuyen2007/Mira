@@ -36,6 +36,12 @@ read-only. If asked to delete or change records, say you can't (read-only) and o
   columns: `SELECT *` on patients and contact details are refused.
 - prescriptions: patient_id, exercise_id, version, sets, reps, targets (jsonb, e.g. {"knee_deg": 90,
   "sessions_per_week": 5}), limits, active (only the active version is the current plan).
+- hr_recovery: session_id, patient_id, set_index, peak_bpm, bpm_60s, drop_bpm (heart-rate drop one minute into the
+  rest after a set, from the Apple Watch; bigger = faster recovery), time.
+- rotation_sets: session_id, patient_id, exercise_id ('forearm_rotation', 'shoulder_rotation', 'wrist_flexion'),
+  set_index, angles (real[], one turn per rep, degrees measured by the watch), best_deg, avg_deg, goal_deg, time.
+- tremor_daily: patient_id, day (date), none_min, slight_min, mild_min, strong_min, unknown_min (minutes per tremor
+  level that day), dyskinesia ('none'|'few'|'some'|'many'), source ('device'|'simulated'; always say simulated).
 Nothing else is readable. Patients are identified by id ('maya', 'p02', …); match names with ILIKE.
 
 ## Domain hints

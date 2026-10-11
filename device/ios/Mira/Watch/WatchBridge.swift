@@ -9,6 +9,12 @@ import WatchConnectivity
 /// message. Lives in `Mira/Watch`, which the `MiraNetworking` SwiftPM package
 /// excludes, so it is free to import `WatchConnectivity` (unavailable on plain
 /// macOS, where `AppState`'s `swift test` build uses a stub of the same shape).
+///
+/// W2 relay: server events → watch messages (`handle(event:)`, via the pure
+/// `WatchRelay`), the watch's setup from `GET /me/watch` (`refreshSetup`), and the
+/// watch's wrist/sync/tremor/prefs/setupDone messages on to the server. Every W2
+/// path is a no-op unless a watch is paired with the Mira watch app installed, so a
+/// phone without a watch makes no extra requests or socket sends.
 @MainActor
 @Observable
 final class WatchBridge: NSObject, WCSessionDelegate {
@@ -23,6 +29,27 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// Whether the watch reports a running `HKWorkoutSession` (its `.status` message).
     /// Nothing reads it yet; kept for a future Settings row.
     private(set) var workoutActive = false
+    /// The watch's last setup (`GET /me/watch`), for Settings.
+    private(set) var setup: WatchWire.Setup?
+    /// The watch finished its own setup flow (`setupDone`); stored locally only.
+    private(set) var watchSetupDone: Bool
+
+    /// A watch is paired and has the Mira watch app: the gate for every W2 path.
+    var watchPaired: Bool { isPaired && isWatchAppInstalled }
+    /// The REST client to use for watch requests, or nil without a linked patient token.
+    /// Set by `AppState`.
+    @ObservationIgnored var apiProvider: (() -> APIClient?)?
+    /// Called with the `PUT /me` response after the watch changed its prefs, so
+    /// `AppState.me` doesn't keep (and later re-send) stale `device_prefs`.
+    @ObservationIgnored var onMeUpdated: ((MeResponse) -> Void)?
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private var relay = WatchRelay()
+    @ObservationIgnored private var wristGate = RateGate(minInterval: 0.1)
+    /// `refreshSetup` coalescing: one request at a time, plus one more if asked meanwhile.
+    @ObservationIgnored private var setupRefreshInFlight = false
+    @ObservationIgnored private var setupRefreshAgain = false
+    private static let setupDoneKey = "watchSetupDone"
 
     @ObservationIgnored private var lastPushedContext: [String: Any]?
     /// Snapshot pushes go out at most once every 0.5 s; a change inside the window
@@ -31,8 +58,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     @ObservationIgnored private var pendingContext: [String: Any]?
     @ObservationIgnored private var trailingPush: Task<Void, Never>?
 
-    init(liveSession: LiveSessionStore) {
+    init(liveSession: LiveSessionStore, defaults: UserDefaults = .standard) {
         self.liveSession = liveSession
+        self.defaults = defaults
+        self.watchSetupDone = defaults.bool(forKey: Self.setupDoneKey)
         super.init()
     }
 
@@ -51,13 +80,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// burst (e.g. the last rep, or the end of the session) always reaches the watch.
     func push(_ live: LiveMessage?) {
         guard let session, session.activationState == .activated else { return }
-        let snapshot = live.map {
-            WatchWire.LiveSnapshot(
-                phase: $0.phase, rep: $0.rep, repsTarget: $0.repsTarget,
-                set: $0.set, setsTarget: $0.setsTarget, exerciseName: $0.exerciseName,
-                hr: $0.hr, paused: $0.paused
-            )
-        } ?? .idle
+        if watchPaired, let caption = relay.caption(from: live) { sendMessage(caption) }
+        let snapshot = relay.snapshot(live, plan: setup?.plan ?? [])
         let context = WatchWire.encode(.snapshot(snapshot))
         if let lastPushedContext, NSDictionary(dictionary: context).isEqual(to: lastPushedContext) {
             cancelTrailingPush()
@@ -98,10 +122,52 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         trailingPush = nil
     }
 
-    /// Best-effort coaching haptic, only while the watch is reachable (foreground app).
-    func forward(haptic pattern: String) {
+    /// A decoded `/ws/events` event (from `LiveSessionStore.onWatchEvent`): relays
+    /// haptics, captions, form cues, breather/recovery/rotation/sync to the watch, and
+    /// refetches the setup when the therapist changed limits or watch features.
+    func handle(event: SocketEvent) {
+        guard watchPaired else { return }
+        for message in relay.map(event) { sendMessage(message) }
+        if WatchRelay.setupRefreshNeeded(event) {
+            Task { await self.refreshSetup(api: self.apiProvider?()) }
+        }
+    }
+
+    /// `GET /me/watch` → the watch's `setup`. The application context is the live
+    /// snapshot's, so setup goes out as queued `transferUserInfo` (delivered even when
+    /// the watch app is closed; older queued setups are cancelled) plus `sendMessage`
+    /// when reachable. No-op without a paired watch or a patient token; errors are swallowed.
+    func refreshSetup(api: APIClient?) async {
+        guard watchPaired, let api else { return }
+        if setupRefreshInFlight {
+            setupRefreshAgain = true
+            return
+        }
+        setupRefreshInFlight = true
+        defer { setupRefreshInFlight = false }
+        repeat {
+            setupRefreshAgain = false
+            guard let response = try? await api.meWatch() else { return }
+            let setup = WatchRelay.setup(response)
+            self.setup = setup
+            deliver(setup: setup)
+        } while setupRefreshAgain && watchPaired
+    }
+
+    private func deliver(setup: WatchWire.Setup) {
+        guard let session, session.activationState == .activated, watchPaired else { return }
+        let payload = WatchWire.encode(.setup(setup))
+        for transfer in session.outstandingUserInfoTransfers where transfer.userInfo["type"] as? String == "setup" {
+            transfer.cancel()
+        }
+        session.transferUserInfo(payload)
+        if session.isReachable { session.sendMessage(payload, replyHandler: nil, errorHandler: { _ in }) }
+    }
+
+    /// Best-effort phone → watch message, only while the watch is reachable (foreground app).
+    private func sendMessage(_ message: WatchWire.ToWatch) {
         guard let session, session.isReachable else { return }
-        session.sendMessage(WatchWire.encode(.haptic(pattern: pattern)), replyHandler: nil, errorHandler: { _ in })
+        session.sendMessage(WatchWire.encode(message), replyHandler: nil, errorHandler: { _ in })
     }
 
     /// Best-effort end-of-set/session counts, only while the watch is reachable.
@@ -121,9 +187,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         let installed = session.isWatchAppInstalled
         let reachable = session.isReachable
         Task { @MainActor in
-            self.isPaired = paired
-            self.isWatchAppInstalled = installed
             self.isReachable = reachable
+            self.updateWatchState(paired: paired, installed: installed)
         }
     }
 
@@ -143,9 +208,16 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
         let paired = session.isPaired
         let installed = session.isWatchAppInstalled
-        Task { @MainActor in
-            self.isPaired = paired
-            self.isWatchAppInstalled = installed
+        Task { @MainActor in self.updateWatchState(paired: paired, installed: installed) }
+    }
+
+    /// Records pairing state; a watch that just became paired+installed gets its setup.
+    private func updateWatchState(paired: Bool, installed: Bool) {
+        let wasPaired = watchPaired
+        isPaired = paired
+        isWatchAppInstalled = installed
+        if !wasPaired, watchPaired {
+            Task { await self.refreshSetup(api: self.apiProvider?()) }
         }
     }
 
@@ -156,11 +228,40 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             case .heartRate(let bpm, let t):
                 self.lastWatchHR = Int(bpm.rounded())
                 try? await self.liveSession.send(.hr(HeartRateMessage(t: t, bpm: bpm)))
-            case .button(let name):
-                try? await self.liveSession.send(.watchButton(WatchButtonMessage(name: name)))
+            case .button, .syncWindow:
+                if let event = WatchRelay.socketEvent(decoded) { try? await self.liveSession.send(event) }
+            case .wrist(let t, _, _, _):
+                // The watch streams faster than the server's 20 msg/s budget allows; keep 10 Hz.
+                guard self.wristGate.allow(t), let event = WatchRelay.socketEvent(decoded) else { return }
+                try? await self.liveSession.send(event)
             case .status(let workoutActive):
                 self.workoutActive = workoutActive
+            case .tremor(let days):
+                // 403 "tremor monitoring off" (and any other failure) is ignored.
+                guard let api = self.apiProvider?() else { return }
+                _ = try? await api.uploadTremor(WatchRelay.tremorUpload(days))
+            case .prefs(let taps, let arm, let doubleTap, let captions):
+                await self.savePrefs(taps: taps, arm: arm, doubleTap: doubleTap, captions: captions)
+            case .setupDone:
+                self.watchSetupDone = true
+                self.defaults.set(true, forKey: Self.setupDoneKey)
             }
         }
+    }
+
+    /// Merges the watch's prefs into `device_prefs` (as `watch_*` keys, every other key
+    /// kept) with a fresh `GET /me` + `PUT /me`, then re-sends the setup. Errors swallowed.
+    private func savePrefs(taps: String?, arm: String?, doubleTap: Bool?, captions: Bool?) async {
+        guard let api = apiProvider?() else { return }
+        do {
+            let current = try await api.me()
+            let merged = WatchRelay.mergedDevicePrefs(current.patient.devicePrefs, taps: taps, arm: arm,
+                                                      doubleTap: doubleTap, captions: captions)
+            let updated = try await api.updateMe(MeUpdate(devicePrefs: merged))
+            onMeUpdated?(updated)
+        } catch {
+            return
+        }
+        await refreshSetup(api: api)
     }
 }

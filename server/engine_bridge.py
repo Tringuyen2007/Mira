@@ -285,30 +285,40 @@ _SET_S = _COUNTDOWN_S + _REPS * _REP_S + _REST_S
 _PROGRAM_S = _SETS * _SET_S
 _KNEE_CAVE_REP = 5
 _EXERCISE = "squat"
+MOCK_WRIST_EXERCISE_ID = "forearm_rotation"  # the MOCK_WRIST=1 demo exercise (no seed prescription needed)
+_ROTATION_PEAKS = (62.0, 70.5, 78.0, 82.0, 75.0, 85.0, 80.0, 72.0, 88.0, 79.0)  # the mock watch's turn per rep
+_ELBOW_DRIFT_REP = 6       # rotation program: the elbow lifts off the side during this rep of every set
+_ELBOW_DRIFT_M = 0.12
+_WRIST_EVERY_TICKS = 3     # 30 Hz frames / 3 = 10 Hz wrist samples (MOCK_WRIST=1)
 
 
-def _program_schedule() -> list[tuple[float, Message]]:
-    """Events of one loop of the mock squat program, as (seconds from loop start, payload)."""
+def _program_schedule(exercise_id: str = _EXERCISE) -> list[tuple[float, Message]]:
+    """Events of one loop of the mock program, as (seconds from loop start, payload). A watch (rotation) exercise has
+    the same countdown/set lifecycle but no engine reps: RotationCoach counts those from the wrist stream."""
+    watch = exercises.is_watch_exercise(exercise_id)
     events: list[tuple[float, Message]] = []
     for set_no in range(1, _SETS + 1):
         base = (set_no - 1) * _SET_S
         for i, n in enumerate((3, 2, 1)):
             events.append((base + i, {"type": "countdown", "n": n, "set": set_no, "reps_target": _REPS,
-                                      "sets_target": _SETS, "exercise_id": _EXERCISE}))
+                                      "sets_target": _SETS, "exercise_id": exercise_id}))
         start = base + _COUNTDOWN_S
         events.append((start, {"type": "cue", "id": "set_start", "text": "Nice and slow. Let's begin.",
                                "audio_url": "/audio/set_start.mp3"}))
-        for rep in range(1, _REPS + 1):
-            caved = rep == _KNEE_CAVE_REP
-            if caved:
-                events.append((start + (rep - 0.5) * _REP_S,
-                               {"type": "cue", "id": "knees_out", "text": "Push your knees out over your toes.",
-                                "audio_url": "/audio/knees_out.mp3"}))
-            events.append((start + rep * _REP_S, {
-                "type": "rep", "index": rep, "set": set_no, "exercise_id": _EXERCISE,
-                "quality": "fix_form" if caved else "good", "flags": ["knee_cave_l"] if caved else []}))
-        events.append((start + _REPS * _REP_S, {"type": "set_done", "set": set_no, "reps": _REPS,
-                                                "exercise_id": _EXERCISE}))
+        if not watch:
+            for rep in range(1, _REPS + 1):
+                caved = rep == _KNEE_CAVE_REP
+                if caved:
+                    events.append((start + (rep - 0.5) * _REP_S,
+                                   {"type": "cue", "id": "knees_out", "text": "Push your knees out over your toes.",
+                                    "audio_url": "/audio/knees_out.mp3"}))
+                events.append((start + rep * _REP_S, {
+                    "type": "rep", "index": rep, "set": set_no, "exercise_id": exercise_id,
+                    "quality": "fix_form" if caved else "good", "flags": ["knee_cave_l"] if caved else []}))
+        done: Message = {"type": "set_done", "set": set_no, "exercise_id": exercise_id}
+        if not watch:
+            done["reps"] = _REPS
+        events.append((start + _REPS * _REP_S, done))
     return sorted(events, key=lambda e: e[0])
 
 
@@ -319,6 +329,7 @@ class _ProgramPose:
     depth: float
     knee_in: float
     active: bool
+    frac: float = 0.0  # 0..1 through the current rep
 
 
 def _program_pose(p: float) -> _ProgramPose:
@@ -332,19 +343,47 @@ def _program_pose(p: float) -> _ProgramPose:
     r = q / _REP_S
     done = int(r)
     depth = (1 - math.cos(2 * math.pi * (r - done))) / 2
-    return _ProgramPose(set_no, done, depth, 0.03 if done + 1 == _KNEE_CAVE_REP else 0.0, True)
+    return _ProgramPose(set_no, done, depth, 0.03 if done + 1 == _KNEE_CAVE_REP else 0.0, True, r - done)
+
+
+def mock_rotation_deg(pose: _ProgramPose) -> float:
+    """The mock watch's twist (MOCK_WRIST=1): 0 → this rep's peak → 0 over one rep (sin² shaped)."""
+    if not pose.active:
+        return 0.0
+    peak = _ROTATION_PEAKS[pose.rep % len(_ROTATION_PEAKS)]
+    return round(peak * math.sin(math.pi * pose.frac) ** 2, 1)
+
+
+def _mock_elbow_drift(pose: _ProgramPose) -> float:
+    return _ELBOW_DRIFT_M if pose.active and pose.rep + 1 == _ELBOW_DRIFT_REP and 0.25 <= pose.frac <= 0.75 else 0.0
+
+
+def rotation_frame_body(drift_m: float, rng: random.Random) -> Message:
+    """Standing, right elbow at the side and bent 90° (forearm forward): the rotation exercises' start position.
+    `drift_m` moves the right elbow out to the side (horizontal distance from the right shoulder)."""
+    body = squat_frame_body(0.0, 0.0, 0.0, rng)
+    joints = body["joints"]
+    shoulder = joints[12]
+    elbow = [round(shoulder[0] - drift_m, 4), round(shoulder[1] - _UPPER_ARM, 4), shoulder[2]]
+    joints[14] = elbow
+    joints[16] = [elbow[0], elbow[1], round(elbow[2] - _FOREARM, 4)]
+    return body
 
 
 class MockSource:
-    """Looping squat program at 30 Hz; `fall_at_s` scripts a fall (mock:fall); reverse queue handled."""
+    """Looping squat program at 30 Hz; `fall_at_s` scripts a fall (mock:fall); reverse queue handled. A watch
+    (rotation) exercise runs the same lifecycle with no engine reps; with MOCK_WRIST=1 it also synthesises the
+    watch's `wrist` rotation (10 Hz) so RotationCoach can count turns without a watch."""
 
     def __init__(self, *, speed: float = 1.0, fall_at_s: float | None = None,
-                 responds_at_s: float | None = None, seed: int = 7) -> None:
+                 responds_at_s: float | None = None, seed: int = 7, exercise_id: str = _EXERCISE) -> None:
         self.speed = speed
         self.fall_at_s = fall_at_s
         self.responds_at_s = responds_at_s
         self._rng = random.Random(seed)
-        self._schedule = _program_schedule()
+        self._exercise = exercise_id
+        self._schedule = _program_schedule(exercise_id)
+        self._tick = 0
         self._seq = 0
         self._t0 = 0.0
         self._sim_s = 0.0
@@ -363,6 +402,10 @@ class MockSource:
         self._paused = False  # user `pause`/`start` (§ reverse channel); independent of a Guardian `paused`
         self._stopped = False  # user `stop`: the program is over, no more reps for this session
 
+    @property
+    def _watch(self) -> bool:
+        return exercises.is_watch_exercise(self._exercise)
+
     def run(self, emit: Emit, inbox: Inbox, stop: StopFlag) -> None:
         dt = 1.0 / FRAME_HZ
         self._t0 = time.time()
@@ -375,7 +418,7 @@ class MockSource:
             if not self._arrived and self._sim_s >= self._arrive_due_s:
                 self._arrived = True
                 # The plan rides on `arrived` so the greeting can show "3 sets · 10 reps" before the first countdown.
-                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id, "exercise_id": _EXERCISE,
+                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id, "exercise_id": self._exercise,
                                   "reps_target": _REPS, "sets_target": _SETS})
                 self._awaiting_due_s = self._sim_s + MOCK_GREETING_HOLD_S
             # Like the vision engine: after the greeting has been on screen a moment, ask for a thumbs-up, and
@@ -397,11 +440,15 @@ class MockSource:
             elif self._stopped or self._paused:
                 # Standing still: a user `pause` or `stop` freezes the program but the camera keeps streaming.
                 pose = _program_pose(self._program_s)
-                body = squat_frame_body(0.0, 0.0, 0.0, self._rng)
+                body = (rotation_frame_body(0.0, self._rng) if self._watch
+                        else squat_frame_body(0.0, 0.0, 0.0, self._rng))
                 events = []
             else:
                 pose = _program_pose(self._program_s)
-                body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
+                if self._watch:
+                    body = rotation_frame_body(_mock_elbow_drift(pose) if self._ready else 0.0, self._rng)
+                else:
+                    body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
                 events = list(self._events_between(self._prev_program_s, self._program_s)) if self._ready else []
                 if self._ready:
                     self._prev_program_s = self._program_s
@@ -410,9 +457,13 @@ class MockSource:
                     # session.
                     self._stopped = True
                     events.append({"type": "stopped", "reason": "program_complete"})
-            self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
+            self._emit(emit, {"type": "frame", "exercise_id": self._exercise, "set_no": pose.set_no, **body})
             for ev in events:
                 self._emit(emit, ev)
+            if (self._watch and cfg.MOCK_WRIST and self._fall is None and self._ready and not self._paused
+                    and not self._stopped and pose.active and self._tick % _WRIST_EVERY_TICKS == 0):
+                self._emit(emit, {"type": "wrist", "rotation_deg": mock_rotation_deg(pose)})
+            self._tick += 1
             if int(self._sim_s) != int(self._sim_s + dt):
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
@@ -439,7 +490,7 @@ class MockSource:
                 self._fall = None
                 self._program_s = math.ceil(self._program_s / _SET_S) * _SET_S  # resume at the next set
             elif kind == SESSION_START:
-                self._restart_session(msg.get("patient_id"))
+                self._restart_session(msg.get("patient_id"), msg.get("exercise_id"))
             elif kind == "command":
                 self._on_command(emit, msg.get("name"))
 
@@ -469,15 +520,17 @@ class MockSource:
         """End the current set now (a partial `set_done`) and jump straight to the next set's countdown,
         without replaying the rest of this set's schedule (mirrors how `incident_closed` resumes)."""
         pose = _program_pose(self._program_s)
-        self._emit(emit, {"type": "set_done", "set": pose.set_no, "reps": pose.rep, "exercise_id": _EXERCISE})
+        self._emit(emit, {"type": "set_done", "set": pose.set_no, "reps": pose.rep, "exercise_id": self._exercise})
         self._program_s = math.ceil((self._program_s + 1e-6) / _SET_S) * _SET_S
         self._prev_program_s = self._program_s - 1e-9
 
-    def _restart_session(self, patient_id: str | None) -> None:
+    def _restart_session(self, patient_id: str | None, exercise_id: str | None = None) -> None:
         """A new live session started: fresh rep/set counters and a fresh `arrived` MOCK_ARRIVE_AT_S seconds
         from now, so `server.ai.session_voice` greets this session too. The ring buffer and any in-progress
         fall script (mock:fall) are left alone."""
         self._patient_id = patient_id or cfg.MOCK_PATIENT_ID
+        self._exercise = exercise_id or _EXERCISE
+        self._schedule = _program_schedule(self._exercise)
         self._arrived = False
         self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
         self._awaiting = False
@@ -490,7 +543,7 @@ class MockSource:
     def _start_fall(self, responds_at_s: float | None) -> None:
         pose = _program_pose(self._program_s)
         self._fall_started_s = self._sim_s
-        self._fall = FallScript(responds_at_s, {"exercise_id": _EXERCISE, "set": pose.set_no, "rep": pose.rep + 1})
+        self._fall = FallScript(responds_at_s, {"exercise_id": self._exercise, "set": pose.set_no, "rep": pose.rep + 1})
 
     def _events_between(self, prev: float, cur: float) -> Iterator[Message]:
         for n in range(int(prev // _PROGRAM_S), int(cur // _PROGRAM_S) + 1):
@@ -578,12 +631,19 @@ def _drain_ignore(inbox: Inbox) -> None:
             return
 
 
+def mock_exercise_id() -> str:
+    """The mock demo's exercise: squats, or forearm turns (counted from a synthesised watch) when MOCK_WRIST=1.
+    Used for the boot/auto-restart demo session and as the mock source's starting program."""
+    return MOCK_WRIST_EXERCISE_ID if cfg.MOCK_WRIST else _EXERCISE
+
+
 def make_source(spec: SourceSpec) -> Source:
     name = spec.source
     if name == "mock":
-        return MockSource(speed=spec.speed)
+        return MockSource(speed=spec.speed, exercise_id=mock_exercise_id())
     if name == "mock:fall":
-        return MockSource(speed=spec.speed, fall_at_s=spec.fall_at_s, responds_at_s=spec.responds_at_s)
+        return MockSource(speed=spec.speed, fall_at_s=spec.fall_at_s, responds_at_s=spec.responds_at_s,
+                          exercise_id=mock_exercise_id())
     if name.startswith("replay:"):
         return ReplaySource(Path(name.removeprefix("replay:")), speed=spec.speed)
     if name == "live":
@@ -747,13 +807,14 @@ class LiveState:
                 self.incident = False
 
     def on_frame(self, frame: Message) -> None:
-        angles = frame.get("angles") or {}
-        knees = [a for a in (angles.get("knee_l"), angles.get("knee_r")) if isinstance(a, (int, float))]
-        self.main_angle = round(max(knees), 1) if knees else None  # deepest bend (flexion)
+        self.exercise_id = frame.get("exercise_id", self.exercise_id)
+        if not exercises.is_watch_exercise(self.exercise_id):  # rotation exercises: the watch's turn is the angle
+            angles = frame.get("angles") or {}
+            knees = [a for a in (angles.get("knee_l"), angles.get("knee_r")) if isinstance(a, (int, float))]
+            self.main_angle = round(max(knees), 1) if knees else None  # deepest bend (flexion)
         self.load_l_pct = frame.get("load_l_pct")
         self.load_conf = frame.get("confidence_avg")
         self.flags = list(frame.get("flags") or [])
-        self.exercise_id = frame.get("exercise_id", self.exercise_id)
         self.set = frame.get("set_no", self.set)
 
     def on_event(self, ev: Message) -> None:
@@ -783,6 +844,10 @@ class LiveState:
             self.phase = "incident"
         elif kind == INCIDENT_CLOSED:
             self.phase, self.incident = "idle", False
+        elif (kind == "wrist" and exercises.is_watch_exercise(self.exercise_id)
+              and isinstance(ev.get("rotation_deg"), (int, float)) and not isinstance(ev.get("rotation_deg"), bool)
+              and math.isfinite(ev["rotation_deg"])):
+            self.main_angle = round(abs(float(ev["rotation_deg"])), 1)
         elif kind == "hr" and isinstance(ev.get("bpm"), (int, float)):
             self.hr = int(ev["bpm"])
 
@@ -1004,12 +1069,12 @@ class EngineBridge:
         elif self._inbox is not None and self._running:
             self._inbox.put_nowait(msg)
 
-    def notify_session_start(self, patient_id: str) -> None:
+    def notify_session_start(self, patient_id: str, exercise_id: str | None = None) -> None:
         """A new live session started (SessionRegistry.on_start hook). In mock modes, restart the mock
-        program so it emits a fresh `arrived` (and the squat program) for this session too; live/replay
-        sources are unaffected."""
+        program so it emits a fresh `arrived` (and the program for this exercise; a watch exercise runs the
+        rotation program) for this session too; live/replay sources are unaffected."""
         if self.source.startswith("mock"):
-            self.send_to_engine({"type": SESSION_START, "patient_id": patient_id})
+            self.send_to_engine({"type": SESSION_START, "patient_id": patient_id, "exercise_id": exercise_id})
 
     async def trigger_fall(self, responds_at_s: float | None) -> None:
         """Inject the scripted mock:fall sequence into the current session."""

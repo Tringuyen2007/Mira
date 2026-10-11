@@ -17,7 +17,7 @@ MAX_ROWS = 200
 # Exactly the relations copilot_ro may SELECT (roles.sql). patients is readable only column by column: the
 # emergency contact columns are not granted.
 ALLOWED_TABLES = frozenset({"progress_v", "sessions", "reps", "form_events", "memory_events", "patients",
-                            "prescriptions"})
+                            "prescriptions", "hr_recovery", "rotation_sets", "tremor_daily"})
 ALLOWED_SCHEMAS = frozenset({"", "public"})
 PATIENT_COLUMNS = ("id", "name", "age", "height_cm", "mass_kg", "affected_side", "condition", "therapist_id",
                    "hr_limit", "simulated", "created_at")

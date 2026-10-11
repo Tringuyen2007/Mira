@@ -54,14 +54,17 @@ MISSED_WINDOW_DAYS = 14
 MISSED_MIN = 3
 DEFAULT_KNEE_TARGET = 90.0    # squat goal when the prescription has no targets.knee_deg
 MILESTONE_RECENT_DAYS = 7     # only announce a goal first reached this recently (no flood of old milestones)
+TREMOR_RISE = 0.30            # tremor trend: mild+strong minutes this week >= last week × 1.3 ...
+TREMOR_MIN_DAYS = 3           # ... with at least 3 days of data in each week
 
-HIGH_SEVERITY_KINDS = frozenset({"compensation", "pain"})
+HIGH_SEVERITY_KINDS = frozenset({"compensation", "pain", "tremor_trend"})
 KIND_TITLES = {
     "depth_gain": "depth improving",
     "asymmetry_worse": "asymmetry rising",
     "compensation": "possible compensation",
     "pain": "pain after exercise",
     "missed_days": "missed sessions",
+    "tremor_trend": "tremor rising",
 }
 
 # ---- step 1: candidate rules (copilot_ro) ------------------------------------------------------------------
@@ -157,6 +160,24 @@ FROM done
 WHERE floor(per_week * window_days / 7) - session_days >= %(missed)s
 ORDER BY patient_id"""
 
+# Apple Watch tremor summaries: mild + strong minutes, this week (last 7 days incl. today) vs the 7 days before.
+TREMOR_TREND_SQL = """
+WITH w AS (
+  SELECT patient_id,
+         sum(mild_min + strong_min) FILTER (WHERE day > current_date - 7)  AS this_week,
+         sum(mild_min + strong_min) FILTER (WHERE day <= current_date - 7) AS last_week,
+         count(*) FILTER (WHERE day > current_date - 7)  AS days_this,
+         count(*) FILTER (WHERE day <= current_date - 7) AS days_last,
+         count(*) FILTER (WHERE source = 'simulated')    AS simulated_days
+  FROM tremor_daily WHERE day > current_date - 14
+  GROUP BY patient_id)
+SELECT patient_id, this_week, last_week, days_this, days_last, simulated_days,
+       round(100.0 * (this_week - last_week) / last_week, 1) AS rise_pct
+FROM w
+WHERE last_week > 0 AND days_this >= %(tremor_min_days)s AND days_last >= %(tremor_min_days)s
+  AND this_week >= last_week * (1 + %(tremor_rise)s)
+ORDER BY patient_id"""
+
 MILESTONE_SQL = f"""
 WITH target AS (
   SELECT DISTINCT ON (patient_id, exercise_id) patient_id, exercise_id,
@@ -215,7 +236,7 @@ WRITE_NOTE_TOOL = {
 FREE_SQL_TOOL = {
     "name": "run_sql",
     "description": "Run one read-only SELECT over progress_v, sessions, reps, form_events, memory_events, patients, "
-                   "prescriptions (max 200 rows).",
+                   "prescriptions, hr_recovery, rotation_sets, tremor_daily (max 200 rows).",
     "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]},
 }
 FIXED_SQL_TOOL = {
@@ -415,17 +436,29 @@ def _missed(row: dict[str, Any]) -> Candidate:
     return Candidate(row["patient_id"], "missed_days", None, ev, note)
 
 
+def _tremor_trend(row: dict[str, Any]) -> Candidate:
+    ev = plain({"this_week_min": row["this_week"], "last_week_min": row["last_week"],
+                "days_this_week": row["days_this"], "days_last_week": row["days_last"], "rise_pct": row["rise_pct"],
+                "levels": ["mild", "strong"], "simulated_days": row["simulated_days"]})
+    note = (f"Mild or strong tremor minutes rose {ev['rise_pct']}% week over week "
+            f"({ev['last_week_min']} → {ev['this_week_min']} min).")
+    if ev["simulated_days"]:
+        note += " Includes simulated watch data."
+    return Candidate(row["patient_id"], "tremor_trend", None, ev, note)
+
+
 RULES: list[tuple[str, str, Any]] = [
     ("depth_gain", DEPTH_GAIN_SQL, _depth_gain),
     ("asymmetry_worse", ASYMMETRY_SQL, _asymmetry),
     ("compensation", COMPENSATION_SQL, _compensation),
     ("pain", PAIN_SQL, _pain),
     ("missed_days", MISSED_SQL, _missed),
+    ("tremor_trend", TREMOR_TREND_SQL, _tremor_trend),
 ]
 RULE_PARAMS: dict[str, Any] = {
     "min_conf": MIN_CONFIDENCE, "gain": DEPTH_GAIN_DEG, "window": TREND_WINDOW_DAYS, "min_days": MIN_SESSION_DAYS,
     "asym_rise": ASYM_MIN_RISE, "depth": COMP_DEPTH_MIN_DEG, "load": COMP_LOAD_MIN_DROP, "pain": PAIN_POST_MIN,
-    "recent": PAIN_RECENT_DAYS, "missed": MISSED_MIN,
+    "recent": PAIN_RECENT_DAYS, "missed": MISSED_MIN, "tremor_rise": TREMOR_RISE, "tremor_min_days": TREMOR_MIN_DAYS,
 }
 
 

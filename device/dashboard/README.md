@@ -42,11 +42,11 @@ make test                  # the whole repo: test-dashboard, then the Python tes
 | Screen | Route | Endpoints |
 |---|---|---|
 | Caseload | `#/caseload` (`?filter=needs\|watch\|on_track`) | `GET /caseload?therapist_id=` |
-| Patient review | `#/patients/:pid`, `#/replay/:sid` | `GET /patients/{id}`, `GET /patients/{id}/memory?days=21`, `GET /sessions/{id}`, `GET /sessions/{id}/frames?...`, `POST /sessions/{id}/progress-note`, `GET /sessions/{id}/progress-note`; `POST /patients/{id}/messages` when capability-gated (see below) |
+| Patient review | `#/patients/:pid`, `#/replay/:sid` | `GET /patients/{id}`, `GET /patients/{id}/memory?days=21`, `GET /sessions/{id}`, `GET /sessions/{id}/frames?...`, `POST /sessions/{id}/progress-note`, `GET /sessions/{id}/progress-note`; `POST /patients/{id}/messages`, `GET /patients/{id}/watch`, `PATCH /patients/{id}/watch-features` when capability-gated (see below) |
 | Prescribe | `#/patients/:pid/prescribe` | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}`, `PATCH /patients/{id}/limits`; `GET /exercises` when capability-gated |
 | Recovery time-lapse | `#/patients/:pid/timelapse` | `GET /patients/{id}/session-history` (date pickers: earliest vs latest by default), `GET /sessions/{id}`, `GET /sessions/{id}/frames?...` (two dates, Overlay toggle). "Add to progress note" hands the headline to Patient review in memory (`store.noteDraft`, consumed once, labelled "From time-lapse — review before approving"), never in the URL |
 | Mira Assistant | `#/assistant` (`#/copilot` kept as an alias, redirects) and `#/proposals/:id` | `POST /copilot/ask`, `POST /copilot/review/{patient_id}`, `GET /proposals?status=&patient_id=`, `POST /proposals/{id}/approve\|edit\|dismiss` |
-| Live session | `#/live`, `#/live/:pid` | `GET /caseload` (who's live), `/ws/live`, `/ws/pose`; `POST /live/say` when capability-gated |
+| Live session | `#/live`, `#/live/:pid` | `GET /caseload` (who's live), `/ws/live`, `/ws/pose`, `/ws/events` (cues, Apple Watch events); `POST /live/say` when capability-gated |
 | Sidebar (every screen) | — | `GET /alerts?open=true`, `POST /alerts/{id}/resolve`, `GET /notifications?...`, `GET /notifications/count`, `POST /notifications/{id}/read\|read-all\|ack`, `/ws/events`, `/ws/notifications?since_id=` |
 
 Full request/response shapes and samples: repo root `README.md` → "For the therapist dashboard", and
@@ -93,6 +93,42 @@ route isn't present on the running server:
 | Message a patient | `/patients/{patient_id}/messages` | Patient review, Mira Assistant ("Approve and send" vs. "Copy text") |
 | "Send a cue" during a live session | `/live/say` | Live session |
 | Add an exercise from the library | `/exercises` | Prescribe |
+| Apple Watch cards; "Add a watch exercise" quick picks | `/patients/{patient_id}/watch` | Patient review, Prescribe |
+| "Tremor monitoring" switch | `/patients/{patient_id}/watch-features` | Patient review |
+
+## Apple Watch data
+
+Server side: `server/api/watch_admin.py`, payloads in `docs/superpowers/plans/2026-10-11-watch-contract.md` and
+`server/samples/` (`rest_get_patient_watch.json`, `ws_events_breather.json`, `ws_events_hr_recovery.json`,
+`ws_events_rotation_rep.json`, `ws_events_rotation_set.json`, `ws_events_limits_changed.json`,
+`ws_events_watch_features_changed.json`). Everything here is capability-gated, so the dashboard still runs against
+a server without the watch routes.
+
+- **Patient review → "Apple Watch"** (`js/screens/patient/watchModel.js` + `watchView.js`), from
+  `GET /patients/{id}/watch` (last 20 HR recoveries, last 20 rotation sets, 14 days of tremor):
+  - *Heart-rate recovery*: per-set drop (peak → 60 s later) on the shared `lineChart`, plus "Avg drop 22 bpm in
+    1 min" and the last set's peak → 60 s reading.
+  - *Rotation range*: per watch exercise, best / average vs the goal over recent sets; "Goal reached" (check icon)
+    or "8° short of goal" (diamond icon) — icon + text, never colour alone.
+  - *Tremor (14 days)*: one stacked bar per day (none / slight / mild / strong minutes; SVG rect attributes, CSS
+    class colours, a text legend and a visually-hidden per-day list), the newest day's headline and dyskinesia
+    ("Extra movements: few"). A **Simulated** chip when any day's `source` is `simulated`.
+  - *Tremor monitoring* switch (`role="switch"`) → `PATCH /patients/{id}/watch-features {tremor_monitoring}`;
+    the current value comes from `GET /patients/{id}` (`patient.tremor_monitoring`) and follows
+    `watch_features_changed` pushes for this patient.
+  - Empty states: one "No Apple Watch data yet" card when all three lists are empty; per-card empties otherwise
+    (the tremor card says whether monitoring is off or there's just no data yet).
+- **Live session**: a "Breather — 128 bpm over limit 120" banner on the room from `breather` `start`, cleared on
+  `end`; an "Apple Watch" side card with how the breather ended, the latest `hr_recovery`, and the latest
+  `rotation_rep` angle vs goal (or `rotation_set` summary) while a watch exercise runs. These events carry a
+  `session_id`, not a `patient_id`; the screen shows them while it is mounted on the live session (one live
+  session at a time in the MVP).
+- **Prescribe**: watch exercises (`forearm_rotation`, `shoulder_rotation`, `wrist_flexion`;
+  `WATCH_EXERCISE_IDS` in `js/core/exercises.js`, mirroring `server/exercises.py`) carry a "Watch" tag, can be
+  added from "Add a watch exercise" quick picks (staged until "Save plan", like a library pick), and edit a "Turn
+  goal" (`targets.rotation_deg`, 10–180°, default 80°) instead of a knee target. After a heart-rate limit save,
+  the server's own `limits_changed` push for the patient shows "Sent to Maya's watch" on the limit card — no
+  extra request.
 
 ## `rule_overrides`
 

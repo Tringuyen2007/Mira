@@ -77,6 +77,37 @@ def test_new_session_start_carries_the_stored_device_prefs(client: TestClient, p
         assert msg["device_prefs"] == {"captions": False, "volume": 0.6}
 
 
+def test_put_me_keeps_stored_watch_prefs_when_incoming_device_prefs_omits_them(
+        client: TestClient, phone: dict[str, str]) -> None:
+    """Apple Watch settings land in device_prefs as watch_* keys, but the iPhone Settings screen sends the
+    whole device_prefs object without them. A later PUT /me from the iPhone must not wipe
+    watch_taps/watch_arm/watch_double_tap/watch_captions — everything else still replaces wholesale, so
+    iPhone-only behaviour (captions/volume here) is unchanged."""
+    r = client.put("/me", headers=phone, json={"device_prefs": {
+        "captions": True, "volume": 0.5, "watch_taps": "strong", "watch_arm": "left",
+        "watch_double_tap": False, "watch_captions": False}})
+    assert r.status_code == 200
+    assert r.json()["patient"]["device_prefs"]["watch_taps"] == "strong"
+
+    # The iPhone round-trips only its own keys, as today's Settings screen does.
+    r = client.put("/me", headers=phone, json={"device_prefs": {"captions": False, "volume": 0.9}})
+    assert r.status_code == 200
+    prefs = r.json()["patient"]["device_prefs"]
+    assert prefs["captions"] is False and prefs["volume"] == 0.9  # iPhone fields still replace wholesale
+    assert prefs["watch_taps"] == "strong"
+    assert prefs["watch_arm"] == "left"
+    assert prefs["watch_double_tap"] is False
+    assert prefs["watch_captions"] is False
+
+
+def test_put_me_still_lets_watch_prefs_be_updated_directly(client: TestClient, phone: dict[str, str]) -> None:
+    """A PUT /me that does include a watch_* key still updates it (e.g. the watch app's own settings write)."""
+    client.put("/me", headers=phone, json={"device_prefs": {"watch_taps": "strong"}})
+    r = client.put("/me", headers=phone, json={"device_prefs": {"watch_taps": "normal"}})
+    assert r.status_code == 200
+    assert r.json()["patient"]["device_prefs"]["watch_taps"] == "normal"
+
+
 def test_put_me_does_not_touch_live_for_a_different_patients_session(client: TestClient,
                                                                       phone: dict[str, str]) -> None:
     """An admin editing another patient's prefs (via ?patient_id=) must not touch Maya's live session, since

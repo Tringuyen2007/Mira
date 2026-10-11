@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { liveModel, cueHistoryModel } from "../js/screens/live/model.js";
+import {
+  liveModel, cueHistoryModel, breatherModel, hrRecoveryLine, rotationLiveModel,
+} from "../js/screens/live/model.js";
 
 import { sample } from "./samples.mjs";
 
@@ -76,4 +78,36 @@ test("cueHistoryModel: maps cue events to {time, text}, newest first", () => {
 test("cueHistoryModel: empty/missing input is an empty list", () => {
   assert.deepEqual(cueHistoryModel(null), []);
   assert.deepEqual(cueHistoryModel([]), []);
+});
+
+// ---- Apple Watch events --------------------------------------------------------------------------------------
+
+test("breatherModel: start -> 'Breather — 128 bpm over limit 120'; end clears the banner with how it ended", () => {
+  const start = sample("ws_events_breather.json");
+  assert.deepEqual(breatherModel(start), { active: true, text: "Breather — 128 bpm over limit 120" });
+  const end = breatherModel({ ...start, state: "end", bpm: 112, resolution: "hr_recovered" });
+  assert.equal(end.active, false);
+  assert.match(end.text, /heart rate back under the limit/);
+  assert.equal(breatherModel({ ...start, state: "end", resolution: "escalated" }).active, false);
+  assert.equal(breatherModel({ type: "cue" }), null);
+});
+
+test("hrRecoveryLine: the latest set's peak -> 60 s drop", () => {
+  assert.equal(hrRecoveryLine(sample("ws_events_hr_recovery.json")),
+    "Set 2 recovery: 126 → 104 bpm, dropped 22 bpm in 1 min");
+  assert.equal(hrRecoveryLine({ type: "hr_recovery" }), null);
+});
+
+test("rotationLiveModel: a rep's angle vs goal (icon + text status) and a set's best/avg", () => {
+  const rep = rotationLiveModel(sample("ws_events_rotation_rep.json"));
+  assert.equal(rep.text, "Rep 4 of 10 · 68° of 80° goal");
+  assert.equal(rep.reached, false);
+  assert.equal(rep.status, "12° short");
+  assert.equal(rep.exerciseId, "forearm_rotation");
+  const hit = rotationLiveModel({ ...sample("ws_events_rotation_rep.json"), angle_deg: 81, reached: true });
+  assert.equal(hit.status, "Goal reached");
+  const set = rotationLiveModel(sample("ws_events_rotation_set.json"));
+  assert.equal(set.text, "Set 1 done · best 82°, avg 74° (goal 80°)");
+  assert.equal(set.reached, true);
+  assert.equal(rotationLiveModel({ type: "rep" }), null);
 });

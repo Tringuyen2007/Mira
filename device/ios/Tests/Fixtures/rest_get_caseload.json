@@ -1,0 +1,67 @@
+{
+  "therapist_id": "okafor",
+  "generated_at": "2026-10-11T08:31:35.355781Z",
+  "today": {
+    "sessions_done": 2,
+    "live_now": null
+  },
+  "counts": {
+    "all": 3,
+    "needs_you": 2,
+    "watch": 0,
+    "on_track": 1
+  },
+  "patients": [
+    {
+      "id": "george",
+      "name": "George Alvarez",
+      "age": 71,
+      "condition": "left hip replacement",
+      "affected_side": "left",
+      "week": 1,
+      "simulated": true,
+      "bucket": "needs_you",
+      "severity": 3,
+      "kind": "alert",
+      "reason": "Fall detected, not resolved yet",
+      "evidence": "",
+      "last_session_at": "2026-10-11T06:31:34.589897Z",
+      "last_session_id": "b6a56eb0-8cd0-4d27-9abc-60c5bc7aa04c",
+      "live_now": false
+    },
+    {
+      "id": "maya",
+      "name": "Maya Ellis",
+      "age": 67,
+      "condition": "right knee replacement",
+      "affected_side": "right",
+      "week": 3,
+      "simulated": true,
+      "bucket": "needs_you",
+      "severity": 3,
+      "kind": "compensation",
+      "reason": "Bending deeper, but taking weight off the right leg",
+      "evidence": "Right leg 47% \u2192 36%",
+      "last_session_at": "2026-10-10T18:31:34.589131Z",
+      "last_session_id": "f57d0bac-48b0-4ca2-9aaf-9564ecff0f91",
+      "live_now": false
+    },
+    {
+      "id": "sofia",
+      "name": "Sofia Novak",
+      "age": 59,
+      "condition": "right rotator cuff repair",
+      "affected_side": "right",
+      "week": 1,
+      "simulated": true,
+      "bucket": "on_track",
+      "severity": 1,
+      "kind": "steady",
+      "reason": "Last session on Oct 10",
+      "evidence": "",
+      "last_session_at": "2026-10-10T08:31:34.590494Z",
+      "last_session_id": "30c27761-be1a-4e90-8bf6-8de004af77ca",
+      "live_now": false
+    }
+  ]
+}

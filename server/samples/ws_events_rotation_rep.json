@@ -1,0 +1,13 @@
+{
+  "type": "rotation_rep",
+  "exercise_id": "forearm_rotation",
+  "set_index": 1,
+  "rep": 4,
+  "reps_target": 10,
+  "angle_deg": 68.0,
+  "goal_deg": 80.0,
+  "reached": false,
+  "seq": 1300,
+  "t": 1791662400.0,
+  "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"
+}

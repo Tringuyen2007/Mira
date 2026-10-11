@@ -2,6 +2,7 @@
 // index.js updates text/attributes on the refs it gets back rather than rebuilding.
 import { h, clear } from "../../core/dom.js";
 import { empty } from "../../ui/states.js";
+import { icon } from "../../ui/icons.js";
 
 const QUICK_CUES = ["Even out your weight", "Knees over your toes", "Take a rest", "Great work"];
 
@@ -35,13 +36,15 @@ export function renderRoomCard() {
     h("p", { class: "live__rep-big" }), h("p", { class: "meta live__rep-line" }));
   const hrChipEl = h("span", { class: "chip live__hr-chip", hidden: true });
   const pausedEl = h("div", { class: "live__paused-banner", role: "status", hidden: true }, "Paused");
+  // Apple Watch breather (Guardian HR pause): "Breather — 128 bpm over limit 120", cleared on `end`.
+  const breatherEl = h("div", { class: "live__breather-banner", role: "status", hidden: true });
   const el = h("section", { class: "card live__room", "aria-label": "Live 3D twin" },
     h("div", { class: "live__room-head" }, liveBadgeEl, latencyEl), poseStatusEl,
     h("div", { class: "live__room-body" },
-      h("div", { class: "live__views" }, mediaHost, avatarHost), repCardEl, hrChipEl, pausedEl));
+      h("div", { class: "live__views" }, mediaHost, avatarHost), repCardEl, hrChipEl, pausedEl, breatherEl));
   const repBigEl = repCardEl.querySelector(".live__rep-big");
   const repLineEl = repCardEl.querySelector(".live__rep-line");
-  return { el, avatarHost, videoEl, videoStatusEl, liveBadgeEl, latencyEl, poseStatusEl, repCardEl, repBigEl, repLineEl, hrChipEl, pausedEl };
+  return { el, avatarHost, videoEl, videoStatusEl, liveBadgeEl, latencyEl, poseStatusEl, repCardEl, repBigEl, repLineEl, hrChipEl, pausedEl, breatherEl };
 }
 
 // "Send a cue" panel when the device-bridge endpoint is live (caps.has("/live/say")).
@@ -82,6 +85,37 @@ export function renderCuePanelDisabled() {
   return h("section", { class: "card live__cue-panel", "aria-label": "Send a cue" },
     h("h2", { class: "card__title" }, "Send a cue"),
     h("p", { class: "meta" }, "Cues from the dashboard arrive with the device bridge."));
+}
+
+// "Apple Watch" side card: the latest breather outcome, HR recovery and (during a watch exercise) the turn angle
+// vs goal. index.js updates the refs in place as events arrive.
+export function renderWatchLiveCard() {
+  const emptyEl = h("p", { class: "meta" }, "Nothing from the watch yet this session.");
+  const breatherLineEl = h("p", { class: "live__watch-line", hidden: true });
+  const recoveryEl = h("p", { class: "live__watch-line", hidden: true });
+  const rotationTextEl = h("span", {});
+  const rotationStatusEl = h("span", { class: "live__watch-goal" });
+  const rotationEl = h("div", { class: "live__watch-rotation", hidden: true }, rotationTextEl, rotationStatusEl);
+  const el = h("section", { class: "card live__watch", "aria-label": "Apple Watch" },
+    h("h2", { class: "card__title" }, "Apple Watch"), emptyEl, breatherLineEl, recoveryEl, rotationEl);
+  function refreshEmpty() {
+    emptyEl.hidden = !(breatherLineEl.hidden && recoveryEl.hidden && rotationEl.hidden);
+  }
+  return {
+    el,
+    setBreatherLine(text) { breatherLineEl.hidden = !text; breatherLineEl.textContent = text || ""; refreshEmpty(); },
+    setRecovery(text) { recoveryEl.hidden = !text; recoveryEl.textContent = text || ""; refreshEmpty(); },
+    setRotation(m) {
+      rotationEl.hidden = !m;
+      if (m) {
+        rotationTextEl.textContent = m.text;
+        rotationStatusEl.setAttribute("class",
+          `live__watch-goal ${m.reached ? "live__watch-goal--reached" : "live__watch-goal--short"}`);
+        rotationStatusEl.replaceChildren(icon(m.reached ? "check-circle" : "diamond"), h("span", {}, m.status));
+      }
+      refreshEmpty();
+    },
+  };
 }
 
 export function renderCueHistory() {

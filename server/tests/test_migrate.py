@@ -29,6 +29,10 @@ def test_migrations_apply_and_are_idempotent() -> None:
         assert {"emergency_contact_relationship", "alert_therapist", "next_visit_at", "share_by_default",
                 "device_prefs"} <= _columns(dsn, "patients")
         assert "clinic" in _columns(dsn, "therapists")
+        assert "007_watch.sql" in first
+        assert {"tremor_monitoring", "hr_limit_set_by"} <= _columns(dsn, "patients")
+        assert {"patient_id", "accel"} <= _columns(dsn, "wrist_motion")
+        assert "watch_clock_offset_ms" in _columns(dsn, "sessions")
         with psycopg.connect(dsn) as conn:
             names = [r[0] for r in conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()]
         assert names == first
@@ -41,3 +45,5 @@ def test_schema_sql_already_contains_the_migration_ddl() -> None:
         assert "reusable" in _columns(dsn, "pairing_codes")
         assert "device_prefs" in _columns(dsn, "patients")
         assert "via_reusable" in _columns(dsn, "patient_devices")
+        assert "tremor_monitoring" in _columns(dsn, "patients")
+        assert "set_index" in _columns(dsn, "hr_recovery")

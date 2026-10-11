@@ -508,10 +508,12 @@ async def purge_patient_data(db: Database | None, patient_id: str) -> dict[str, 
             ids = [r["id"] for r in await cur.fetchall()]
             counts: dict[str, int] = {"sessions": len(ids)}
             if ids:
-                for table in ("pose_frames", "reps", "form_events", "wrist_motion", "heart_rate"):
+                for table in ("pose_frames", "reps", "form_events", "wrist_motion", "heart_rate", "hr_recovery",
+                              "rotation_sets"):
                     cur = await conn.execute(f"DELETE FROM {table} WHERE session_id = ANY(%s)", (ids,))  # noqa: S608
                     counts[table] = cur.rowcount
-            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals", "messages"):
+            for table in ("alerts", "memory_events", "notifications", "agent_actions", "plan_proposals", "messages",
+                          "tremor_daily"):
                 cur = await conn.execute(f"DELETE FROM {table} WHERE patient_id = %s", (patient_id,))  # noqa: S608
                 counts[table] = cur.rowcount
             if ids:
@@ -543,6 +545,81 @@ async def mark_messages_read(db: Database | None, patient_id: str, sender_not: s
            "AND sender != %s AND read_at IS NULL")
     return await _safe(db, "mark_messages_read", lambda d: d.execute(sql, (patient_id, sender_not)), None,
                        patient_id=patient_id)
+
+
+# ---- Apple Watch (migration 005) ------------------------------------------------------------------------------
+
+TREMOR_MINUTE_FIELDS = ("none_min", "slight_min", "mild_min", "strong_min", "unknown_min")
+
+
+async def upsert_hr_recovery(db: Database | None, session_id: str, patient_id: str, set_index: int, peak_bpm: int,
+                             bpm_60s: int, drop_bpm: int, time: Timestamp = None) -> bool:
+    """One row per (session, set); a re-run for the same set overwrites it."""
+    sql = ("INSERT INTO hr_recovery (session_id, patient_id, set_index, peak_bpm, bpm_60s, drop_bpm, time) "
+           "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (session_id, set_index) DO UPDATE SET "
+           "peak_bpm = EXCLUDED.peak_bpm, bpm_60s = EXCLUDED.bpm_60s, drop_bpm = EXCLUDED.drop_bpm, "
+           "time = EXCLUDED.time")
+    params = (session_id, patient_id, set_index, peak_bpm, bpm_60s, drop_bpm, ts(time))
+    return await _safe(db, "upsert_hr_recovery", lambda d: _done(d.execute(sql, params)), False,
+                       session_id=session_id)
+
+
+async def upsert_rotation_set(db: Database | None, session_id: str, patient_id: str, exercise_id: str,
+                              set_index: int, angles: list[float], best_deg: float, avg_deg: float, goal_deg: float,
+                              time: Timestamp = None) -> bool:
+    sql = ("INSERT INTO rotation_sets (session_id, patient_id, exercise_id, set_index, angles, best_deg, avg_deg, "
+           "goal_deg, time) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+           "ON CONFLICT (session_id, exercise_id, set_index) DO UPDATE SET angles = EXCLUDED.angles, "
+           "best_deg = EXCLUDED.best_deg, avg_deg = EXCLUDED.avg_deg, goal_deg = EXCLUDED.goal_deg, "
+           "time = EXCLUDED.time")
+    params = (session_id, patient_id, exercise_id, set_index, [float(a) for a in angles], best_deg, avg_deg,
+              goal_deg, ts(time))
+    return await _safe(db, "upsert_rotation_set", lambda d: _done(d.execute(sql, params)), False,
+                       session_id=session_id)
+
+
+async def upsert_tremor_days(db: Database | None, patient_id: str, days: list[dict[str, Any]]) -> int | None:
+    """Daily tremor summaries from the watch (`POST /me/tremor`), one row per (patient, day), in one transaction.
+    Returns how many days were stored, None on failure."""
+    sql = ("INSERT INTO tremor_daily (patient_id, day, none_min, slight_min, mild_min, strong_min, unknown_min, "
+           "dyskinesia, source, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+           "ON CONFLICT (patient_id, day) DO UPDATE SET none_min = EXCLUDED.none_min, "
+           "slight_min = EXCLUDED.slight_min, mild_min = EXCLUDED.mild_min, strong_min = EXCLUDED.strong_min, "
+           "unknown_min = EXCLUDED.unknown_min, dyskinesia = EXCLUDED.dyskinesia, source = EXCLUDED.source, "
+           "updated_at = now()")
+
+    async def run(d: Database) -> int:
+        async with d.connection() as conn, conn.transaction():
+            for day in days:
+                await conn.execute(sql, (patient_id, day["day"], *(int(day[k]) for k in TREMOR_MINUTE_FIELDS),
+                                         day["dyskinesia"], day["source"]))
+        return len(days)
+
+    return await _safe(db, "upsert_tremor_days", run, None, patient_id=patient_id)
+
+
+async def set_patient_hr_limit(db: Database | None, patient_id: str, hr_limit: int, set_by: str | None) -> int | None:
+    """Sets patients.hr_limit and who set it; returns the new limit, None if the patient doesn't exist (or on
+    failure). Same contract as therapist-page's dashboard_writes.set_hr_limit, plus `hr_limit_set_by`."""
+    sql = "UPDATE patients SET hr_limit = %s, hr_limit_set_by = %s WHERE id = %s RETURNING hr_limit"
+
+    async def run(d: Database) -> int | None:
+        row = await d.fetchrow(sql, (hr_limit, set_by, patient_id))
+        return int(row["hr_limit"]) if row else None
+
+    return await _safe(db, "set_patient_hr_limit", run, None, patient_id=patient_id)
+
+
+async def set_tremor_monitoring(db: Database | None, patient_id: str, enabled: bool) -> bool:
+    sql = "UPDATE patients SET tremor_monitoring = %s WHERE id = %s"
+    return await _safe(db, "set_tremor_monitoring", lambda d: _ok(d.execute(sql, (enabled, patient_id))), False,
+                       patient_id=patient_id)
+
+
+async def set_watch_clock_offset(db: Database | None, session_id: str, offset_ms: int) -> bool:
+    sql = "UPDATE sessions SET watch_clock_offset_ms = %s WHERE id = %s"
+    return await _safe(db, "set_watch_clock_offset", lambda d: _ok(d.execute(sql, (int(offset_ms), session_id))),
+                       False, session_id=session_id)
 
 
 # ---- helpers ---------------------------------------------------------------------------------------------

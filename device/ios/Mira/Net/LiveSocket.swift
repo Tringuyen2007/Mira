@@ -187,6 +187,9 @@ final class LiveSessionStore {
     /// Fires once per `session_summary`, after `sessionSummary` is updated, so `AppState`
     /// can refresh care/progress data for the session that just ended.
     @ObservationIgnored var onSessionSummary: ((SessionSummaryMessage) -> Void)?
+    /// Fires for every decoded /ws/events event, after all the handling above — the hook
+    /// `WatchBridge` (W2) uses to relay haptics/cues/rotation/etc. on to the watch.
+    @ObservationIgnored var onWatchEvent: ((SocketEvent) -> Void)?
 
     var connectionState: ConnectionState {
         let states = [liveSocket.state, eventSocket.state, poseSocket.state]
@@ -224,6 +227,7 @@ final class LiveSessionStore {
                     self?.sessionSummary = summary
                     self?.cue = summary.spoken
                     self?.onSessionSummary?(summary)
+                    self?.onWatchEvent?(event)
                     return
                 }
                 if case .message(let messageEvent) = event {
@@ -250,6 +254,7 @@ final class LiveSessionStore {
                 case .command(let command): self?.lastCommand = command
                 default: break
                 }
+                self?.onWatchEvent?(event)
             }
         }
     }

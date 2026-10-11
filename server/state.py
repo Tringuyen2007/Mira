@@ -249,6 +249,7 @@ class AppState:
         self.notifications: Any | None = None
         self.analyst: Any | None = None  # server.agents.session_analyst.SessionAnalyst
         self.devices: Any = None
+        self.clock_sync: Any | None = None  # server.agents.clock_sync.ClockSync: receives watch_sync windows
         # Per-patient limits on patient-scope actions (server.api.ratelimit): one per app, so tests start fresh.
         from server.api.ratelimit import PATIENT_ACTIONS_PER_MIN, PerKeyLimiter  # local: api imports state
 

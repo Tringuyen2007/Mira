@@ -1,0 +1,18 @@
+{
+  "type": "rotation_set",
+  "exercise_id": "forearm_rotation",
+  "set_index": 1,
+  "angles": [
+    62.0,
+    70.5,
+    78.0,
+    82.0,
+    75.0
+  ],
+  "best_deg": 82.0,
+  "avg_deg": 73.5,
+  "goal_deg": 80.0,
+  "seq": 1310,
+  "t": 1791662460.0,
+  "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"
+}
