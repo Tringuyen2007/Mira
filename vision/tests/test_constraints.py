@@ -102,3 +102,15 @@ def test_smooth_angle_damps_wobble_and_passes_turns():
     assert 0 < small < np.radians(2) * 0.25
     big = C.smooth_angle(0.0, np.radians(60), 30, 0.2)
     assert abs(big - np.radians(60)) < 1e-9
+
+
+def _facing(deg):
+    a = np.radians(deg)
+    return np.array([np.sin(a), 0.0, np.cos(a)])
+
+
+def test_locked_foot_is_dragged_along_when_the_body_turns_past_the_limit():
+    y = 0.0
+    for _ in range(300):
+        y = C.foot_yaw(_facing(90), _facing(90), y, 1 / 30, 0.0, True)  # anchored at 0°, body turned to 90°
+    assert abs(np.degrees(y) - 90) <= C.FOOT_YAW_LIMIT_DEG + 1e-6

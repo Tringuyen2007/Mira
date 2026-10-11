@@ -120,7 +120,8 @@ def foot_yaw(tracked_dir, body_fwd, prev_yaw: float | None, dt: float, locked_ya
              confident: bool) -> float:
     """Yaw (radians, atan2(x, z) on the floor) for a foot: the tracked direction limited to
     FOOT_YAW_LIMIT_DEG from the body's forward; when not confident, the previous yaw (dragged along
-    only if the body turns past the limit); the locked yaw while anchored; changes smoothed and
+    only if the body turns past the limit); the locked yaw while anchored (also dragged past the limit);
+    changes smoothed and
     turning no faster than FOOT_YAW_RATE_DPS."""
     ref = float(np.arctan2(body_fwd[0], body_fwd[2]))
     lim = np.radians(FOOT_YAW_LIMIT_DEG)
@@ -129,7 +130,7 @@ def foot_yaw(tracked_dir, body_fwd, prev_yaw: float | None, dt: float, locked_ya
         return ref + float(np.clip((yaw - ref + np.pi) % (2 * np.pi) - np.pi, -lim, lim))
 
     if locked_yaw is not None:
-        want = locked_yaw
+        want = within_limit(locked_yaw)  # anchored, but dragged along if the body turns past the limit
     elif confident and tracked_dir is not None and np.hypot(tracked_dir[0], tracked_dir[2]) > 1e-6:
         want = within_limit(float(np.arctan2(tracked_dir[0], tracked_dir[2])))
     elif prev_yaw is not None:  # unsure: the foot stays put unless the body turns past the limit
