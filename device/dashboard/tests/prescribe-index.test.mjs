@@ -2,16 +2,13 @@
 // something changes, and a clean teardown.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 
 installFakeDom();
 const { screen } = await import("../js/screens/prescribe/index.js");
 const { stepper } = await import("../js/ui/stepper.js");
 
-function sample(name) {
-  return JSON.parse(readFileSync(new URL(`../../../server/samples/${name}`, import.meta.url), "utf8"));
-}
+import { sample } from "./samples.mjs";
 
 const PATIENT = sample("rest_get_patient.json");
 const PRESCRIPTIONS = sample("rest_get_prescriptions.json");

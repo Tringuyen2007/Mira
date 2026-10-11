@@ -3,6 +3,8 @@
 
 const enc = (id) => encodeURIComponent(id);
 export const ASSISTANT_TIMEOUT_MS = 30000;
+// POST /patients/{id}/messages takes {body (1-1000 chars), kind} (server/api/care.py TherapistMessageIn).
+export const MESSAGE_MAX_CHARS = 1000;
 
 export function createEndpoints(api, therapistId) {
   return {
@@ -51,8 +53,10 @@ export function createEndpoints(api, therapistId) {
       return api.post("/copilot/ask", body, { timeoutMs: ASSISTANT_TIMEOUT_MS });
     },
     assistantReview: (pid) => api.post(`/copilot/review/${enc(pid)}`, {}, { timeoutMs: ASSISTANT_TIMEOUT_MS }),
-    // Planned route: only called when caps.has("/patients/{patient_id}/messages").
-    sendMessage: (pid, text) => api.post(`/patients/${enc(pid)}/messages`, { therapist_id: therapistId, text }),
+    // Only called when caps.has("/patients/{patient_id}/messages"). Callers check the length first; the slice
+    // is a last guard so an over-long body can never 422.
+    sendMessage: (pid, text) =>
+      api.post(`/patients/${enc(pid)}/messages`, { body: String(text).slice(0, MESSAGE_MAX_CHARS), kind: "message" }),
 
     notifications: ({ unread, limit, sinceId } = {}) =>
       api.get("/notifications", { unread, limit, since_id: sinceId, therapist_id: therapistId }),

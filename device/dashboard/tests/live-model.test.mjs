@@ -1,11 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { liveModel, cueHistoryModel } from "../js/screens/live/model.js";
 
-function sample(name) {
-  return JSON.parse(readFileSync(new URL(`../../../server/samples/${name}`, import.meta.url), "utf8"));
-}
+import { sample } from "./samples.mjs";
 
 const liveSnapshot = sample("ws_live.json");
 const patient = sample("rest_get_patient.json").patient;

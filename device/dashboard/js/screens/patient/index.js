@@ -4,6 +4,7 @@
 // Cleanup on unmount/route change: the player's rAF loop, the frames AbortController, and the live/pose
 // socket subscriptions are the three things that leak if this isn't careful (self-review note in the brief).
 import { h, clear } from "../../core/dom.js";
+import { MESSAGE_MAX_CHARS } from "../../net/endpoints.js";
 import { href } from "../../core/router.js";
 import { firstName, fmtWhen, weeksSince } from "../../core/format.js";
 import { createAvatarView } from "../../avatar/avatarView.js";
@@ -110,8 +111,8 @@ export const screen = {
     function toggleMessagePopover(btn) {
       if (messagePopoverEl) { messagePopoverEl.remove(); messagePopoverEl = null; return; }
       const name = firstName((state.patientJson && state.patientJson.patient && state.patientJson.patient.name) || "");
-      const textarea = h("textarea", { class: "patient__message-textarea", rows: 3,
-        placeholder: `Message ${name}…` });
+      const textarea = h("textarea", { class: "patient__message-textarea", rows: 3, maxlength: MESSAGE_MAX_CHARS,
+        placeholder: `Message ${name}…`, "aria-label": `Message ${name}` });
       const errorEl = h("p", { class: "patient__note-error", role: "alert" });
       const sendBtn = h("button", { class: "btn btn--primary", type: "button", onclick: send }, "Send");
       messagePopoverEl = h("div", { class: "card patient__popover patient__message-popover" },
@@ -121,6 +122,9 @@ export const screen = {
       async function send() {
         const text = textarea.value.trim();
         if (!text) { errorEl.textContent = "Write something first."; return; }
+        if (text.length > MESSAGE_MAX_CHARS) {
+          errorEl.textContent = `Keep it under ${MESSAGE_MAX_CHARS} characters.`; return;
+        }
         sendBtn.setAttribute("disabled", "");
         try {
           await ctx.api.sendMessage(state.pid, text);

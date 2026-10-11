@@ -3,15 +3,12 @@
 // leaked rAF loop) on unmount.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 
 installFakeDom();
 const { screen } = await import("../js/screens/timelapse/index.js");
 
-function sample(name) {
-  return JSON.parse(readFileSync(new URL(`../../../server/samples/${name}`, import.meta.url), "utf8"));
-}
+import { sample } from "./samples.mjs";
 
 const SESSION = sample("rest_get_session.json");
 

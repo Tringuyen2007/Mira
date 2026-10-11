@@ -4,7 +4,10 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 // Every attribute name that can carry a URL, checked case-insensitively so HREF/Src/XLink:Href etc. can't slip
 // past the guard. No absolute-origin escape hatch: an in-app hash route, a relative ./ or bare assets/vendor/
 // path, or a same-origin /dashboard/... path only. No scheme, no protocol-relative "//", no ../ traversal.
-const URL_ATTR_NAMES = new Set(["href", "src", "xlink:href", "formaction", "action", "srcset", "poster"]);
+const URL_ATTR_NAMES = new Set(["href", "src", "xlink:href", "formaction", "action", "srcset", "poster", "data", "ping",
+  "background"]);
+// Attributes that take markup, not a URL: never allowed (server text there would be HTML injection).
+const MARKUP_ATTR_NAMES = new Set(["srcdoc"]);
 const SAFE_URL = /^(#\/|\.\/|assets\/|vendor\/|\/dashboard\/)/;
 const HAS_TRAVERSAL = /(^|\/)\.\.(\/|$)/;
 
@@ -17,6 +20,7 @@ function build(el, attrs, children) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === null || v === undefined || v === false) continue;
     const lower = k.toLowerCase();
+    if (MARKUP_ATTR_NAMES.has(lower)) throw new Error(`${k} attribute not allowed`);
     if (lower === "style") throw new Error("style attribute not allowed (CSP style-src 'self'); use a class");
     if (URL_ATTR_NAMES.has(lower) && !isSafeUrl(v)) throw new Error(`${k} not allowed: ${v}`);
     if (lower.startsWith("on")) {

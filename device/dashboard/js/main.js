@@ -2,9 +2,8 @@
 // the sidebar re-render on route/store changes, and sign-out (which tears every listener/socket down).
 import { applyStoredTheme, getTheme, toggleTheme } from "./ui/theme.js";
 
-// First statement in the module, before any other work: sets <html data-theme> from localStorage (or "light")
-// synchronously so the page never paints the wrong theme and flips to the right one a moment later. No inline
-// script is allowed by the CSP, so this is the earliest point JS can apply it.
+// js/theme-boot.js already set <html data-theme> before first paint; this re-applies it (same source) so the
+// module's view of the theme matches the document.
 applyStoredTheme();
 
 import { clear, h } from "./core/dom.js";

@@ -146,11 +146,26 @@ WHERE patient_id = ANY(%(patient_ids)s)
   AND started_at >= time_bucket(INTERVAL '1 day', now(), %(tz)s)
 """
 
+# `investigation` (Insight's tool calls and data, ~5 KB per event) is dropped here as in CASELOAD_SQL: the
+# dashboard never shows it, and both reads should return the same evidence.
 MEMORY_EVENTS_SQL = """
-SELECT id, time, kind, message, evidence, acknowledged
+SELECT id, time, kind, message, evidence - 'investigation' AS evidence, acknowledged
 FROM memory_events
 WHERE patient_id = %(patient_id)s AND time >= now() - make_interval(days => %(days)s)
 ORDER BY time DESC
+LIMIT %(limit)s
+"""
+
+SESSION_HISTORY_LIMIT_MAX = 200
+
+# The time-lapse's date pickers: finished sessions of one patient (optionally one exercise), newest first.
+# A bare list (no frames, no reps), bounded by `limit` (<= SESSION_HISTORY_LIMIT_MAX).
+SESSION_HISTORY_SQL = """
+SELECT id, started_at, exercise_id, reps_done
+FROM sessions
+WHERE patient_id = %(patient_id)s AND ended_at IS NOT NULL
+  AND (%(exercise_id)s::text IS NULL OR exercise_id = %(exercise_id)s)
+ORDER BY started_at DESC
 LIMIT %(limit)s
 """
 
@@ -186,6 +201,15 @@ async def sessions_done_today(db: Database, patient_ids: list[str]) -> int:
 async def memory_events(db: Database, patient_id: str, days: int) -> list[dict[str, Any]]:
     """The patient's Therapist Memory list: memory_events from the last `days` days, newest first."""
     return await db.fetch(MEMORY_EVENTS_SQL, {"patient_id": patient_id, "days": days, "limit": MEMORY_EVENTS_LIMIT})
+
+
+async def session_history(db: Database, patient_id: str, exercise_id: str | None,
+                          limit: int) -> list[dict[str, Any]]:
+    """Finished sessions for the time-lapse pickers, newest first, at most `limit` (capped at
+    SESSION_HISTORY_LIMIT_MAX)."""
+    rows = await db.fetch(SESSION_HISTORY_SQL, {"patient_id": patient_id, "exercise_id": exercise_id,
+                                               "limit": min(limit, SESSION_HISTORY_LIMIT_MAX)})
+    return [{**r, "id": str(r["id"])} for r in rows]
 
 
 async def latest_progress_note(db: Database, session_id: str) -> dict[str, Any] | None:

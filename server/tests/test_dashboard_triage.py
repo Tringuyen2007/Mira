@@ -123,3 +123,24 @@ def test_asymmetry_real_insight_evidence_uses_affected_side() -> None:
     assert (t.bucket, t.kind) == ("needs_you", "asymmetry")
     assert t.reason == "Leaning more onto one side"
     assert t.evidence == "Asymmetry 3% → 7%"
+
+
+def test_malformed_memory_evidence_falls_back_to_reason_only() -> None:
+    """One bad memory event (evidence a list, or a non-numeric value) must not fail triage — and with it the
+    whole caseload (final review A, M2)."""
+    listy = [{"kind": "compensation", "evidence": ["not", "an", "object"], "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=listy, affected_side="right"))
+    assert (t.bucket, t.kind, t.evidence) == ("needs_you", "compensation", "")
+    assert t.reason == "Bending deeper, but taking weight off the right leg"
+
+    bad_num = [{"kind": "asymmetry_worse", "evidence": {"from": "n/a", "to": 7}, "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=bad_num))
+    assert (t.reason, t.evidence) == ("Leaning more onto one side", "")
+
+    bad_gain = [{"kind": "depth_gain", "evidence": {"gain_deg": "lots", "exercise_id": "squat"},
+                 "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=bad_gain))
+    assert (t.bucket, t.reason, t.evidence) == ("on_track", "Depth improving", "")
+
+    not_a_dict = triage(sig(memory=["junk", {"kind": "pain", "evidence": None}]))
+    assert not_a_dict.bucket == "watch"

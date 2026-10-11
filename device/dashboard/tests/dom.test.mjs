@@ -69,3 +69,12 @@ test("clear removes children", () => {
   clear(ul);
   assert.equal(ul.children.length, 0);
 });
+
+test("srcdoc is refused outright; data/ping/background are URL attributes", () => {
+  assert.throws(() => h("iframe", { srcdoc: "<b>x</b>" }));
+  assert.throws(() => h("iframe", { SrcDoc: "#/caseload" }));
+  assert.throws(() => h("object", { data: "https://evil.example/x" }));
+  assert.throws(() => h("a", { ping: "https://evil.example/" }));
+  assert.throws(() => h("td", { background: "javascript:alert(1)" }));
+  assert.equal(h("object", { data: "assets/x.svg" }).getAttribute("data"), "assets/x.svg");
+});

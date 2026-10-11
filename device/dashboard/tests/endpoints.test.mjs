@@ -88,10 +88,12 @@ test("assistant calls: context only when non-empty, review route, 30 s timeout p
   await ep.copilotAsk("Summarise today", null, []);
   await ep.assistantReview("a/b");
   await ep.sendMessage("maya", "Hi Maya");
+  await ep.sendMessage("maya", "x".repeat(1200));
   assert.deepEqual(calls, [
     ["/copilot/ask", { question: "And her pain?", patient_id: "maya", context: ctx }, { timeoutMs: 30000 }],
     ["/copilot/ask", { question: "Summarise today" }, { timeoutMs: 30000 }],
     ["/copilot/review/a%2Fb", {}, { timeoutMs: 30000 }],
-    ["/patients/maya/messages", { therapist_id: "okafor", text: "Hi Maya" }, undefined],
+    ["/patients/maya/messages", { body: "Hi Maya", kind: "message" }, undefined],
+    ["/patients/maya/messages", { body: "x".repeat(1000), kind: "message" }, undefined],
   ]);
 });

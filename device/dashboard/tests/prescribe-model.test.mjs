@@ -1,15 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   prescribeModel, diffPrescription, buildPutBody, hrLimitChanged, exerciseName,
   DEFAULT_REST_S, DEFAULT_TEMPO_S, DEFAULT_WEIGHT_SHIFT_PCT, DEFAULT_KNEE_CAVE_DEG, DEFAULT_TRUNK_LEAN_DEG,
   DEFAULT_HR_LIMIT,
 } from "../js/screens/prescribe/model.js";
 
-function sample(name) {
-  return JSON.parse(readFileSync(new URL(`../../../server/samples/${name}`, import.meta.url), "utf8"));
-}
+import { sample } from "./samples.mjs";
 
 const PATIENT = sample("rest_get_patient.json");
 const PRESCRIPTIONS = sample("rest_get_prescriptions.json");

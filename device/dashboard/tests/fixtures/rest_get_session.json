@@ -1,0 +1,68 @@
+{
+  "session": {
+    "id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+    "patient_id": "maya",
+    "exercise_id": "squat",
+    "started_at": "2026-10-10T20:32:10.053404Z",
+    "ended_at": null,
+    "reps_done": null,
+    "pain_pre": null,
+    "pain_post": null,
+    "effort": null,
+    "note": null,
+    "shared": false,
+    "ai_summary": null,
+    "ai_note": null,
+    "simulated": false
+  },
+  "reps": [
+    {
+      "session_id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+      "rep": 1,
+      "set_no": 1,
+      "started_at": null,
+      "ended_at": "2026-10-10T20:32:16.081000Z",
+      "peak_angle": null,
+      "rom": null,
+      "hold_s": null,
+      "asym_avg": null,
+      "asym_max": null,
+      "smoothness": null,
+      "quality": 1.0,
+      "flags": []
+    },
+    {
+      "session_id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+      "rep": 2,
+      "set_no": 1,
+      "started_at": null,
+      "ended_at": "2026-10-10T20:32:19.081000Z",
+      "peak_angle": null,
+      "rom": null,
+      "hold_s": null,
+      "asym_avg": null,
+      "asym_max": null,
+      "smoothness": null,
+      "quality": 1.0,
+      "flags": []
+    }
+  ],
+  "flags": [],
+  "summary": {
+    "reps_total": 4,
+    "good_reps": 4,
+    "flag_counts": {},
+    "ai_summary": null,
+    "ai_note": null,
+    "ai_note_label": "AI draft \u2014 review before use"
+  },
+  "tw_load_left_pct": 53.348443440011465,
+  "per_set": [
+    {
+      "set_no": 1,
+      "tw_load_left_pct": 53.348443440011465,
+      "reps": 4,
+      "good_reps": 4
+    }
+  ]
+}

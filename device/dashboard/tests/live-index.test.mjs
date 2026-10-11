@@ -2,15 +2,12 @@
 // pid that isn't live -> empty state) and socket cleanup on unmount (the leak class called out in the brief).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { installFakeDom } from "./fakedom.mjs";
 
 installFakeDom();
 const { screen } = await import("../js/screens/live/index.js");
 
-function sample(name) {
-  return JSON.parse(readFileSync(new URL(`../../../server/samples/${name}`, import.meta.url), "utf8"));
-}
+import { sample } from "./samples.mjs";
 
 const PATIENT = sample("rest_get_patient.json");
 const CASELOAD = sample("rest_get_caseload.json");

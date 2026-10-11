@@ -13,7 +13,7 @@ const load = (rel) => JSON.parse(readFileSync(new URL(rel, import.meta.url), "ut
 const realAsk = load("../../../server/samples/rest_post_copilot_ask.json");
 const realReview = load("../../../server/samples/rest_post_copilot_review.json");
 const realProposals = load("../../../server/samples/rest_get_proposals.json");
-const realPatient = load("../../../server/samples/rest_get_patient.json");
+const realPatient = load("./fixtures/rest_get_patient.json");
 const figma = load("./fixtures/assistant-figma.json");
 
 const flush = () => new Promise((r) => setTimeout(r, 0));

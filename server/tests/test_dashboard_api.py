@@ -21,7 +21,7 @@ OTHER_NOTE_SESSION_ID = "22222222-2222-2222-2222-222222222222"
 
 def test_dashboard_routes_need_the_token(make_client: Callable[..., TestClient]) -> None:
     client = make_client()
-    for path in ("/caseload", "/patients/maya/memory"):
+    for path in ("/caseload", "/patients/maya/memory", "/patients/maya/session-history"):
         assert client.get(path).status_code == 401
 
 
@@ -29,6 +29,7 @@ def test_dashboard_routes_503_without_db(make_client: Callable[..., TestClient])
     client = make_client()
     assert client.get("/caseload", headers=AUTH).status_code == 503
     assert client.get("/patients/maya/memory", headers=AUTH).status_code == 503
+    assert client.get("/patients/maya/session-history", headers=AUTH).status_code == 503
 
 
 def test_caseload_sample_shape() -> None:
@@ -415,4 +416,52 @@ def test_limits_persisted_and_visible_in_get_patient_and_logs_agent_action(dash_
             "SELECT detail FROM agent_actions WHERE agent = 'therapist' AND action = 'hr_limit_set' "
             "AND patient_id = 'maya' ORDER BY time DESC LIMIT 1").fetchone()
     assert row is not None
-    assert row[0] == {"from": before, "to": 140}
+    assert row[0] == {"from": before, "to": 140, "by": "okafor"}
+
+
+# ---- session history (final review, time-lapse pickers) ---------------------------------------------------
+
+def test_session_history_sample_shape() -> None:
+    body = json.loads((SAMPLES / "rest_get_patient_session_history.json").read_text())
+    assert set(body) == {"patient_id", "exercise_id", "sessions"}
+    s = body["sessions"][0]
+    assert set(s) == {"id", "started_at", "exercise_id", "reps_done"}
+    times = [x["started_at"] for x in body["sessions"]]
+    assert times == sorted(times, reverse=True)
+
+
+def test_session_history_finished_only_newest_first_and_bounded(dash_client: TestClient) -> None:
+    body = dash_client.get("/patients/missed3_pat/session-history", headers=AUTH).json()
+    # missed3_pat has one finished and one unfinished session: only the finished one comes back.
+    assert body["patient_id"] == "missed3_pat" and body["exercise_id"] is None
+    assert len(body["sessions"]) == 1
+    assert set(body["sessions"][0]) == {"id", "started_at", "exercise_id", "reps_done"}
+
+    pain = dash_client.get("/patients/pain_pat/session-history?exercise_id=squat", headers=AUTH).json()["sessions"]
+    assert len(pain) == 2 and pain[0]["started_at"] > pain[1]["started_at"]
+    assert dash_client.get("/patients/pain_pat/session-history?exercise_id=lunge",
+                           headers=AUTH).json()["sessions"] == []
+    assert len(dash_client.get("/patients/pain_pat/session-history?limit=1", headers=AUTH).json()["sessions"]) == 1
+
+
+def test_session_history_validates_input(dash_client: TestClient) -> None:
+    assert dash_client.get("/patients/nobody/session-history", headers=AUTH).status_code == 404
+    assert dash_client.get("/patients/bad%20id/session-history", headers=AUTH).status_code == 422
+    assert dash_client.get("/patients/maya/session-history?limit=0", headers=AUTH).status_code == 422
+    assert dash_client.get("/patients/maya/session-history?limit=201", headers=AUTH).status_code == 422
+    assert dash_client.get("/patients/maya/session-history?exercise_id=a;b", headers=AUTH).status_code == 422
+
+
+def test_memory_route_drops_insight_investigation(dash_client: TestClient, dash_dsn: str) -> None:
+    with psycopg.connect(dash_dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO memory_events (patient_id, kind, message, evidence) VALUES ('george', 'pain', "
+                     "'x', %s)", (json.dumps({"max_pain_recent": 5, "investigation": {"steps": [1, 2, 3]}}),))
+    events = dash_client.get("/patients/george/memory", headers=AUTH).json()["events"]
+    assert events and all("investigation" not in e["evidence"] for e in events)
+    assert any(e["evidence"].get("max_pain_recent") == 5 for e in events)
+
+
+def test_progress_note_rejects_huge_raw_text(dash_client: TestClient) -> None:
+    r = dash_client.post(f"/sessions/{NOTE_SESSION_ID}/progress-note",
+                         json={"therapist_id": "okafor", "text": " " * 9000}, headers=AUTH)
+    assert r.status_code == 422

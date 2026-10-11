@@ -1,8 +1,7 @@
 // Projector theme: data-theme="projector" on <html>, remembered in localStorage key "mira.dashboard.theme"
 // (convenience only, wrapped in try/catch — a blocked or full store never breaks the toggle, it just forgets the
-// choice on reload). main.js calls applyStoredTheme() synchronously as its first statement, before anything else
-// runs, so the right theme is already set when the page paints (no inline script is allowed by the CSP, so this
-// is the earliest JS can run).
+// choice on reload). js/theme-boot.js (a render-blocking classic script in <head>) sets it before first paint;
+// main.js calls applyStoredTheme() again on boot, which is a no-op unless storage changed in between.
 const STORAGE_KEY = "mira.dashboard.theme";
 const THEMES = new Set(["light", "projector"]);
 

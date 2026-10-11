@@ -4,6 +4,7 @@
 // The conversation lives only in this closure (never in storage: it carries patient data) and dies with unmount,
 // which main.js runs on every route change and on sign-out.
 import { h } from "../../core/dom.js";
+import { MESSAGE_MAX_CHARS } from "../../net/endpoints.js";
 import { href } from "../../core/router.js";
 import { proposalCard } from "../../ui/proposalCard.js";
 import { answerModel, contextFrom, proposalsTabsModel } from "./model.js";
@@ -291,6 +292,10 @@ export const screen = {
     }
 
     async function sendDraft(draft, btn, draftEl) {
+      if (String(draft.text).length > MESSAGE_MAX_CHARS) {
+        ctx.toast({ kind: "error", text: `This draft is over ${MESSAGE_MAX_CHARS} characters. Copy it instead.` });
+        return;
+      }
       btn.setAttribute("disabled", "");
       try {
         await ctx.api.sendMessage(draft.patientId, draft.text);

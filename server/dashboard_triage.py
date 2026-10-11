@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -167,9 +168,20 @@ def _progress_text(ev: dict[str, Any]) -> tuple[str, str]:
 
 def _find_memory(memory: list[dict[str, Any]], kinds: frozenset[str]) -> dict[str, Any] | None:
     for event in memory:
-        if event.get("kind") in kinds:
+        if isinstance(event, dict) and event.get("kind") in kinds:
             return event
     return None
+
+
+def _event_text(text_fn: Callable[..., tuple[str, str]], event: dict[str, Any], fallback: str,
+                *args: Any) -> tuple[str, str]:
+    """`text_fn(evidence, *args)`, but one malformed memory event (evidence not an object, a non-numeric value)
+    falls back to the reason-only `fallback` instead of failing the whole caseload (final review A, M2)."""
+    ev = event.get("evidence")
+    try:
+        return text_fn(ev if isinstance(ev, dict) else {}, *args)
+    except (TypeError, ValueError, AttributeError):
+        return fallback, ""
 
 
 def _flag_phrase(flag: str | None) -> str:
@@ -195,7 +207,9 @@ def triage(s: Signals) -> Triage:
     if worsening is not None:
         kind = "compensation" if worsening.get("kind") == "compensation" else "asymmetry"
         text_fn = _compensation_text if kind == "compensation" else _asymmetry_text
-        reason, evidence = text_fn(worsening.get("evidence") or {}, s.affected_side)
+        fallback = ("Bending deeper, but taking weight off the affected leg" if kind == "compensation"
+                    else "Leaning more onto one side")
+        reason, evidence = _event_text(text_fn, worsening, fallback, s.affected_side)
         return _result("needs_you", reason, evidence, kind)
 
     if s.missed_sessions >= MISSED_NEEDS_YOU_MIN:
@@ -206,7 +220,7 @@ def triage(s: Signals) -> Triage:
     # ---- watch --------------------------------------------------------------------------------------------
     low_pain = _find_memory(s.memory, frozenset({PAIN_MEMORY_KIND}))
     if low_pain is not None:
-        reason, evidence = _pain_watch_text(low_pain.get("evidence") or {})
+        reason, evidence = _event_text(_pain_watch_text, low_pain, "Pain reported after exercise this week")
         return _result("watch", reason, evidence, "pain")
 
     if s.flagged_reps_last >= FLAGGED_REPS_WATCH_MIN:
@@ -222,7 +236,7 @@ def triage(s: Signals) -> Triage:
     # ---- on_track -------------------------------------------------------------------------------------------
     progress = _find_memory(s.memory, PROGRESS_MEMORY_KINDS)
     if progress is not None:
-        reason, evidence = _progress_text(progress.get("evidence") or {})
+        reason, evidence = _event_text(_progress_text, progress, "Depth improving")
         return _result("on_track", reason, evidence, "progress")
 
     if s.last_session_at is not None:

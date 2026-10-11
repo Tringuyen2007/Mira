@@ -1,12 +1,15 @@
 """Therapist dashboard REST (dashboard spec 2026-10-11, Task 8): `GET /caseload` and
 `GET /patients/{id}/memory` ("Therapist Memory"). Task 11 adds the progress-note approval routes:
 `POST /sessions/{id}/progress-note` (approve the AI-drafted note, optionally edited) and
-`GET /sessions/{id}/progress-note` (read the latest approval back). Pure triage logic lives in
+`GET /sessions/{id}/progress-note` (read the latest approval back). The final review adds
+`GET /patients/{id}/session-history` (finished sessions for the time-lapse date pickers; named so it can't
+collide with wire-tri's `GET /patients/{id}/sessions`, which is capped at 100 and skips simulated sessions). Pure triage logic lives in
 server.dashboard_triage; this module only assembles signals from the database and the live session
 snapshot, and formats the response."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +24,7 @@ from server.db.pool import Database
 from server.state import get_state
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 # Same shape the dashboard uses for every id (query or path): letters, digits, underscore, hyphen.
 ID_RE = r"^[A-Za-z0-9_-]{1,64}$"
@@ -132,11 +136,24 @@ async def patient_memory(patient_id: str = Path(pattern=ID_RE, max_length=64),
     return {"patient_id": patient_id, "days": days, "events": events}
 
 
+@router.get("/patients/{patient_id}/session-history")
+async def patient_session_history(
+        patient_id: str = Path(pattern=ID_RE, max_length=64),
+        exercise_id: str | None = Query(default=None, pattern=ID_RE, max_length=64),
+        limit: int = Query(default=200, ge=1, le=dashboard_queries.SESSION_HISTORY_LIMIT_MAX),
+        db: Database = Depends(require_db)) -> dict[str, Any]:
+    patient = await queries.get_patient(db, patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="patient not found")
+    sessions = await dashboard_queries.session_history(db, patient_id, exercise_id, limit)
+    return {"patient_id": patient_id, "exercise_id": exercise_id, "sessions": sessions}
+
+
 # ---- progress-note approval (Task 11) --------------------------------------------------------------------
 
 class ProgressNoteIn(BaseModel):
     therapist_id: str = Field(pattern=ID_RE, max_length=64)
-    text: str
+    text: str = Field(max_length=8000)  # raw cap before stripping; the 1-4000 rule below is the real one
 
     @field_validator("text")
     @classmethod
@@ -205,6 +222,8 @@ async def set_limits(patient_id: str = Path(pattern=ID_RE, max_length=64), body:
     new_limit = await dashboard_writes.set_hr_limit(db, patient_id, body.hr_limit)
     if new_limit is None:
         raise HTTPException(status_code=503, detail="database unavailable: heart-rate limit not saved")
-    await writes.insert_agent_action(db, "therapist", "hr_limit_set", patient_id,
-                                     detail={"from": before, "to": new_limit})
+    audited = await writes.insert_agent_action(db, "therapist", "hr_limit_set", patient_id,
+                                               detail={"from": before, "to": new_limit, "by": body.therapist_id})
+    if not audited:
+        log.warning("hr_limit_set for %s saved but not audited", patient_id)
     return {"patient_id": patient_id, "hr_limit": new_limit}

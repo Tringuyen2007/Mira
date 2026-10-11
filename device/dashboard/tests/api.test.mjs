@@ -49,3 +49,14 @@ test("a per-request timeout overrides the client default", async () => {
   assert.deepEqual(await api.get("/slow", {}, { timeoutMs: 1000 }), { ok: true });
   await assert.rejects(api.post("/slow", {}), (e) => e.status === 0 && e.detail === "timeout");
 });
+
+test("the timeout also covers a response body that never finishes", async () => {
+  const stalledBody = async (_url, opts) => ({
+    ok: true, status: 200,
+    json: () => new Promise((_, reject) => {
+      opts.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    }),
+  });
+  const api = createApi({ token: "t".repeat(24), timeoutMs: 5, fetchImpl: stalledBody });
+  await assert.rejects(api.get("/x"), (e) => e.status === 0 && e.detail === "timeout");
+});
