@@ -12,12 +12,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from server.ai.validators import AI_DRAFT_LABEL
+from server import security
+from server.ai.validators import AI_DRAFT_LABEL, label_note
+from server.api import ratelimit
 from server.api.db_dep import require_db
 from server.config import cfg
 from server.db import queries, writes
 from server.db.pool import Database
+from server.exercises import display_name
+from server.notify import notifications
 from server.state import get_state
+
+DEFAULT_THERAPIST_ID = "okafor"
 
 router = APIRouter()
 
@@ -27,10 +33,52 @@ class SessionIn(BaseModel):
     exercise_id: str = Field(default="squat", min_length=1, max_length=64)
 
 
+class CheckinIn(BaseModel):
+    pain_post: int | None = Field(default=None, ge=0, le=10)
+    effort: int | None = Field(default=None, ge=1, le=10)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+async def _owned_session(db: Database, sid: str, principal: security.Principal) -> dict[str, Any]:
+    session = await queries.get_session(db, sid)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    principal.require(session["patient_id"])
+    return session
+
+
+def _incident_blocks(state: Any, patient_id: str) -> bool:
+    """Is a Safety Guardian incident open for this patient? Incidents are keyed by session id: the registry says
+    whose session it was, else the incident's own profile; an incident nobody can attribute blocks everyone."""
+    guardian = state.guardian
+    for key, incident in list(getattr(guardian, "incidents", {}).items()):
+        live = state.sessions.get(key) if isinstance(key, str) else None
+        owner = live.patient_id if live is not None else getattr(getattr(incident, "profile", None), "patient_id",
+                                                                 None)
+        if owner is None or owner == patient_id:
+            return True
+    return False
+
+
 @router.post("/sessions")
-async def start_session(body: SessionIn | None = None) -> dict[str, Any]:
+async def start_session(body: SessionIn | None = None,
+                        principal: security.Principal = Depends(security.require_principal)) -> dict[str, Any]:
     body = body or SessionIn()
-    registry = get_state().sessions
+    state = get_state()
+    if principal.scope == "patient":
+        assert principal.patient_id is not None
+        ratelimit.check_patient(state.patient_limiter, principal.scope, "sessions", principal.patient_id)
+        body.patient_id = principal.patient_id
+        if state.db is not None:  # a phone may only start exercises on its plan
+            active = {rx["exercise_id"] for rx in await queries.prescriptions(state.db, body.patient_id)}
+            if body.exercise_id not in active:
+                raise HTTPException(status_code=422, detail=f"{body.exercise_id!r} is not in your plan")
+        current = state.sessions.current
+        if current is not None and current.patient_id != body.patient_id:
+            raise HTTPException(status_code=409, detail="another patient's session is running")
+        if _incident_blocks(state, body.patient_id):
+            raise HTTPException(status_code=409, detail="an incident is open; your care team is checking in")
+    registry = state.sessions
     if registry.current is not None:
         await registry.stop(registry.current.session_id)
     session = await registry.start(body.patient_id, body.exercise_id)
@@ -40,29 +88,73 @@ async def start_session(body: SessionIn | None = None) -> dict[str, Any]:
 
 
 @router.post("/sessions/{session_id}/stop")
-async def stop_session(session_id: uuid.UUID) -> dict[str, Any]:
+async def stop_session(session_id: uuid.UUID,
+                       principal: security.Principal = Depends(security.require_principal)) -> dict[str, Any]:
     sid = str(session_id)
     state = get_state()
-    if state.sessions.get(sid) is not None:
+    live = state.sessions.get(sid)
+    if live is not None:
+        principal.require(live.patient_id)
+        if not state.sessions.is_ended(sid):  # tell the engine too, so the LCD/mock program stops counting
+            state.bridge.send_to_engine({"type": "command", "name": "stop", "payload": {"source": "rest"},
+                                         "session_id": sid})
         await state.sessions.stop(sid)
         return {"session_id": sid, "stopped": True}
     db = require_db()
-    if await queries.get_session(db, sid) is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(db, sid, principal)
     if not await writes.end_session(db, sid, None):
         raise HTTPException(status_code=503, detail="database unavailable: could not stop the session")
     return {"session_id": sid, "stopped": True}
 
 
-@router.get("/sessions/{session_id}")
-async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db)) -> dict[str, Any]:
+@router.post("/sessions/{session_id}/checkin")
+async def checkin_session(session_id: uuid.UUID, body: CheckinIn,
+                          principal: security.Principal = Depends(security.require_principal),
+                          db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
-    session = await queries.get_session(db, sid)
-    if session is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    reps, flags, tw, per_set_tw = await asyncio.gather(
+    session = await _owned_session(db, sid, principal)
+    await writes.record_session_feedback(db, sid, pain_post=body.pain_post, effort=body.effort, note=body.note)
+    if body.pain_post is not None and body.pain_post >= 7:
+        await _notify_post_session_pain(db, sid, session["patient_id"], session["exercise_id"], body.pain_post,
+                                        body.note)
+    return {"session_id": sid, "pain_post": body.pain_post, "effort": body.effort,
+            "note_saved": body.note is not None}
+
+
+async def _notify_post_session_pain(db: Database, sid: str, patient_id: str, exercise_id: str, pain_post: int,
+                                    note: str | None) -> None:
+    """A pain_post >= 7 check-in arrives after the session (and often after its analysis) already ended, so
+    it can't open a live Safety Guardian incident — there's no live call to escalate into. Instead it routes
+    straight to the therapist as a notification; `dedupe_key` makes re-posting the same check-in harmless.
+    Spec deviation: post-session pain routes to the therapist as a notification, not through the live
+    Guardian (there is nothing left for the Guardian to hold open)."""
+    live = get_state().sessions.get(sid)
+    first_name = live.profile.first_name if live else None
+    therapist_id = live.profile.therapist_id if live else None
+    if not therapist_id:
+        row = await queries.patient_me_row(db, patient_id)
+        therapist_id = (row or {}).get("therapist_id")
+        if first_name is None and row is not None and row.get("name"):
+            first_name = str(row["name"]).split()[0]
+    therapist_id = therapist_id or DEFAULT_THERAPIST_ID
+    first_name = first_name or patient_id
+    body = (note or "").strip()[:140] or display_name(exercise_id)
+    await notifications.create(kind="pain", severity="high", therapist_id=therapist_id, patient_id=patient_id,
+                               title=f"{first_name} reported pain {pain_post}/10 after a session", body=body,
+                               link=f"/sessions/{sid}", source_table="sessions", source_id=sid,
+                               dedupe_key=f"pain_post:{sid}")
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: uuid.UUID,
+                      principal: security.Principal = Depends(security.require_principal),
+                      db: Database = Depends(require_db)) -> dict[str, Any]:
+    sid = str(session_id)
+    session = await _owned_session(db, sid, principal)
+    reps, flags, tw, per_set_tw, analysis = await asyncio.gather(
         queries.session_reps(db, sid), queries.session_form_events(db, sid),
-        queries.session_tw_load(db, sid), queries.session_tw_load_per_set(db, sid))
+        queries.session_tw_load(db, sid), queries.session_tw_load_per_set(db, sid),
+        queries.session_analysis(db, sid))
     reps_by_set: dict[Any, list[dict[str, Any]]] = {}
     for rep in reps:
         reps_by_set.setdefault(rep["set_no"], []).append(rep)
@@ -70,8 +162,12 @@ async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db))
                 "reps": len(reps_by_set.get(row["set_no"], [])),
                 "good_reps": sum(1 for r in reps_by_set.get(row["set_no"], []) if (r["quality"] or 0) >= 1.0)}
                for row in per_set_tw]
+    if analysis is not None:
+        analysis = {**analysis, "note": label_note(analysis["note"])}
     return {
         "session": session,
+        "exercise_name": display_name(session["exercise_id"]),
+        "analysis": analysis,
         "reps": reps,
         "flags": flags,
         "summary": {
@@ -90,10 +186,12 @@ async def get_session(session_id: uuid.UUID, db: Database = Depends(require_db))
 @router.get("/sessions/{session_id}/frames", response_model=None)
 async def get_frames(session_id: uuid.UUID, downsample: int = Query(default=300, ge=0, le=5000),
                      t0: datetime | None = None, t1: datetime | None = None,
+                     principal: security.Principal = Depends(security.require_principal),
                      db: Database = Depends(require_db)) -> dict[str, Any] | Response:
     """downsample > 0: knee curve with lttb (charts); downsample=0: one page of full-rate frames between t0 and t1
     (replay). A full page has `next_t0`: request again with t0=next_t0 for the rest."""
     sid = str(session_id)
+    await _owned_session(db, sid, principal)
     if downsample > 0:
         points = await queries.session_knee_lttb(db, sid, downsample)
         return {"session_id": sid, "mode": "lttb", "series": "knee_r", "points": points}
@@ -111,10 +209,11 @@ def render_frames(session_id: str, page: dict[str, Any]) -> bytes:
 
 
 @router.post("/sessions/{session_id}/share")
-async def share_session(session_id: uuid.UUID, db: Database = Depends(require_db)) -> dict[str, Any]:
+async def share_session(session_id: uuid.UUID,
+                        principal: security.Principal = Depends(security.require_principal),
+                        db: Database = Depends(require_db)) -> dict[str, Any]:
     sid = str(session_id)
-    if await queries.get_session(db, sid) is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    await _owned_session(db, sid, principal)
     if not await writes.set_session_shared(db, sid, True):
         raise HTTPException(status_code=503, detail="database unavailable: could not share the session")
     return {"session_id": sid, "shared": True}

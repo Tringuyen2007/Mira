@@ -98,12 +98,48 @@ struct OnboardingDraft: Codable, Equatable {
     }
 }
 
+#if !canImport(WatchConnectivity)
+/// Stand-in for the macOS `swift test` build (`MiraNetworking` excludes `Mira/Watch`,
+/// and plain macOS has no `WatchConnectivity`), with the same shape `AppState` calls.
+@MainActor
+final class WatchBridge {
+    private(set) var isPaired = false
+    private(set) var isWatchAppInstalled = false
+
+    init(liveSession: LiveSessionStore) {}
+    func activate() {}
+    func push(_ live: LiveMessage?) {}
+    func forward(haptic pattern: String) {}
+    func forward(summary: SessionSummaryMessage) {}
+}
+#endif
+
 @MainActor
 @Observable
 final class AppState {
     var preferences: MiraPreferences {
         didSet {
             if let data = try? JSONEncoder().encode(preferences) { defaults.set(data, forKey: "miraPreferences.v1") }
+            notifyPreferencesChanged()
+        }
+    }
+
+    /// Set by `MiraApp` on iOS to `{ prefs in Task { await Reminders.sync(prefs) } }`.
+    /// Kept as a closure (rather than importing `Reminders` here) so this file keeps
+    /// building in the macOS `swift test` package, which has no UserNotifications.
+    @ObservationIgnored var onPreferencesChanged: ((MiraPreferences) -> Void)?
+    @ObservationIgnored private var preferencesChangeTask: Task<Void, Never>?
+
+    /// Debounces rapid preference edits (e.g. dragging the volume slider or tapping
+    /// several reminder days) before syncing to local notifications.
+    private func notifyPreferencesChanged() {
+        guard let onPreferencesChanged else { return }
+        preferencesChangeTask?.cancel()
+        let prefs = preferences
+        preferencesChangeTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            onPreferencesChanged(prefs)
         }
     }
     var onboarding: OnboardingDraft {
@@ -114,6 +150,8 @@ final class AppState {
         }
     }
     let liveSession = LiveSessionStore()
+    let store = PatientStore()
+    let watch: WatchBridge
     private(set) var serverAddress: String
     private(set) var connectionEnabled: Bool
     private(set) var restStatus: String?
@@ -132,11 +170,33 @@ final class AppState {
     @ObservationIgnored private var token: String?
     private(set) var tokenHint: String?
 
-    var isPaired: Bool { token != nil }
+    /// The server's patient id for this phone, set by a successful /pair. UserDefaults `patientID.v1`.
+    private(set) var patientID: String? { didSet { defaults.set(patientID, forKey: "patientID.v1") } }
+    private(set) var me: MeResponse?
+    private(set) var pairingError: String?
+    private(set) var isPairing = false
+    @ObservationIgnored private let urlSession: URLSession
 
-    init(defaults: UserDefaults = .standard, tokenStore: TokenStore = KeychainTokenStore()) {
+    var isPaired: Bool { token != nil }
+    var isLinked: Bool { patientID != nil && isPaired }
+    /// Whether an Apple Watch is paired with this iPhone and has the Mira watch app
+    /// installed (not whether it's currently reachable — the toggle should stay on
+    /// even while the watch is locked or out of Bluetooth range).
+    var watchPaired: Bool { watch.isPaired && watch.isWatchAppInstalled }
+
+    static let demoServerAddress = "http://45.76.255.253:8000"
+    private static var defaultServerAddress: String {
+        #if MIRA_DEMO
+        return demoServerAddress
+        #else
+        return "http://localhost:8000"
+        #endif
+    }
+
+    init(defaults: UserDefaults = .standard, tokenStore: TokenStore = KeychainTokenStore(), urlSession: URLSession = .shared) {
         self.defaults = defaults
         self.tokenStore = tokenStore
+        self.urlSession = urlSession
         preferences = defaults.data(forKey: "miraPreferences.v1")
             .flatMap { try? JSONDecoder().decode(MiraPreferences.self, from: $0) } ?? MiraPreferences()
         let draft = defaults.data(forKey: "onboardingDraft.v1")
@@ -144,10 +204,80 @@ final class AppState {
         onboarding = draft
         // The old welcome-only screen must not count as a completed profile.
         hasCompletedOnboarding = defaults.bool(forKey: "hasCompletedOnboarding.v2") && draft.canFinish
-        serverAddress = defaults.string(forKey: "serverAddress") ?? "http://localhost:8000"
+        serverAddress = defaults.string(forKey: "serverAddress") ?? Self.defaultServerAddress
         connectionEnabled = defaults.bool(forKey: "connectionEnabled")
         token = tokenStore.load()
         tokenHint = token.map(PairingToken.masked)
+        // Note: patientID's didSet isn't called from init, which is what we want.
+        patientID = defaults.string(forKey: "patientID.v1")
+        watch = WatchBridge(liveSession: liveSession)
+        liveSession.onMessageEvent = { [weak self, store] event in
+            if event.message.kind == "message" {
+                store.appendIncoming(event)
+            } else {
+                // note / visit_highlight: no message to append, just refetch /me/care
+                // so the Care screens pick up the change.
+                Task { [weak self] in
+                    guard let self, let api = self.apiClient else { return }
+                    await self.store.refreshCare(api: api)
+                }
+            }
+        }
+        liveSession.onSessionSummary = { [weak self] _ in Task { await self?.refreshMe() } }
+        #if canImport(WatchConnectivity)
+        watch.activate()
+        #endif
+        trackLiveForWatch()
+        trackHapticForWatch()
+        trackSummaryForWatch()
+    }
+
+    // MARK: Watch relay (Plan 4)
+
+    /// Re-arming `withObservationTracking` loops: each tracks exactly one
+    /// `liveSession` property, so a `live` update never re-sends the last haptic
+    /// (and vice versa). `AppState` itself stays the single place that knows both
+    /// "what changed" and "the watch cares" — `LiveSessionStore` doesn't know
+    /// `WatchBridge` exists, and `WatchBridge` doesn't know when to look.
+    private func trackLiveForWatch() {
+        withObservationTracking({ _ = liveSession.live }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                // The server reports `done` on stop and then clears the session, after
+                // which this patient's `/ws/live` goes quiet — so the end of a session
+                // must be pushed proactively as the idle snapshot (the watch then ends
+                // its workout), not left to a frame that never comes.
+                let live = self.liveSession.live
+                self.watch.push(live?.phase == "done" ? nil : live)
+                self.trackLiveForWatch()
+            }
+        })
+    }
+
+    private func trackHapticForWatch() {
+        withObservationTracking({ _ = liveSession.hapticSeq }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let haptic = self.liveSession.haptic { self.watch.forward(haptic: haptic.pattern) }
+                self.trackHapticForWatch()
+            }
+        })
+    }
+
+    private func trackSummaryForWatch() {
+        withObservationTracking({ _ = liveSession.sessionSummary }, onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let summary = self.liveSession.sessionSummary {
+                    self.watch.forward(summary: summary)
+                    // The session is over: the idle snapshot ends the watch workout. The
+                    // summary arrives ~2 s late, so leave a session that already restarted alone.
+                    let live = self.liveSession.live
+                    if live == nil || live?.phase == "done" { self.watch.push(nil) }
+                }
+                self.trackSummaryForWatch()
+            }
+        })
     }
 
     func advanceOnboarding() {
@@ -171,7 +301,7 @@ final class AppState {
 
     var apiClient: APIClient? {
         guard let address = try? ServerAddress(serverAddress) else { return nil }
-        return APIClient(address: address, token: token)
+        return APIClient(address: address, token: token, session: urlSession)
     }
 
     /// Saves the address and, when one is entered, a new token (an empty token field
@@ -207,11 +337,195 @@ final class AppState {
         tokenStore.delete()
         token = nil
         tokenHint = nil
+        patientID = nil
+        me = nil
+        pairingError = nil
         configurationVersion = UUID()
         restStatus = nil
         if connectionEnabled, let address = try? ServerAddress(serverAddress) {
             liveSession.connect(to: address, token: nil, reset: true)
         }
+    }
+
+    /// After a confirmed `DELETE /me`: forgets the pairing token and every local
+    /// record of this patient, so the app falls back to onboarding. `serverAddress`
+    /// is kept — deleting your data doesn't mean re-typing the clinic's server.
+    func wipeLocalData() {
+        forgetToken()
+        onboarding = OnboardingDraft()
+        preferences = MiraPreferences()
+        hasCompletedOnboarding = false
+        me = nil
+        store.reset()
+        // The property `didSet`s above re-persist the fresh defaults; remove the
+        // keys afterward so a deleted account truly leaves nothing behind.
+        defaults.removeObject(forKey: "onboardingDraft.v1")
+        defaults.removeObject(forKey: "miraPreferences.v1")
+        defaults.removeObject(forKey: "hasCompletedOnboarding.v2")
+        defaults.removeObject(forKey: "patientID.v1")
+        Self.deleteExportedDataFiles()
+    }
+
+    /// Removes any `mira-export-*.json` temp files left behind by Settings'
+    /// "Download my data" share sheet (I10): once on a confirmed delete, and the
+    /// caller also removes the one it just shared once that sheet is dismissed.
+    static func deleteExportedDataFiles() {
+        let directory = FileManager.default.temporaryDirectory
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in contents where url.lastPathComponent.hasPrefix("mira-export-") && url.pathExtension == "json" {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Builds the /pair request from the onboarding draft and preferences.
+    func pairRequest(deviceName: String) -> PairRequest? {
+        let d = onboarding
+        guard d.therapistCode.count == 6, let height = d.height, let mass = d.bodyMass,
+              let name = d.patientName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        let side: String? = switch d.affectedSide {
+        case .left: "left"
+        case .right: "right"
+        case .notApplicable: "none"
+        case .both, .notSelected: nil
+        }
+        let relationship = preferences.contactRelationship.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = d.contactIsValid ? PairContact(name: d.emergencyContactName, phone: d.emergencyContactPhone,
+                                                     relationship: relationship.isEmpty ? nil : relationship) : nil
+        return PairRequest(code: d.therapistCode, deviceName: deviceName,
+                           profile: PairProfile(name: name, heightCm: height, massKg: mass, affectedSide: side,
+                                                condition: d.condition.isEmpty ? nil : d.condition),
+                           emergencyContact: contact, alertTherapist: preferences.alertTherapist)
+    }
+
+    /// Clears a stale pairing error, e.g. once the user edits the therapist code after a failed attempt.
+    func clearPairingError() {
+        pairingError = nil
+    }
+
+    /// POST /pair with the draft; on success the patient token replaces any saved token and sockets reconnect.
+    @discardableResult
+    func pair(deviceName: String = "iPhone") async -> Bool {
+        guard !isPairing else { return false }
+        guard let body = pairRequest(deviceName: deviceName) else {
+            pairingError = "Enter your name, height, weight and the 6-character code first."
+            return false
+        }
+        guard let address = try? ServerAddress(serverAddress) else {
+            pairingError = APIError.invalidAddress.localizedDescription
+            return false
+        }
+        isPairing = true
+        pairingError = nil
+        defer { isPairing = false }
+        do {
+            let response = try await APIClient(address: address, token: nil, session: urlSession).pair(body)
+            try tokenStore.save(response.token)
+            token = response.token
+            tokenHint = PairingToken.masked(response.token)
+            patientID = response.patientId
+            me = response.me
+            configurationVersion = UUID()
+            configurationError = nil
+            connectionEnabled = true
+            defaults.set(true, forKey: "connectionEnabled")
+            if foreground { liveSession.connect(to: address, token: token, reset: true) }
+            return true
+        } catch {
+            pairingError = PairingError.message(for: error)
+            return false
+        }
+    }
+
+    /// Refreshes `me` plus everything `store` holds (care, sessions, progress,
+    /// milestones, messages), in parallel. Kept as `refreshMe` so existing call
+    /// sites (foreground, after pairing, Settings' "Refresh" button) don't change.
+    func refreshMe() async {
+        guard let patientID, let apiClient else { return }
+        await store.refreshAll(api: apiClient, patientID: patientID)
+        if let fresh = store.me {
+            me = fresh
+            configurationError = nil
+        } else {
+            // `store`'s own /me call failed; a single direct retry tells us whether
+            // it's an auth problem (token rejected) worth surfacing, or just offline
+            // (where we keep the cached `me`; Home shows the offline banner from the
+            // socket state).
+            do { _ = try await apiClient.me() } catch APIError.unauthorized {
+                configurationError = APIError.unauthorized.localizedDescription
+            } catch {}
+        }
+    }
+
+    /// PUT /me (profile/emergency-contact/alert-therapist patch). The PUT response is
+    /// itself a full `MeResponse`, so `me`/`store.me` are set directly from it instead
+    /// of triggering another `refreshAll` round trip.
+    func updateMe(_ body: MeUpdate) async throws {
+        let updated = try await requireClient().updateMe(body)
+        me = updated
+        store.apply(me: updated)
+        configurationError = nil
+    }
+
+    /// POST /me/test-alert.
+    func sendTestAlert() async throws -> TestAlertResponse {
+        try await requireClient().testAlert()
+    }
+
+    // MARK: Sessions (Plan 2)
+
+    /// The session this phone started over REST; covers the gap before /ws/events
+    /// stamps `liveSession.currentSessionID`.
+    private(set) var startedSessionID: String?
+
+    private func requireClient() throws -> APIClient {
+        guard let apiClient else { throw APIError.invalidAddress }
+        return apiClient
+    }
+
+    /// POST /sessions; the exercise defaults to the first prescription, else "squat".
+    @discardableResult
+    func startSession(exerciseID: String?) async throws -> SessionStarted {
+        let exercise = exerciseID ?? me?.prescriptions.first?.exerciseId ?? "squat"
+        let started = try await requireClient().createSession(SessionRequest(patientId: patientID, exerciseId: exercise))
+        startedSessionID = started.sessionId
+        return started
+    }
+
+    func stopSession(_ id: String) async throws {
+        _ = try await requireClient().stopSession(id: id)
+        if startedSessionID == id { startedSessionID = nil }
+    }
+
+    func loadSession(_ id: String) async throws -> SessionDetail {
+        try await requireClient().session(id: id)
+    }
+
+    /// The most recent ended session for this patient, if any.
+    func latestEndedSessionID() async throws -> String? {
+        guard let patientID else { return nil }
+        let list = try await requireClient().sessions(patientID: patientID, limit: 10)
+        return list.sessions.filter { $0.endedAt != nil }.max { $0.startedAt < $1.startedAt }?.id
+    }
+
+    func checkin(_ id: String, pain: Int, effort: Int, note: String) async throws {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await requireClient().checkin(sessionID: id, CheckinRequest(painPost: pain, effort: effort, note: trimmed.isEmpty ? nil : trimmed))
+    }
+
+    func share(_ id: String) async throws {
+        _ = try await requireClient().shareSession(id: id)
+    }
+
+    /// Only a server-relative `/audio/<name>.mp3` path is accepted; anything else (an
+    /// absolute URL, a path outside /audio/, unexpected characters) returns nil so the
+    /// caller falls back to TTS instead of opening an arbitrary or malformed URL.
+    private static let audioPathPattern = try! NSRegularExpression(pattern: #"^/audio/[A-Za-z0-9._-]+\.mp3$"#)
+
+    func serverURL(for path: String) -> URL? {
+        let range = NSRange(path.startIndex..<path.endIndex, in: path)
+        guard Self.audioPathPattern.firstMatch(in: path, range: range) != nil else { return nil }
+        guard let address = try? ServerAddress(serverAddress) else { return nil }
+        return URL(string: path, relativeTo: address.url)?.absoluteURL
     }
 
     func disconnect() {
@@ -228,6 +542,7 @@ final class AppState {
         } else if !active {
             liveSession.disconnect()
         }
+        if active, patientID != nil { Task { await refreshMe() } }
     }
 
     func testREST() async {
@@ -272,4 +587,18 @@ struct MiraPreferences: Codable, Equatable {
     var phoneReminder = true
     var deviceReminder = false
     var watchReminder = false
+}
+
+enum PairingError {
+    static func message(for error: Error) -> String {
+        switch error {
+        case APIError.http(404, _): return "That code isn't recognised. Check it with your therapist."
+        case APIError.http(410, _): return "That code has expired or was already used. Ask your therapist for a new one."
+        case APIError.http(429, _): return "Too many attempts. Wait a minute and try again."
+        case APIError.http(422, _): return "Mira couldn't read your details. Check your name, height and weight."
+        case APIError.http(503, _), APIError.notConnected: return "Mira's server is offline right now. You can save your code and try again later."
+        case let api as APIError: return api.localizedDescription
+        default: return "Mira's server is offline right now. You can save your code and try again later."
+        }
+    }
 }

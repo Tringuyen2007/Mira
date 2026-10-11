@@ -3,28 +3,74 @@ import AVFoundation
 
 struct CareView: View {
     @Environment(\.miraDesignPreview) private var preview
+    @Environment(AppState.self) private var state
+
+    private static let nextVisitFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d · h:mm a"
+        return formatter
+    }()
+
+    private var care: CareResponse? { state.store.care }
+
+    private var initials: String {
+        if preview { return "SL" }
+        guard let name = care?.therapist?.name, !name.isEmpty else { return "PT" }
+        let letters = name.split(separator: " ").compactMap { $0.first }.prefix(2)
+        return letters.isEmpty ? "PT" : String(letters).uppercased()
+    }
+
+    private var therapistName: String {
+        preview ? "Dr. Sam Lee, PT" : (care?.therapist?.name ?? "Your therapist")
+    }
+
+    private var clinicLine: String {
+        if preview { return "Your therapist · Lakeside Rehab" }
+        guard let therapist = care?.therapist else { return "Link your therapist to see your care team." }
+        if let clinic = therapist.clinic, !clinic.isEmpty { return "Your therapist · \(clinic)" }
+        return "Your therapist"
+    }
+
+    private var nextVisitText: String {
+        if preview { return "Tue, Oct 20 · 10:30 AM" }
+        guard let raw = care?.nextVisitAt, let date = WireDates.parse(raw) else { return "Not scheduled yet" }
+        return Self.nextVisitFormatter.string(from: date)
+    }
+
+    /// Digits (and a leading `+`) suitable for a `tel:` URL; `nil` disables Call,
+    /// including in the design preview (no real phone to dial there).
+    private var phoneDigits: String? {
+        guard !preview, let phone = care?.therapist?.phone else { return nil }
+        let digits = phone.filter { $0.isNumber || $0 == "+" }
+        return digits.isEmpty ? nil : digits
+    }
+
     var body: some View {
         MiraPage {
             MiraScreenHeading(title: "Your care", detail: "Your therapist and help in one place.", mascot: true)
             MiraCard {
                 VStack(spacing: 20) {
                     HStack(spacing: 16) {
-                        Text(preview ? "SL" : "PT").font(MiraUI.font(22, "SemiBold")).foregroundStyle(Color("MiraWelcomeTitleStart")).frame(width: 64, height: 64).background(Color(red: 0.93, green: 0.8, blue: 0.83), in: Circle())
+                        Text(initials).font(MiraUI.font(22, "SemiBold")).foregroundStyle(Color("MiraWelcomeTitleStart")).frame(width: 64, height: 64).background(Color(red: 0.93, green: 0.8, blue: 0.83), in: Circle())
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(preview ? "Dr. Sam Lee, PT" : "Your therapist").font(MiraUI.font(22, "SemiBold"))
-                            Text(preview ? "Your therapist · Lakeside Rehab" : "Link your therapist to see your care team.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                            Text(therapistName).font(MiraUI.font(22, "SemiBold"))
+                            Text(clinicLine).font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 14) {
                         FigmaIcon(screen: "care", slot: "imgIconCalendar").padding(12).background(.white, in: Circle())
-                        VStack(alignment: .leading, spacing: 4) { Text("Next visit").foregroundStyle(MiraUI.soft); Text(preview ? "Tue, Oct 20 · 10:30 AM" : "Not scheduled yet").font(MiraUI.font(20, "SemiBold")) }
+                        VStack(alignment: .leading, spacing: 4) { Text("Next visit").foregroundStyle(MiraUI.soft); Text(nextVisitText).font(MiraUI.font(20, "SemiBold")) }
                         Spacer(minLength: 0)
                     }.padding(16).background(MiraUI.mist, in: RoundedRectangle(cornerRadius: 20))
                     HStack(spacing: 12) {
-                        MiraButton(title: "Call", secondary: true, icon: ("care", "imgIconPhone")) {}.disabled(true)
+                        MiraButton(title: "Call", secondary: true, icon: ("care", "imgIconPhone")) {
+                            if let digits = phoneDigits, let url = URL(string: "tel:\(digits)") {
+                                UIApplication.shared.open(url)
+                            }
+                        }.disabled(phoneDigits == nil)
                         NavigationLink { CareDetailView(screen: .messages) } label: { Text("Message").font(MiraUI.font(20, "SemiBold")).foregroundStyle(.white).frame(maxWidth: .infinity, minHeight: 56).background(MiraUI.charcoal, in: Capsule()) }.buttonStyle(.plain)
                     }
-                    if !preview { Text("Calling is available after your therapist’s contact details are connected.").font(MiraUI.font(14)).foregroundStyle(MiraUI.soft) }
+                    if phoneDigits == nil { Text("Calling is available after your therapist’s contact details are connected.").font(MiraUI.font(14)).foregroundStyle(MiraUI.soft) }
                 }
             }
             MiraCard(padding: 16) {
@@ -35,7 +81,12 @@ struct CareView: View {
                     }
                 }
             }
-        }.navigationTitle("").toolbar(.hidden, for: .navigationBar)
+        }
+        .task {
+            guard !preview else { return }
+            await state.refreshMe()
+        }
+        .navigationTitle("").toolbar(.hidden, for: .navigationBar)
     }
 }
 
@@ -49,7 +100,19 @@ struct CareDetailView: View {
     @Environment(\.miraDesignPreview) private var preview
     @Environment(AppState.self) private var state
     @State private var message = ""
+    @State private var sending = false
+    @State private var sendError: String?
     @State private var speech = MiraSpeech()
+
+    /// Highlight kinds that read as a warning (red border, alert color), matching
+    /// the therapist-facing analysis vocabulary.
+    private static let warningKinds: Set<String> = ["asymmetry_worse", "compensation", "pain"]
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
     var body: some View {
         Group {
             if screen == .contact { EmergencyContactView() }
@@ -59,23 +122,62 @@ struct CareDetailView: View {
                                       detail: screen == .visit ? (preview ? "Tue, Oct 20 with Dr. Lee. Mira will share these with them." : "Your visit summary will appear after your care plan is connected.") : screen == .notes ? "Short notes after your therapist checks your sessions." : screen == .videos ? (preview ? "Short videos from Dr. Lee. All have captions." : "Exercise videos from your care team will appear here.") : nil)
                     if preview {
                         switch screen { case .visit: visit; case .notes: notes; case .messages: messages; case .videos: videos; case .contact: EmptyView() }
-                    } else { MiraPendingCard(title: "Waiting for your care team", detail: "Link your therapist to receive \(screen == .notes ? "notes" : screen == .videos ? "videos" : screen == .messages ? "messages" : "visit information").") }
+                    } else {
+                        switch screen {
+                        case .visit: realVisit
+                        case .notes: realNotes
+                        case .messages: realMessages
+                        case .videos: MiraPendingCard(title: "Waiting for your care team", detail: "Link your therapist to receive videos.")
+                        case .contact: EmptyView()
+                        }
+                    }
                 }
             }
         }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Text("Care").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft) } }
+            .task {
+                // The Messages screen marks therapist/mira messages read on appear
+                // (`mark_read=true`); every other refresh (CareView.task, refreshAll)
+                // leaves them unread so the badge doesn't clear before they're seen.
+                guard !preview, screen == .messages, let api = state.apiClient else { return }
+                await state.store.refreshMessages(api: api, markRead: true)
+            }
             .safeAreaInset(edge: .bottom) {
                 if screen == .messages {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Messaging isn’t connected yet. Your text stays on this screen.").font(MiraUI.font(14)).foregroundStyle(MiraUI.soft)
+                        if preview { Text("Messaging isn’t connected yet. Your text stays on this screen.").font(MiraUI.font(14)).foregroundStyle(MiraUI.soft) }
+                        if let sendError { Text(sendError).font(MiraUI.font(14)).foregroundStyle(.red) }
                         HStack(spacing: 12) {
                             TextField("Write a message", text: $message, axis: .vertical).font(MiraUI.font(18)).lineLimit(1...4).padding(18).background(.white, in: Capsule()).overlay { Capsule().stroke(MiraUI.border) }
-                            Button {} label: { FigmaIcon(screen: "messages", slot: "imgIconSend", size: 24) }.buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.large).disabled(true).accessibilityLabel("Send message")
+                            Button { send() } label: { FigmaIcon(screen: "messages", slot: "imgIconSend", size: 24) }.buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.large).disabled(preview || sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
                         }
                     }.padding(24).background(Color("MiraWelcomeEdge"))
                 }
             }.onDisappear { speech.stop() }
     }
+
+    /// Clears the composer only once the send succeeds; on failure the text is
+    /// restored so the patient doesn't lose what they typed, and a one-line error
+    /// shows above the composer.
+    private func send() {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending, let api = state.apiClient else { return }
+        message = ""
+        sending = true
+        sendError = nil
+        Task {
+            defer { sending = false }
+            do {
+                try await state.store.send(text, api: api)
+            } catch {
+                message = text
+                sendError = "Couldn't send. Try again."
+            }
+        }
+    }
+
+    // MARK: - Preview content (unchanged)
+
     private var visit: some View {
         VStack(spacing: 12) {
             visitCard("Knee bend up 22°", detail: "From 62° on Sep 22 to 84° today.", icon: "imgIconUp")
@@ -83,11 +185,14 @@ struct CareDetailView: View {
             visitCard("Pain stayed low", detail: "3 out of 10 or less after every session.", icon: "imgIconCheck")
         }
     }
-    private func visitCard(_ title: String, detail: String, icon: String, warning: Bool = false) -> some View {
+    private func visitCard(_ title: String, detail: String? = nil, icon: String, warning: Bool = false) -> some View {
         MiraCard {
             HStack(alignment: .top, spacing: 16) {
                 FigmaIcon(screen: "visit", slot: icon).padding(10).background(warning ? .clear : MiraUI.mist, in: Circle())
-                VStack(alignment: .leading, spacing: 4) { Text(title).font(MiraUI.font(20, "SemiBold")).foregroundStyle(warning ? MiraUI.alert : MiraUI.ink); Text(detail).font(MiraUI.font(18)).foregroundStyle(MiraUI.soft) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(MiraUI.font(20, "SemiBold")).foregroundStyle(warning ? MiraUI.alert : MiraUI.ink)
+                    if let detail { Text(detail).font(MiraUI.font(18)).foregroundStyle(MiraUI.soft) }
+                }
             }
         }.overlay { if warning { RoundedRectangle(cornerRadius: 28).stroke(MiraUI.alert, lineWidth: 1.5) } }
     }
@@ -147,6 +252,74 @@ struct CareDetailView: View {
         }.accessibilityLabel("Video preview, playback unavailable")
     }
 
+    // MARK: - Real content
+
+    @ViewBuilder private var realVisit: some View {
+        let highlights = state.store.care?.highlights ?? []
+        if highlights.isEmpty {
+            MiraPendingCard(title: "Waiting for your care team", detail: "Link your therapist to receive visit information.")
+        } else {
+            VStack(spacing: 12) {
+                ForEach(Array(highlights.enumerated()), id: \.offset) { _, highlight in
+                    let warning = Self.warningKinds.contains(highlight.kind ?? "")
+                    let detail = highlight.time.flatMap(WireDates.parse).map(Self.shortDateFormatter.string)
+                    visitCard(highlight.text, detail: detail, icon: warning ? "imgIconWarn" : "imgIconCheck", warning: warning)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var realNotes: some View {
+        let notes = (state.store.care?.notes ?? []).sorted { (WireDates.parse($0.createdAt) ?? .distantPast) > (WireDates.parse($1.createdAt) ?? .distantPast) }
+        if notes.isEmpty {
+            MiraPendingCard(title: "Waiting for your care team", detail: "Link your therapist to receive notes.")
+        } else {
+            VStack(spacing: 14) {
+                ForEach(Array(notes.enumerated()), id: \.element.id) { index, note in
+                    MiraCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                Text(WireDates.parse(note.createdAt).map(Self.shortDateFormatter.string) ?? "").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                                Spacer()
+                                if note.readAt == nil { Text("New").font(MiraUI.font(16, "SemiBold")).foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 4).background(MiraUI.charcoal, in: Capsule()) }
+                            }
+                            Text("“\(note.body)”").font(MiraUI.font(20)).lineSpacing(4)
+                            if index == 0 {
+                                Button { speech.read(note.body, preferences: state.preferences) } label: {
+                                    HStack { FigmaIcon(screen: "notes", slot: "imgIconSpeaker"); Text("Mira reads it").font(MiraUI.font(19, "SemiBold")) }
+                                        .foregroundStyle(MiraUI.accent).padding(16).background(MiraUI.mist, in: Capsule())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func authorLine(_ note: CareMessage) -> String {
+        let date = WireDates.parse(note.createdAt).map(Self.shortDateFormatter.string) ?? ""
+        let name = note.sender == "patient" ? "You" : (note.sender == "therapist" ? (state.store.care?.therapist?.name ?? "Your therapist") : "Mira")
+        return date.isEmpty ? name : "\(name) · \(date)"
+    }
+
+    private var realMessages: some View {
+        ScrollViewReader { proxy in
+            VStack(spacing: 14) {
+                ForEach(state.store.messages) { msg in
+                    bubble(msg.body, author: authorLine(msg), mine: msg.sender == "patient").id(msg.id)
+                }
+            }
+            .onChange(of: state.store.messages.count) { _, _ in
+                if let last = state.store.messages.last?.id {
+                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                }
+            }
+            .onAppear {
+                if let last = state.store.messages.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+            }
+        }
+    }
 }
 
 struct EmergencyContactView: View {
@@ -160,13 +333,15 @@ struct EmergencyContactView: View {
     @State private var editing: String?
     @State private var saved = false
     @State private var loaded = false
+    @State private var testAlertNote: String?
+    @State private var syncRemoteTask: Task<Void, Never>?
     @FocusState private var focus: String?
     var body: some View {
         MiraPage(inset: onboarding ? 32 : 24, top: onboarding ? 28 : 12) {
             if onboarding {
                 MiraIntro(eyebrow: "YOUR SAFETY", title: "Emergency contact", detail: preview ? "If you fall and do not answer, Mira\ncalls this person and tells Dr. Lee." : "Choose who Mira should contact in an emergency.")
             } else {
-                MiraScreenHeading(title: "Emergency contact", detail: "Choose who Mira should contact in an emergency. Calls and alerts are not active yet.")
+                MiraScreenHeading(title: "Emergency contact", detail: state.isLinked ? "Choose who Mira should contact in an emergency. Mira calls this person if you fall and don’t respond." : "Choose who Mira should contact in an emergency. Calls and alerts are not active yet.")
             }
             contactField("Name", value: $name)
             contactField("Relationship", value: $relationship)
@@ -175,18 +350,19 @@ struct EmergencyContactView: View {
                 Toggle(isOn: $alertTherapist) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(preview ? "Also alert Dr. Lee" : "Also alert your therapist").font(MiraUI.font(20, "SemiBold"))
-                        Text(preview ? "Mira sends them a message too." : "Your choice is saved. Alerts will work once connected.")
+                        Text(preview ? "Mira sends them a message too." : (state.isLinked ? "Your therapist is notified when you need help." : "Your choice is saved. Alerts will work once connected."))
                             .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
                     }
                 }
                 .tint(MiraUI.accent)
                 .accessibilityIdentifier("emergencyAlertTherapist")
             }
-            if onboarding && !preview { Text("Heart-rate limit: not provided by your care team yet.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) }
+            if onboarding && !preview { Text(hrLimitText).font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) }
             if !onboarding {
-                MiraButton(title: "Save contact") { focus = nil; save(); saved = true }.disabled(!valid)
-                MiraButton(title: "Send a test alert", secondary: true) {}.disabled(true)
-                if saved { Text("Contact saved on this phone. Alerts are not active yet.").font(MiraUI.font(16)).foregroundStyle(MiraUI.accent) }
+                MiraButton(title: "Save contact") { focus = nil; save(); saved = true; syncRemote() }.disabled(!valid)
+                MiraButton(title: "Send a test alert", secondary: true) { sendTestAlert() }.disabled(preview || !state.isLinked)
+                if saved { Text(state.isLinked ? "Contact saved and sent to your care team." : "Contact saved on this phone. Alerts are not active yet.").font(MiraUI.font(16)).foregroundStyle(MiraUI.accent) }
+                if let testAlertNote { Text(testAlertNote).font(MiraUI.font(16)).foregroundStyle(MiraUI.accent) }
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -198,15 +374,26 @@ struct EmergencyContactView: View {
             }
         }.onAppear {
             let draft = state.onboarding
-            name = draft.emergencyContactName
-            relationship = state.preferences.contactRelationship
-            phone = draft.emergencyContactPhone
-            alertTherapist = state.preferences.alertTherapist
-            loaded = true
-        }.onChange(of: name) { _, _ in if onboarding && loaded { save() } }.onChange(of: phone) { _, _ in if onboarding && loaded { save() } }.onChange(of: relationship) { _, _ in if onboarding && loaded { save() } }
-            .onChange(of: alertTherapist) { _, value in
-                if loaded { state.preferences.alertTherapist = value }
+            if state.isLinked, let care = state.store.care {
+                name = care.emergencyContact?.name ?? draft.emergencyContactName
+                phone = care.emergencyContact?.phone ?? draft.emergencyContactPhone
+                relationship = care.emergencyContact?.relationship ?? state.preferences.contactRelationship
+                alertTherapist = care.alertTherapist
+            } else {
+                name = draft.emergencyContactName
+                relationship = state.preferences.contactRelationship
+                phone = draft.emergencyContactPhone
+                alertTherapist = state.preferences.alertTherapist
             }
+            loaded = true
+        }.onChange(of: name) { _, _ in if onboarding && loaded { save(); syncRemote() } }.onChange(of: phone) { _, _ in if onboarding && loaded { save(); syncRemote() } }.onChange(of: relationship) { _, _ in if onboarding && loaded { save(); syncRemote() } }
+            .onChange(of: alertTherapist) { _, value in
+                if loaded { state.preferences.alertTherapist = value; if onboarding { syncRemote() } }
+            }
+    }
+    private var hrLimitText: String {
+        if let limit = state.store.care?.hrLimit { return "Heart-rate limit from your care team: \(limit) bpm" }
+        return "Heart-rate limit: not provided by your care team yet."
     }
     private func contactField(_ label: String, value: Binding<String>) -> some View {
         MiraField(label: label) {
@@ -222,6 +409,28 @@ struct EmergencyContactView: View {
     }
     private var valid: Bool { var draft = state.onboarding; draft.emergencyContactName = name; draft.emergencyContactPhone = phone; return draft.contactIsValid }
     private func save() { state.onboarding.emergencyContactName = name; state.onboarding.emergencyContactPhone = phone; state.preferences.contactRelationship = relationship; state.preferences.alertTherapist = alertTherapist }
+    /// Pushes the contact/alert choice to the server once paired, matching `save()`'s
+    /// local persistence; debounced 600 ms like `SettingsView.syncDevicePrefs` so
+    /// rapid edits (typing a name, flipping the toggle) don't fire a request per
+    /// keystroke. A best-effort background sync (errors stay silent here — the next
+    /// `refreshMe()` will reconcile).
+    private func syncRemote() {
+        guard state.isLinked, valid else { return }
+        syncRemoteTask?.cancel()
+        let contact = PairContact(name: name, phone: phone, relationship: relationship.isEmpty ? nil : relationship)
+        let body = MeUpdate(emergencyContact: contact, alertTherapist: alertTherapist)
+        syncRemoteTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            try? await state.updateMe(body)
+        }
+    }
+    private func sendTestAlert() {
+        Task {
+            do { testAlertNote = try await state.sendTestAlert().note }
+            catch { testAlertNote = nil }
+        }
+    }
 }
 
 @MainActor final class MiraSpeech {

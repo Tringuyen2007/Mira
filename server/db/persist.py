@@ -50,6 +50,7 @@ def profile_from_row(row: dict[str, Any]) -> PatientProfile:
         pain_today=row.get("pain_today"),
         falls_30d=int(row.get("falls_30d") or 0),
         age=row.get("age"),
+        device_prefs=row.get("device_prefs") or {},
     )
 
 
@@ -65,6 +66,7 @@ class SessionPersistence:
         # session itself survive a database outage at session start.
         self._unsaved: dict[str, LiveSession] = {}
         self._retry_after: dict[str, float] = {}
+        self._last_hr_at: dict[str, float] = {}  # session_id → monotonic time of the last persisted hr row
 
     # ---- SessionStore -------------------------------------------------------------------------------------
 
@@ -83,6 +85,7 @@ class SessionPersistence:
         await self._ensure_saved(session.session_id, force=True)
         self._unsaved.pop(session.session_id, None)
         self._retry_after.pop(session.session_id, None)
+        self._last_hr_at.pop(session.session_id, None)
         await writes.end_session(self.db, session.session_id, ended_at, reps_done=reps)
 
     async def _ensure_saved(self, session_id: str, *, force: bool = False) -> None:
@@ -108,6 +111,8 @@ class SessionPersistence:
             await self._on_rep(session_id, ev)
         elif kind == "command" and ev.get("name") == "pain":
             await self._on_pain(session_id, ev.get("payload") or {})
+        elif kind == "hr":
+            self._on_hr(session_id, ev)
 
     async def _on_rep(self, session_id: str, ev: dict[str, Any]) -> None:
         # Rep events count per set (index 1..N); reps.rep is the running number within the session.
@@ -136,6 +141,18 @@ class SessionPersistence:
         await writes.record_session_feedback(self.db, session_id, effort=effort,
                                              pain_pre=level if when == "pre" else None,
                                              pain_post=level if when == "post" else None)
+
+    def _on_hr(self, session_id: str, ev: dict[str, Any]) -> None:
+        """At most one `heart_rate` row per second per session: fire-and-forget, never awaited."""
+        bpm = ev.get("bpm")
+        if not isinstance(bpm, (int, float)) or isinstance(bpm, bool):
+            return
+        now = time.monotonic()
+        if now - self._last_hr_at.get(session_id, 0.0) < 1.0:
+            return
+        self._last_hr_at[session_id] = now
+        writes.fire(writes.insert_heart_rate(self.db, ev.get("t"), self._patient_of(session_id), session_id,
+                                             int(bpm)))
 
     def _patient_of(self, session_id: str) -> str | None:
         session = self.sessions.get(session_id) if self.sessions is not None else None

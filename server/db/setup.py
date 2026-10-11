@@ -32,6 +32,7 @@ import psycopg
 from psycopg import sql
 
 from server.agents.data_guard import DataGuard
+from server.db import migrate
 from server.db import seed as seed_mod
 from server.db import writes
 from server.db.apply_sql import apply_file, env_params
@@ -110,8 +111,10 @@ def setup(dsn: str, *, fresh: bool = False, seed: int = 42, days: int = 75, pati
     with psycopg.connect(dsn, autocommit=True) as conn:
         def schema() -> str:
             if _exists(conn, "pose_frames"):
-                return "already applied, skipped"
+                migrated = migrate.apply_migrations(dsn)
+                return f"already applied, skipped; {len(migrated)} migration(s) checked"
             count = apply_file(DB_DIR / "schema.sql", dsn)
+            migrate.apply_migrations(dsn)
             version = conn.execute("SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'").fetchone()[0]
             if tuple(int(p) for p in version.split(".")[:2]) < MIN_TIMESCALE:
                 raise SetupError(f"TimescaleDB {version} < 2.18: use the legacy compression names (§5.15 5b)")

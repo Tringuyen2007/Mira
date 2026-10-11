@@ -25,7 +25,7 @@ DEVICE_HEALTH_KEYS = frozenset({"type", "t", "app", "screen", "version", "batter
 # (no proposals, coach_adapt, notifications or engine diagnostics).
 DEVICE_EVENT_TYPES = frozenset({"arrived", "greeting", "awaiting_gesture", "gesture", "countdown", "cue", "rep",
                                 "set_done", "paused", "resumed", "stopped", "fall", "alert", "summary_ready",
-                                "hr", "device_status", "ping"})
+                                "session_summary", "hr", "device_status", "ping"})
 
 
 class Emitter(Protocol):

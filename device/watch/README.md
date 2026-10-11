@@ -1,5 +1,10 @@
 # Mira Watch mockup
 
+> The real Watch companion app now lives in `device/ios/MiraWatch/` (Plan 4: Ready/Stop, live reps, heart
+> rate over HealthKit, server-driven haptics — see the README "Apple Watch companion" section and
+> `device/ios/NETWORKING.md` for the WatchConnectivity relay). This mock stays as-is for design review and
+> is not touched by that work.
+
 A working SwiftUI concept while the final Watch designs are pending. Uses the
 existing Mira mascot and bundled Inter fonts. This is a separate project from
 the patient iPhone app, so it does not change your onboarding or saved profile.

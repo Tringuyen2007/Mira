@@ -64,7 +64,15 @@ export function render(root, vm, mascot) {
     show(root, "done-pill", vm.summary.balance !== null);
   }
 
+  if (vm.sessionSummary) {
+    const { formScore, goodReps, repsTotal, spoken } = vm.sessionSummary;
+    text(root, "session-score", formScore === null ? "—" : String(formScore));
+    text(root, "session-good", goodReps === null || repsTotal === null ? "" : `${goodReps} of ${repsTotal} good reps`);
+    text(root, "session-spoken", spoken);
+  }
+
   text(root, "fall-name", vm.firstName || "the patient");
   text(root, "caption-text", vm.caption);
-  show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== "");
+  show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== ""
+    && vm.captionsOn !== false);
 }

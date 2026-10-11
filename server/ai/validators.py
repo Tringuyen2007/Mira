@@ -30,6 +30,7 @@ LENGTH_LIMITS: dict[str, tuple[int | None, int | None]] = {
     "spoken": (None, 3),
     "situation": (None, 4),
     "note": (None, 5),
+    "highlight": (20, 1),
 }
 
 _UNITS = {

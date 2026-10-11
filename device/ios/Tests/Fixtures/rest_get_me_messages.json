@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "id": 2,
+      "sender": "therapist",
+      "kind": "message",
+      "body": "How's the knee feeling?",
+      "created_at": "2026-10-11T08:47:04.671532+00:00",
+      "read_at": "2026-10-11T08:47:07.683503+00:00"
+    }
+  ]
+}

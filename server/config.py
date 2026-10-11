@@ -50,10 +50,18 @@ class Config:
     MOCK_PATIENT_ID: str = "maya"
     MOCK_FALL_RESPONDS_AT: float | None = None
     DEMO_TOOLS_ENABLED: bool = False
+    MOCK_LOOP: bool = False  # True: the mock squat program repeats forever (pre-Plan-2 behaviour)
+    MOCK_AUTO_RESTART_S: float = 60.0  # mock mode: start the next demo session this long after one ends (0 = off)
+    AUTO_STOP_AFTER_LAST_SET: bool = True  # end the session when set == sets_target (engines without `stopped`)
+    ANALYST_DELAY_S: float = 2.0  # SessionAnalyst waits this long after a session ends for rep writes to land
+    PAIRING_DEMO_CODE: str = "K7P4M2"  # therapist code the seed binds to Maya (the iOS design preview uses it)
+    PAIRING_DEMO_CODE_REUSABLE: bool = True  # the demo code may pair many phones; real codes are single-use
+    PAIRING_REUSABLE_UPDATES_PROFILE: bool = True  # set to 0 on a public server once the demo phone has paired
 
     TIGER_DSN: str | None = None
     COPILOT_DSN: str | None = None
     DB_DISABLED: bool = False
+    DB_AUTO_MIGRATE: bool = True  # apply server/db/migrations/*.sql (idempotent) at server start
 
     GEMINI_API_KEY: str | None = None
     GEMINI_API_KEYS: str = ""  # extra keys, comma-separated: used in turn when one hits its daily quota
@@ -79,6 +87,7 @@ class Config:
     RETELL_BACKUP_AGENT_VERSION: int | None = None
     CALLS_DISABLED: bool = True
     SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
+    ALLOW_TEST_CALLS: bool = False  # POST /me/test-alert may place a real call (only when CALLS_DISABLED is off too)
 
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None

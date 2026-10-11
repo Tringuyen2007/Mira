@@ -1,0 +1,100 @@
+{
+  "patient": {
+    "id": "maya",
+    "name": "Maya Ellis",
+    "first_name": "Maya",
+    "age": 67,
+    "height_cm": 163.0,
+    "mass_kg": 70.0,
+    "affected_side": "right",
+    "condition": "Knee replacement",
+    "hr_limit": 130,
+    "emergency_contact": {
+      "name": "Eric",
+      "phone": "+15550100111",
+      "relationship": "son"
+    },
+    "alert_therapist": true,
+    "share_by_default": false,
+    "device_prefs": {},
+    "next_visit_at": "2026-10-13T15:30:00Z"
+  },
+  "therapist": {
+    "id": "okafor",
+    "name": "Dr. Okafor",
+    "clinic": "Lakeside Rehab",
+    "phone": null
+  },
+  "prescriptions": [
+    {
+      "exercise_id": "glute_bridge",
+      "exercise_name": "Glute bridge",
+      "sets": 2,
+      "reps": 10,
+      "targets": {
+        "hold_s": 2,
+        "sessions_per_week": 1
+      },
+      "limits": {
+        "max_reps": 15,
+        "min_reps": 8,
+        "max_rest_s": 120,
+        "min_rest_s": 30
+      },
+      "version": 1,
+      "metric_label": "Hip lift",
+      "unit": "cm",
+      "target_key": "hold_s"
+    },
+    {
+      "exercise_id": "single_leg_stance",
+      "exercise_name": "Single-leg stance",
+      "sets": 3,
+      "reps": 3,
+      "targets": {
+        "hold_s": 20
+      },
+      "limits": {
+        "max_reps": 15,
+        "min_reps": 8,
+        "max_rest_s": 120,
+        "min_rest_s": 30
+      },
+      "version": 1,
+      "metric_label": "Hold",
+      "unit": "s",
+      "target_key": "hold_s"
+    },
+    {
+      "exercise_id": "squat",
+      "exercise_name": "Mini squats",
+      "sets": 3,
+      "reps": 10,
+      "targets": {
+        "knee_deg": 90,
+        "sessions_per_week": 5
+      },
+      "limits": {
+        "max_reps": 15,
+        "min_reps": 8,
+        "max_rest_s": 120,
+        "min_rest_s": 30
+      },
+      "version": 1,
+      "metric_label": "Knee bend",
+      "unit": "\u00b0",
+      "target_key": "knee_deg"
+    }
+  ],
+  "lcd": {
+    "online": false,
+    "last_seen": null
+  },
+  "calibration": {
+    "status": "unknown",
+    "calibrated": false,
+    "cameras": [],
+    "errors": null,
+    "note": "placeholder until the vision engine reports calibration"
+  }
+}

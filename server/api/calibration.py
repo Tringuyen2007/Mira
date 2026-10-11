@@ -9,7 +9,11 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get("/calibration/status")
-async def calibration_status() -> dict[str, Any]:
+def placeholder_status() -> dict[str, Any]:
     return {"status": "unknown", "calibrated": False, "cameras": [], "errors": None,
             "note": "placeholder until the vision engine reports calibration"}
+
+
+@router.get("/calibration/status")
+async def calibration_status() -> dict[str, Any]:
+    return placeholder_status()

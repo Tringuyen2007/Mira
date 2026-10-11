@@ -148,6 +148,11 @@ final class LiveSocket {
     }
 }
 
+/// Every /ws/events message carries `session_id`; decoded alongside the typed
+/// `SocketEvent` so `currentSessionID` tracks it even for event types this app
+/// version does not model.
+private struct SessionStamp: Codable { let sessionId: String? }
+
 @MainActor
 @Observable
 final class LiveSessionStore {
@@ -160,11 +165,28 @@ final class LiveSessionStore {
     private(set) var latestEvent: SocketEvent?
     private(set) var alert: AlertMessage?
     private(set) var fallStatus: FallStatusMessage?
+    /// The most recent coaching haptic (good_rep | fix_form | set_done | check_in),
+    /// relayed to the watch by `WatchBridge`. `hapticSeq` increments on every one, even
+    /// a repeated pattern, since `haptic` itself wouldn't otherwise look "changed".
+    private(set) var haptic: HapticMessage?
+    private(set) var hapticSeq = 0
+    /// The session currently in progress, from any /ws/events message's `session_id`.
+    private(set) var currentSessionID: String?
+    /// The whole-session AI analysis, delivered once at session end.
+    private(set) var sessionSummary: SessionSummaryMessage?
+    /// Whether the LCD kiosk is currently online (from `device_status`, `device == "lcd"`).
+    private(set) var lcdOnline: Bool?
     /// The server echoes every accepted client message on /ws/events; a command
     /// appearing here proves it passed the allow-list (and the rate limit).
     private(set) var lastCommand: CommandMessage?
     private(set) var decodingError: String?
     private(set) var receivedMessages = 0
+    /// Forwards every `message` event (a therapist note/message or the patient's own,
+    /// echoed back) so `PatientStore` can append it without this store knowing about it.
+    @ObservationIgnored var onMessageEvent: ((MessageEvent) -> Void)?
+    /// Fires once per `session_summary`, after `sessionSummary` is updated, so `AppState`
+    /// can refresh care/progress data for the session that just ended.
+    @ObservationIgnored var onSessionSummary: ((SessionSummaryMessage) -> Void)?
 
     var connectionState: ConnectionState {
         let states = [liveSocket.state, eventSocket.state, poseSocket.state]
@@ -195,14 +217,36 @@ final class LiveSessionStore {
             guard !WireJSON.isPing(data) else { return }
             self?.decode(data, as: SocketEvent.self) { event in
                 self?.latestEvent = event
+                if case .sessionSummary(let summary) = event {
+                    // session_summary arrives late, for the session that just ended, after the
+                    // next session's events may already have stamped currentSessionID — never
+                    // let it clobber that boundary.
+                    self?.sessionSummary = summary
+                    self?.cue = summary.spoken
+                    self?.onSessionSummary?(summary)
+                    return
+                }
+                if case .message(let messageEvent) = event {
+                    self?.onMessageEvent?(messageEvent)
+                }
+                // Every other /ws/events message carries the current session's stamp.
+                if let stamp = try? WireJSON.decoder().decode(SessionStamp.self, from: data), let sessionId = stamp.sessionId {
+                    self?.currentSessionID = sessionId
+                }
                 switch event {
+                case .arrived: self?.sessionSummary = nil
                 case .cue(let cue): self?.cue = cue.text
                 case .greeting(let greeting): self?.cue = greeting.text
                 case .summaryReady(let summary): self?.cue = summary.spoken
+                case .deviceStatus(let status):
+                    if status.device == nil || status.device == "lcd" { self?.lcdOnline = status.online }
                 case .alert(let alert):
                     self?.alert = alert.isOpen ? alert : nil
                     if !alert.isOpen { self?.fallStatus = nil }
                 case .fallStatus(let status): self?.fallStatus = status
+                case .haptic(let haptic):
+                    self?.haptic = haptic
+                    self?.hapticSeq += 1
                 case .command(let command): self?.lastCommand = command
                 default: break
                 }
@@ -224,6 +268,7 @@ final class LiveSessionStore {
         if reset {
             live = nil; pose = nil; cue = nil; latestEvent = nil; alert = nil; fallStatus = nil; lastCommand = nil
             receivedMessages = 0; decodingError = nil
+            currentSessionID = nil; sessionSummary = nil; lcdOnline = nil
         }
         guard let token else {
             liveSocket.markNotPaired(); eventSocket.markNotPaired(); poseSocket.markNotPaired()
@@ -246,5 +291,11 @@ final class LiveSessionStore {
 
     func send(_ command: CommandMessage) async throws {
         try await eventSocket.send(.command(command))
+    }
+
+    /// For events the server's client allow-list accepts besides `command` — today
+    /// `hr`/`watch_button`, relayed in from `WatchBridge`.
+    func send(_ event: SocketEvent) async throws {
+        try await eventSocket.send(event)
     }
 }

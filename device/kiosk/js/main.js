@@ -10,7 +10,11 @@ import { loadMascot } from "./mascot.js";
 
 const VERSION = "1";
 const HEALTH_EVERY_MS = 5000;
-const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready"]);
+const AUDIO_EVENTS = new Set(["greeting", "cue", "summary_ready", "session_summary"]);
+
+function clamp01(n) {
+  return typeof n === "number" && Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1;
+}
 
 // Uniform scale with letterboxing: the stage is always 1024×600 CSS px inside.
 function fitStage() {
@@ -34,7 +38,10 @@ async function boot() {
   const audio = new AudioPlayer();
   const status = (s) => dispatch({ channel: "socket", msg: { status: s } });
   const live = new ReconnectingSocket(wsUrl(window.location, "/ws/live", token), {
-    onMessage: (msg) => dispatch({ channel: "live", msg }),
+    onMessage: (msg) => {
+      audio.volume = clamp01(msg?.device_prefs?.volume ?? 1);
+      dispatch({ channel: "live", msg });
+    },
   });
   const health = () => events.send({ type: "device_health", app: "lcd", t: Date.now() / 1000,
     screen: `${window.innerWidth}x${window.innerHeight}`, version: VERSION });

@@ -93,16 +93,22 @@ to update itself mid-session.
 | 5 | Rep | `phase == "active"` otherwise; cheering 1.5 s after a `rep` with `quality == "good"` | cheering → idle |
 | 6 | Paused | `live.paused` / `phase == "paused"` | sleeping |
 | 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "EVEN WEIGHT L / R" (balanced) or "WEIGHT L / R" | celebrating |
+| — | Session complete | a `session_summary` event arrived ≤ 60 s ago and `phase` is `idle`, `rest`, or `done` (a new `countdown` wins — next session started); form score /100, "N of M good reps", the AI `spoken` line | celebrating |
 | 8 | Fall alert | `live.incident` true, an `alert` opened by step `detected` (until a closing step: `resolved` / `closed` / `resolved_by_therapist`), a `fall` with `stage == "confirmed"` or `cue check_in` | — (full screen, red border) |
 | — | Idle | no session / `phase == "idle"` with no greeting yet: greeting layout, "Mira" hero, no plan | idle |
 | — | Offline | events socket down > 3 s: small "Reconnecting…" pill top-centre over the last screen | unchanged |
 | — | Not paired | socket rejected (1008): full-screen plain message "This screen isn't paired" | — |
 
-Priority when several apply: Not paired > Fall alert > Paused > Countdown > Set done > Awaiting gesture >
-Greeting > Cue > Rep > Idle.
+Priority when several apply: Not paired > Fall alert > Paused > Countdown > Session complete > Set done >
+Awaiting gesture > Greeting > Cue > Rep > Idle.
 
-The caption bar shows `live.caption.text`; the same text is what the audio plays (greeting/cue/summary_ready
-events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
+The caption bar shows `live.caption.text`; the same text is what the audio plays (greeting/cue/summary_ready/
+session_summary events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
+
+`live.device_prefs` (set from the phone's Settings, Plan 3 §6.5) is honoured on every `/ws/live` message: the
+caption bar is hidden when `device_prefs.captions === false` (`state.js` `view().captionsOn`), and
+`AudioPlayer.volume` is set from `device_prefs.volume` (0..1, default 1, clamped in `main.js`) before each clip
+plays. Missing/empty `device_prefs` means captions on and full volume.
 
 ## How to add mascot frames
 

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from server import security
 from server.api.db_dep import require_db
 from server.db import queries, writes
 from server.db.pool import Database
@@ -26,13 +27,17 @@ class PrescriptionIn(BaseModel):
 
 @router.get("/prescriptions/{patient_id}")
 async def get_prescriptions(patient_id: str, history: bool = False,
+                            principal: security.Principal = Depends(security.require_principal),
                             db: Database = Depends(require_db)) -> dict[str, Any]:
+    principal.require(patient_id)
     return {"patient_id": patient_id, "prescriptions": await queries.prescriptions(db, patient_id, history)}
 
 
 @router.put("/prescriptions/{patient_id}")
 async def put_prescription(patient_id: str, body: PrescriptionIn,
+                           principal: security.Principal = Depends(security.require_principal),
                            db: Database = Depends(require_db)) -> dict[str, Any]:
+    security.full_only(principal)
     if await queries.get_patient(db, patient_id) is None:
         raise HTTPException(status_code=404, detail="patient not found")
     try:

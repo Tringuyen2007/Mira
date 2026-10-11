@@ -5,6 +5,7 @@ export const CUE_WINDOW_MS = 4000;    // a correction cue keeps the Cue screen (
 export const CHEER_MS = 1500;         // Mira cheers this long after a good rep
 export const OFFLINE_AFTER_MS = 3000; // a dropped socket shows "Reconnecting…" only after this grace period
 export const BALANCE_LIMIT = 15;      // |left% − 50| above this is "off balance" (VICTORIA.md)
+export const SESSION_DONE_MS = 60000; // the whole-session summary (sessionDone) keeps showing this long
 
 const NON_CORRECTION_CUES = new Set(["set_start", "check_in", "im_ok_thanks", "rest", "set_done", "fatigue_rest"]);
 const CLOSED_ALERT_STEPS = new Set(["resolved", "closed", "resolved_by_therapist"]);
@@ -19,6 +20,7 @@ export function initialState() {
     alertOpen: false,
     socket: "connecting",
     closedAt: null,
+    summary: null,
   };
 }
 
@@ -43,7 +45,7 @@ export function reduce(state, input, now) {
     case "arrived":
       // A session boundary: nothing carries over to the new patient/session.
       return { ...state, arrived: true, awaitingGesture: false, alertOpen: false,
-        lastCorrectionAt: -Infinity, lastGoodRepAt: -Infinity };
+        lastCorrectionAt: -Infinity, lastGoodRepAt: -Infinity, summary: null };
     case "greeting":
       return { ...state, arrived: true };
     case "awaiting_gesture":
@@ -68,6 +70,8 @@ export function reduce(state, input, now) {
       return state;
     case "stopped":
       return { ...state, awaitingGesture: false };
+    case "session_summary":
+      return { ...state, summary: { msg, at: now } };
     default:
       return state;
   }
@@ -87,7 +91,9 @@ export function view(state, now) {
   const set = num(live.set);
   const setsTarget = num(live.sets_target);
   const caption = live.caption && typeof live.caption.text === "string" ? live.caption.text : "";
+  const devicePrefs = live.device_prefs && typeof live.device_prefs === "object" ? live.device_prefs : {};
   const base = {
+    captionsOn: devicePrefs.captions !== false,
     offline: state.socket === "closed" && state.closedAt !== null && now - state.closedAt > OFFLINE_AFTER_MS,
     setLabel: set !== null && setsTarget !== null ? `SET ${set} OF ${setsTarget}` : null,
     hr: num(live.hr),
@@ -103,12 +109,23 @@ export function view(state, now) {
     // repainted on the very next live message, with no separate event-caption state to go stale.
     caption,
     summary: null,
+    sessionSummary: null,
   };
 
   if (state.socket === "rejected") return { ...base, screen: "unpaired", mood: null };
   if (live.incident || phase === "incident" || state.alertOpen) return { ...base, screen: "fall", mood: null };
   if (live.paused || phase === "paused") return { ...base, screen: "paused", mood: "sleeping" };
   if (phase === "countdown") return { ...base, screen: "countdown", mood: null };
+  if (state.summary && now - state.summary.at <= SESSION_DONE_MS &&
+      (phase === "done" || phase === "idle" || phase === "rest")) {
+    const m = state.summary.msg;
+    return { ...base, screen: "sessionDone", mood: "celebrating", sessionSummary: {
+      formScore: num(m.form_score),
+      goodReps: num(m.good_reps),
+      repsTotal: num(m.reps_total),
+      spoken: typeof m.spoken === "string" ? m.spoken : "",
+    } };
+  }
   if (phase === "rest" || phase === "done") {
     const summary = { reps: base.rep, repsTarget, balance: balance
       ? `${balance.leftPct} / ${100 - balance.leftPct}` : null, balanceOk: balance ? balance.ok : null };

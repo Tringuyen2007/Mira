@@ -155,7 +155,7 @@ async def list_patients(db: Database) -> list[dict[str, Any]]:
 
 async def get_patient(db: Database, patient_id: str) -> dict[str, Any] | None:
     return await db.fetchrow("""
-        SELECT p.*, t.name AS therapist_name
+        SELECT p.*, t.name AS therapist_name, t.clinic AS therapist_clinic, t.phone AS therapist_phone
         FROM patients p LEFT JOIN therapists t ON t.id = p.therapist_id
         WHERE p.id = %s""", (patient_id,))
 
@@ -179,7 +179,7 @@ async def ro_recent_sessions(db: Database, patient_id: str, limit: int = 10,
 async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> dict[str, Any] | None:
     """Everything the cached PatientProfile needs, in one round trip."""
     return await db.fetchrow(f"""
-        SELECT p.id, p.name, p.age, p.condition, p.affected_side, p.hr_limit,
+        SELECT p.id, p.name, p.age, p.condition, p.affected_side, p.hr_limit, p.device_prefs,
                p.emergency_contact_name, p.emergency_contact_phone,
                t.id AS therapist_id, t.name AS therapist_name, t.phone AS therapist_phone,
                (SELECT s.pain_pre FROM sessions s WHERE s.patient_id = p.id AND s.pain_pre IS NOT NULL
@@ -191,8 +191,109 @@ async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> 
         WHERE p.id = %s""", (patient_id,), timeout_s=timeout_s)
 
 
+# ---- session analysis (Plan 2) ------------------------------------------------------------------------------
+
+async def session_analysis(db: Database, session_id: str) -> dict[str, Any] | None:
+    return await db.fetchrow("SELECT * FROM session_analyses WHERE session_id = %s", (session_id,))
+
+
+async def previous_sessions_stats(db: Database, patient_id: str, exercise_id: str, before_session_id: str,
+                                  limit: int = 5) -> dict[str, Any]:
+    """The `limit` most recent ended sessions of this patient+exercise that started before
+    `before_session_id`'s own start: average good-rep rate (mean over sessions of good_reps/reps_total, where
+    good = quality >= 1.0), average rep ROM/asymmetry (mean over all their reps), and the most recent one's
+    form_score. All None (count 0) when there are no such sessions, or `before_session_id` doesn't exist."""
+    none_result = {"count": 0, "avg_good_rep_rate": None, "avg_rom_deg": None, "avg_asym_pct": None,
+                   "last_form_score": None}
+    target = await db.fetchrow("SELECT started_at FROM sessions WHERE id = %s", (before_session_id,))
+    if target is None:
+        return none_result
+    sessions = await db.fetch(
+        "SELECT id FROM sessions WHERE patient_id = %s AND exercise_id = %s AND ended_at IS NOT NULL "
+        "AND started_at < %s ORDER BY started_at DESC LIMIT %s",
+        (patient_id, exercise_id, target["started_at"], limit))
+    if not sessions:
+        return none_result
+    ids = [row["id"] for row in sessions]
+    rate_row = await db.fetchrow(
+        "SELECT avg(good_rate) AS avg_good_rep_rate FROM ("
+        "  SELECT CASE WHEN count(*) = 0 THEN NULL "
+        "    ELSE count(*) FILTER (WHERE quality >= 1.0)::float / count(*) END AS good_rate "
+        "  FROM reps WHERE session_id = ANY(%s) GROUP BY session_id) sub", (ids,))
+    rep_row = await db.fetchrow(
+        "SELECT avg(rom) AS avg_rom_deg, avg(asym_avg) AS avg_asym_pct FROM reps WHERE session_id = ANY(%s)",
+        (ids,))
+    analysis_row = await db.fetchrow("SELECT form_score FROM session_analyses WHERE session_id = %s", (ids[0],))
+    return {
+        "count": len(ids),
+        "avg_good_rep_rate": rate_row["avg_good_rep_rate"] if rate_row else None,
+        "avg_rom_deg": rep_row["avg_rom_deg"] if rep_row else None,
+        "avg_asym_pct": rep_row["avg_asym_pct"] if rep_row else None,
+        "last_form_score": analysis_row["form_score"] if analysis_row else None,
+    }
+
+
+async def patient_sessions(db: Database, patient_id: str, limit: int = 30,
+                           before: Any = None) -> list[dict[str, Any]]:
+    """Newest-first ended sessions (NOT simulated), LEFT JOIN session_analyses; `before` pages on started_at."""
+    return await db.fetch(
+        "SELECT s.id, s.exercise_id, s.started_at, s.ended_at, s.reps_done, s.pain_post, s.effort, s.shared, "
+        "s.simulated, sa.form_score, sa.good_reps, sa.reps_total, left(sa.spoken, 140) AS spoken_preview "
+        "FROM sessions s LEFT JOIN session_analyses sa ON sa.session_id = s.id "
+        "WHERE s.patient_id = %(pid)s AND s.ended_at IS NOT NULL AND NOT s.simulated "
+        "  AND (%(before)s::timestamptz IS NULL OR s.started_at < %(before)s) "
+        "ORDER BY s.started_at DESC LIMIT %(limit)s",
+        {"pid": patient_id, "before": before, "limit": limit})
+
+
+# ---- patient identity (Plan 1) ------------------------------------------------------------------------------
+
+async def patient_device(db: Database, token_hash: str, timeout_s: float = 1.5) -> dict[str, Any] | None:
+    """The phone that owns a patient token (by hash), including revoked_at so the caller can refuse it."""
+    return await db.fetchrow("SELECT token_hash, patient_id, device_name, last_seen, revoked_at, via_reusable "
+                             "FROM patient_devices WHERE token_hash = %s", (token_hash,), timeout_s=timeout_s)
+
+
+async def pairing_code(db: Database, code: str) -> dict[str, Any] | None:
+    return await db.fetchrow("SELECT code, patient_id, therapist_id, expires_at, used_at, reusable FROM pairing_codes "
+                             "WHERE code = %s", (code,))
+
+
+ME_SQL = """
+    SELECT p.id, p.name, p.age, p.height_cm, p.mass_kg, p.affected_side, p.condition, p.hr_limit,
+           p.emergency_contact_name, p.emergency_contact_phone, p.emergency_contact_relationship,
+           p.alert_therapist, p.share_by_default, p.device_prefs, p.next_visit_at, p.simulated,
+           t.id AS therapist_id, t.name AS therapist_name, t.clinic AS therapist_clinic, t.phone AS therapist_phone
+    FROM patients p LEFT JOIN therapists t ON t.id = p.therapist_id
+    WHERE p.id = %s"""
+
+
+async def patient_me_row(db: Database, patient_id: str) -> dict[str, Any] | None:
+    """Everything GET /me shows about the patient and their therapist, in one round trip."""
+    return await db.fetchrow(ME_SQL, (patient_id,))
+
+
 async def prescriptions(db: Database, patient_id: str, history: bool = False) -> list[dict[str, Any]]:
     return await db.fetch(PRESCRIPTIONS_SQL, (patient_id, history))
+
+
+async def patient_export(db: Database, patient_id: str) -> dict[str, Any]:
+    """Everything DELETE /me would remove, as JSON-able rows (no pose frames, only their count)."""
+    sessions = await db.fetch("SELECT * FROM sessions WHERE patient_id = %s AND NOT simulated ORDER BY started_at",
+                              (patient_id,), timeout_s=20)
+    ids = [s["id"] for s in sessions]
+    reps = await db.fetch("SELECT * FROM reps WHERE session_id = ANY(%s) ORDER BY session_id, rep", (ids,),
+                          timeout_s=20) if ids else []
+    flags = await db.fetch("SELECT time, session_id, rep, rule_id, severity, duration_s FROM form_events "
+                           "WHERE session_id = ANY(%s) ORDER BY time", (ids,), timeout_s=20) if ids else []
+    alerts = await db.fetch("SELECT time, alert_id, session_id, kind, step, channel, payload FROM alerts "
+                            "WHERE patient_id = %s ORDER BY time", (patient_id,), timeout_s=20)
+    memory = await db.fetch("SELECT time, kind, message, evidence FROM memory_events WHERE patient_id = %s "
+                            "ORDER BY time", (patient_id,), timeout_s=10)
+    frames = await db.fetchrow("SELECT count(*) AS n FROM pose_frames WHERE session_id = ANY(%s)", (ids,),
+                               timeout_s=30) if ids else {"n": 0}
+    return {"sessions": sessions, "reps": reps, "form_events": flags, "alerts": alerts, "memory_events": memory,
+            "pose_frames_count": int(frames["n"]) if frames else 0}
 
 
 async def ro_prescriptions(db: Database, patient_id: str, timeout_s: float = 1.5) -> list[dict[str, Any]]:
@@ -206,6 +307,69 @@ async def pending_proposal_ids_named_in(db: Database, text: str) -> list[int]:
                           "WHERE pp.status = 'pending' AND strpos(%s, p.name) > 0 "
                           "ORDER BY pp.created_at DESC, pp.id DESC LIMIT 5", (text,), timeout_s=2)
     return [int(r["id"]) for r in rows]
+
+
+# ---- messages, notes, highlights, milestones (Plan 3 §6.4) -------------------------------------------------
+
+MESSAGE_COLUMNS = "id, sender, kind, body, created_at, read_at"
+HIGHLIGHT_MEMORY_KINDS = ("insight", "depth_gain", "asymmetry_worse", "compensation", "pain", "missed_days")
+
+
+async def list_messages(db: Database, patient_id: str, kind: str = "message", since_id: int | None = None,
+                        limit: int = 100) -> list[dict[str, Any]]:
+    """Both directions of the thread (patient/therapist/mira), ascending by id.
+
+    With `since_id`, rows after it, ascending, capped at `limit`. Without it, the newest `limit` rows
+    (so a plain page load gets the most recent window, not the oldest), still ordered ascending.
+    """
+    if since_id is None:
+        return await db.fetch(
+            f"SELECT {MESSAGE_COLUMNS} FROM (SELECT {MESSAGE_COLUMNS} FROM messages "
+            "WHERE patient_id = %(pid)s AND kind = %(kind)s ORDER BY id DESC LIMIT %(limit)s) AS newest "
+            "ORDER BY id ASC",
+            {"pid": patient_id, "kind": kind, "limit": limit})
+    return await db.fetch(
+        f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE patient_id = %(pid)s AND kind = %(kind)s "
+        "AND id > %(since)s ORDER BY id ASC LIMIT %(limit)s",
+        {"pid": patient_id, "kind": kind, "since": since_id, "limit": limit})
+
+
+async def care_notes(db: Database, patient_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Therapist notes (messages kind='note'), newest first."""
+    return await db.fetch(f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE patient_id = %s AND kind = 'note' "
+                         "ORDER BY id DESC LIMIT %s", (patient_id, limit))
+
+
+async def unread_messages(db: Database, patient_id: str) -> int:
+    """Unread messages sent to the patient (therapist/mira side) in the two-way thread."""
+    row = await db.fetchrow("SELECT count(*) AS n FROM messages WHERE patient_id = %s AND kind = 'message' "
+                            "AND sender != 'patient' AND read_at IS NULL", (patient_id,))
+    return int(row["n"]) if row else 0
+
+
+async def patient_milestones(db: Database, patient_id: str) -> list[dict[str, Any]]:
+    """memory_events kind='milestone' for this patient, newest first."""
+    return await db.fetch("SELECT id, time, message, evidence FROM memory_events WHERE patient_id = %s "
+                         "AND kind = 'milestone' ORDER BY time DESC", (patient_id,))
+
+
+async def latest_highlights(db: Database, patient_id: str, limit: int = 3) -> list[dict[str, Any]]:
+    """The most recent session_analyses.highlights for a non-simulated session of this patient, plus the most
+    recent `limit` memory_events of the AI-draft kinds, newest first within each group, as
+    {kind, text, time, source}. Analysis highlights carry source=None; memory events are labeled "ai"."""
+    analysis = await db.fetchrow(
+        "SELECT sa.highlights, sa.created_at FROM session_analyses sa JOIN sessions s ON s.id = sa.session_id "
+        "WHERE s.patient_id = %s AND NOT s.simulated ORDER BY s.started_at DESC LIMIT 1", (patient_id,))
+    out: list[dict[str, Any]] = []
+    if analysis is not None:
+        for h in analysis["highlights"] or []:
+            out.append({**h, "time": analysis["created_at"], "source": None})
+    rows = await db.fetch(
+        "SELECT kind, message, time FROM memory_events WHERE patient_id = %s AND kind = ANY(%s) "
+        "ORDER BY time DESC LIMIT %s", (patient_id, list(HIGHLIGHT_MEMORY_KINDS), limit))
+    for r in rows:
+        out.append({"kind": r["kind"], "text": r["message"], "time": r["time"], "source": "ai"})
+    return out
 
 
 # ---- alerts ------------------------------------------------------------------------------------------------
