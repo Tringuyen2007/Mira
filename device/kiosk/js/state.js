@@ -58,9 +58,14 @@ export function reduce(state, input, now) {
     case "rep":
       return msg.quality === "good" ? { ...state, lastGoodRepAt: now } : state;
     case "fall":
-      return { ...state, alertOpen: true };
+      // Only a confirmed fall is an incident (as for the SafetyGuardian); a suspected one is not.
+      return msg.stage === "confirmed" ? { ...state, alertOpen: true } : state;
     case "alert":
-      return { ...state, alertOpen: !CLOSED_ALERT_STEPS.has(msg.step) };
+      // `detected` opens and a closing step ends it; anything else (escalated, Retell call_*/webhook_*
+      // steps that land after the close) leaves it as it is.
+      if (msg.step === "detected") return { ...state, alertOpen: true };
+      if (CLOSED_ALERT_STEPS.has(msg.step)) return { ...state, alertOpen: false };
+      return state;
     case "stopped":
       return { ...state, awaitingGesture: false };
     default:
@@ -106,7 +111,7 @@ export function view(state, now) {
   if (phase === "countdown") return { ...base, screen: "countdown", mood: null };
   if (phase === "rest" || phase === "done") {
     const summary = { reps: base.rep, repsTarget, balance: balance
-      ? `${balance.leftPct} / ${100 - balance.leftPct}` : null };
+      ? `${balance.leftPct} / ${100 - balance.leftPct}` : null, balanceOk: balance ? balance.ok : null };
     return { ...base, screen: "setDone", mood: "celebrating", summary };
   }
   if (state.awaitingGesture) return { ...base, screen: "gesture", mood: "idle" };

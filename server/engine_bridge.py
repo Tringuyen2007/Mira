@@ -46,6 +46,7 @@ LAG_WARN_P95_MS = 50.0
 FALL_STATUS_EVERY_S = 2.0
 MOCK_FALL_AT_S = 20.0
 MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
+MOCK_GREETING_HOLD_S = 3.0  # simulated seconds between arrived and awaiting_gesture (the LCD greeting shows)
 MOCK_GESTURE_AFTER_S = 4.0  # simulated seconds between awaiting_gesture and the mock's thumbs-up
 JOIN_TIMEOUT_S = 2.0
 
@@ -353,6 +354,8 @@ class MockSource:
         self._auto_fall_done = False
         self._arrived = False
         self._arrive_due_s = MOCK_ARRIVE_AT_S
+        self._awaiting = False
+        self._awaiting_due_s = 0.0
         self._ready = False
         self._gesture_due_s = 0.0
         self._patient_id = cfg.MOCK_PATIENT_ID
@@ -371,10 +374,14 @@ class MockSource:
             if not self._arrived and self._sim_s >= self._arrive_due_s:
                 self._arrived = True
                 self._emit(emit, {"type": "arrived", "patient_id": self._patient_id})
-                # Like the vision engine: ask for a thumbs-up, and start the program once it is seen.
+                self._awaiting_due_s = self._sim_s + MOCK_GREETING_HOLD_S
+            # Like the vision engine: after the greeting has been on screen a moment, ask for a thumbs-up, and
+            # start the program once it is seen.
+            if self._arrived and not self._awaiting and self._fall is None and self._sim_s >= self._awaiting_due_s:
+                self._awaiting = True
                 self._emit(emit, {"type": "awaiting_gesture", "gesture": "thumbs_up"})
                 self._gesture_due_s = self._sim_s + MOCK_GESTURE_AFTER_S
-            if self._arrived and not self._ready and self._fall is None and self._sim_s >= self._gesture_due_s:
+            if self._awaiting and not self._ready and self._fall is None and self._sim_s >= self._gesture_due_s:
                 self._ready = True
                 self._emit(emit, {"type": "gesture", "name": "thumbs_up"})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
@@ -465,6 +472,7 @@ class MockSource:
         self._patient_id = patient_id or cfg.MOCK_PATIENT_ID
         self._arrived = False
         self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
+        self._awaiting = False
         self._ready = False
         self._program_s = 0.0
         self._prev_program_s = -1e-9
@@ -691,6 +699,14 @@ class LiveState:
         self.paused = False
         self.countdown = None
         self.cue_id = None
+        self.set = None
+        self.reps_target = None
+        self.sets_target = None
+        self.hr = None
+        self.load_l_pct = None
+        self.load_conf = None
+        self.main_angle = None
+        self.flags = []
 
     def on_agent_event(self, ev: Message) -> None:
         """Caption and incident only. Agent events (hub.emit) come here directly; they must not move phase,
@@ -700,10 +716,16 @@ class LiveState:
         text = ev.get(text_key) if text_key else None
         if isinstance(text, str) and text.strip():
             self.caption = {"text": text.strip(), "source": kind, "t": ev.get("t", round(time.time(), 3))}
-        if kind == "fall" or (kind == "cue" and ev.get("id") == "check_in"):
+        if (kind == "fall" and ev.get("stage") == "confirmed") or (kind == "cue" and ev.get("id") == "check_in"):
             self.incident = True
         elif kind == "alert":
-            self.incident = ev.get("step") not in CLOSED_ALERT_STEPS
+            # Only `detected` opens and only a closing step ends it: steps that arrive after the close (Retell
+            # call_*/webhook_*, a late checked_in/escalated) leave it as it is.
+            step = ev.get("step")
+            if step == "detected":
+                self.incident = True
+            elif step in CLOSED_ALERT_STEPS:
+                self.incident = False
 
     def on_frame(self, frame: Message) -> None:
         angles = frame.get("angles") or {}

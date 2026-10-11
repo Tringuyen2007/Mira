@@ -259,8 +259,9 @@ Logs are JSON lines in `logs/server.log` (phone numbers masked, secrets redacted
 The Mira LCD kiosk (`device/kiosk/`, see its README) renders from the same event/frame stream as the iOS app —
 no new engine API — but it depends on these specifically:
 
-- `awaiting_gesture` before each session's first set (so the kiosk shows "give me a thumbs up" instead of
-  jumping straight to a countdown).
+- `arrived`, then `awaiting_gesture` a few seconds later, before each session's first set: the gap is what
+  keeps the greeting on screen, and `awaiting_gesture` makes the kiosk show "give me a thumbs up" instead of
+  jumping straight to a countdown. (The mock holds the greeting `MOCK_GREETING_HOLD_S` = 3 s.)
 - `gesture {name}` on a thumbs-up or raised hand.
 - `countdown {n, set, reps_target, sets_target, exercise_id}`.
 - `rep {index, set, quality}`.

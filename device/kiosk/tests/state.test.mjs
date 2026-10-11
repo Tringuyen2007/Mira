@@ -68,13 +68,16 @@ test("paused, set done, fall priority", () => {
   const v = view(s, 1000);
   assert.equal(v.screen, "setDone");
   assert.equal(v.mood, "celebrating");
-  assert.deepEqual(v.summary, { reps: 12, repsTarget: 12, balance: "52 / 48" });
+  assert.deepEqual(v.summary, { reps: 12, repsTarget: 12, balance: "52 / 48", balanceOk: true });
+  assert.equal(view(reduce(s, live({ phase: "rest", rep: 12, load_l_pct: 70 }), 1000), 1000).summary.balanceOk,
+    false);
   s = reduce(s, live({ phase: "incident", incident: true }), 1000);
   assert.equal(view(s, 1000).screen, "fall");
 });
 
 test("open alert forces fall screen until resolved", () => {
   let s = run([open, live({ phase: "active" })]);
+  s = reduce(s, ev({ type: "alert", step: "detected" }), 1000);
   s = reduce(s, ev({ type: "alert", step: "escalated", show_call_911: true }), 1000);
   assert.equal(view(s, 1000).screen, "fall");
   s = reduce(s, ev({ type: "alert", step: "resolved" }), 1000);
@@ -87,6 +90,24 @@ test("alert-triggered fall screen clears once a live snapshot reports no inciden
   assert.equal(view(s, 1000).screen, "fall");
   s = reduce(s, live({ phase: "active", incident: false }), 1000);
   assert.equal(view(s, 1000).screen, "rep");
+});
+
+test("alert steps after the close do not reopen the fall screen", () => {
+  let s = run([open]);
+  s = reduce(s, ev({ type: "alert", step: "detected" }), 1000);
+  s = reduce(s, ev({ type: "alert", step: "closed" }), 1000);
+  s = reduce(s, ev({ type: "alert", step: "call_update" }), 1000);
+  s = reduce(s, live({ phase: "active", incident: false }), 1000);
+  s = reduce(s, ev({ type: "alert", step: "webhook_call_analyzed" }), 1000);
+  assert.notEqual(view(s, 1000).screen, "fall");
+});
+
+test("only a confirmed fall shows the fall screen", () => {
+  let s = run([open, live({ phase: "active" })]);
+  s = reduce(s, ev({ type: "fall", stage: "suspected" }), 1000);
+  assert.equal(view(s, 1000).screen, "rep");
+  s = reduce(s, ev({ type: "fall", stage: "confirmed" }), 1000);
+  assert.equal(view(s, 1000).screen, "fall");
 });
 
 test("caption comes from live", () => {

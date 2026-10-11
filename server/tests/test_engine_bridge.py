@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from server.engine_bridge import RING_SECONDS, EngineBridge, RingBuffer
+from server.engine_bridge import MOCK_GREETING_HOLD_S, RING_SECONDS, EngineBridge, RingBuffer
 from server.hub import Hub
 
 FRAME_KEYS = {"type", "seq", "t", "session_id", "exercise_id", "set_no", "joints", "confidence", "angles", "com",
@@ -127,8 +127,8 @@ async def test_mock_fall_script(run_bridge: Callable[..., Any]) -> None:
     assert all(g == pytest.approx(2.0, abs=0.05) for g in gaps)
     assert statuses[0]["moving"] is False and statuses[0]["still_s"] == 2.0
 
-    # The mock's own "ready to start" thumbs-up fires earlier (MOCK_GESTURE_AFTER_S after arrival, well
-    # before this scripted fall at t=20); the incident response is the first "gesture" at/after the fall.
+    # The mock's own "ready to start" thumbs-up fires earlier (MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
+    # arrival, well before this scripted fall at t=20); the incident response is the first "gesture" at/after the fall.
     gesture = next(e for e in got.of_type("gesture") if e["t"] >= fall["t"])
     assert gesture["name"] == "thumbs_up" and gesture["t"] - fall["t"] == pytest.approx(6, abs=0.1)
     assert statuses[-1]["moving"] is True
@@ -146,8 +146,8 @@ async def test_mock_fall_script(run_bridge: Callable[..., Any]) -> None:
 async def test_mock_fall_without_response_never_sends_gesture(run_bridge: Callable[..., Any]) -> None:
     _, got = await run_bridge(source="mock:fall", speed=40, responds_at_s=None)
     await wait_until(lambda: len(got.of_type("fall_status")) >= 10)
-    # The mock's own "ready to start" thumbs-up (before the fall, at MOCK_GESTURE_AFTER_S after arrival)
-    # is expected; the point of this test is that no gesture answers the incident once it is underway.
+    # The mock's own "ready to start" thumbs-up (before the fall, MOCK_GREETING_HOLD_S + MOCK_GESTURE_AFTER_S after
+    # arrival) is expected; the point of this test is that no gesture answers the incident once it is underway.
     fall_t = got.of_type("fall")[0]["t"]
     assert not [g for g in got.of_type("gesture") if g["t"] >= fall_t]
     assert all(s["moving"] is False for s in got.of_type("fall_status"))
@@ -363,3 +363,6 @@ async def test_mock_waits_for_a_gesture_before_the_countdown(run_bridge: Callabl
     assert order[:4] == ["arrived", "awaiting_gesture", "gesture", "countdown"]
     assert got.of_type("awaiting_gesture")[0]["gesture"] == "thumbs_up"
     assert got.of_type("gesture")[0]["name"] == "thumbs_up"
+    # The greeting stays on screen MOCK_GREETING_HOLD_S before the thumbs-up prompt.
+    held = got.of_type("awaiting_gesture")[0]["t"] - got.of_type("arrived")[0]["t"]
+    assert held == pytest.approx(MOCK_GREETING_HOLD_S, abs=0.2)

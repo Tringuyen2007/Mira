@@ -6,6 +6,7 @@ Run exactly one process: uvicorn server.main:app --host 0.0.0.0 --port 8000 --wo
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -56,6 +57,7 @@ CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "devic
 # handle off the broadcast event). These are forwarded to the engine over the reverse channel.
 SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
 MAX_CLIENT_MSG_KEYS = 32
+DEVICE_HEALTH_STR_MAX = 64  # chars kept of a device_health string (screen, version)
 CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
 # Static web pages, mounted only when the directory exists. `device/` itself holds the iOS sources, so it is
@@ -226,8 +228,20 @@ def _on_client_event(msg: dict[str, Any]) -> None:
 
 
 def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:
-    """A device's device_health, reduced to the allow-listed keys, stamped as the LCD."""
-    out = {k: v for k, v in msg.items() if k in DEVICE_HEALTH_KEYS}
+    """A device's device_health, reduced to the allow-listed keys with bounded scalar values, stamped as the
+    LCD: strings are cut to DEVICE_HEALTH_STR_MAX chars, battery_pct must be a number (clamped to 0-100), and
+    objects, lists and nulls are dropped."""
+    out: dict[str, Any] = {}
+    for k, v in msg.items():
+        if k not in DEVICE_HEALTH_KEYS:
+            continue
+        if k == "battery_pct":
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                out[k] = min(100, max(0, v))
+        elif isinstance(v, str):
+            out[k] = v[:DEVICE_HEALTH_STR_MAX]
+        elif isinstance(v, (int, float, bool)):
+            out[k] = v
     out.update(type="device_health", app="lcd", t=round(time.time(), 3))
     return out
 

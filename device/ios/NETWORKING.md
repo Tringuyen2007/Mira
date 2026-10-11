@@ -162,7 +162,8 @@ History routes need the database and return 503 with `DB_DISABLED=1`.
 A separate device (`device/kiosk/`, a Raspberry Pi running Chromium) connects to `/ws/live` and `/ws/events`
 with its own, separately-scoped `MIRA_DEVICE_TOKEN` — **not** the app's `MIRA_API_TOKEN`, and not something
 the app sends or reads. The device token only unlocks those two streams (401 on every REST route, 1008 on
-`/ws/pose` and `/ws/notifications`), and on `/ws/events` it may only send `device_health` and only receives an
+`/ws/pose` and `/ws/notifications`), and on `/ws/events` it may only send `device_health` (allow-listed keys,
+scalar values only: strings cut to 64 chars, `battery_pct` clamped to 0–100) and only receives an
 allow-listed slice of event types (no proposals, `coach_adapt`, or notifications).
 
 When at least one LCD is connected and reporting health, the server emits on `/ws/events`:

@@ -69,9 +69,11 @@ def test_device_receives_only_allow_listed_events(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/events?token={DEVICE_TOKEN}") as device, \
             client.websocket_connect(f"/ws/events?token={TOKEN}") as full:
         full.send_json({"type": "watch_button", "name": "x"})  # echoed to full clients only
+        read_until(full, lambda m: m["type"] == "watch_button")  # proves it was published
         seen: list[str] = []
         read_until(device, lambda m: seen.append(m["type"]) or m["type"] == "hr")  # mock hr ~1/s
         assert seen and all(kind in DEVICE_EVENT_TYPES for kind in seen), seen
+        assert "watch_button" not in seen
 
 
 def test_health_data_reports_lcd(client: TestClient) -> None:
@@ -83,3 +85,23 @@ def test_sanitize_device_health_keeps_allow_listed_keys() -> None:
     out = sanitize_device_health({"type": "device_health", "app": "watch", "battery_pct": 50, "x": 1})
     assert out["type"] == "device_health" and out["app"] == "lcd" and out["battery_pct"] == 50
     assert "x" not in out and isinstance(out["t"], float)
+
+
+def test_sanitize_device_health_truncates_long_strings() -> None:
+    out = sanitize_device_health({"type": "device_health", "screen": "s" * 500, "version": "v" * 65})
+    assert out["screen"] == "s" * 64 and out["version"] == "v" * 64
+
+
+def test_sanitize_device_health_drops_nested_values() -> None:
+    out = sanitize_device_health({"type": "device_health", "screen": {"a": "b" * 10_000}, "version": [1, 2],
+                                  "battery_pct": None})
+    assert "screen" not in out and "version" not in out and "battery_pct" not in out
+
+
+def test_sanitize_device_health_clamps_battery() -> None:
+    assert sanitize_device_health({"type": "device_health", "battery_pct": 150})["battery_pct"] == 100
+    assert sanitize_device_health({"type": "device_health", "battery_pct": -5})["battery_pct"] == 0
+
+
+def test_sanitize_device_health_drops_bool_battery() -> None:
+    assert "battery_pct" not in sanitize_device_health({"type": "device_health", "battery_pct": True})

@@ -38,9 +38,15 @@ def test_session_start_resets_phase_and_counters() -> None:
     live.on_event({"type": "rep", "index": 4})
     live.on_event({"type": "paused", "reason": "user"})
     live.on_event({"type": "stopped"})
+    live.on_event({"type": "set_done", "reps_target": 10, "sets_target": 3})
+    live.on_event({"type": "hr", "bpm": 92})
+    live.on_frame({"exercise_id": "squat", "set_no": 2, "angles": {"knee_l": 80.0}, "load_l_pct": 55.0,
+                   "confidence_avg": 0.9, "flags": ["knee_valgus"]})
     live.on_session_start("Maya", "squat")
     p = live.payload()
     assert (p["phase"], p["rep"], p["paused"], p["countdown"], p["cue_id"]) == ("idle", 0, False, None, None)
+    assert (p["set"], p["reps_target"], p["sets_target"], p["hr"]) == (None, None, None, None)
+    assert (p["load_l_pct"], p["load_conf"], p["main_angle"], p["flags"]) == (None, None, None, [])
 
 
 def test_incident_flag() -> None:
@@ -53,6 +59,31 @@ def test_incident_flag() -> None:
     assert live.payload()["incident"] is True
     live.on_event({"type": INCIDENT_CLOSED})
     assert live.payload()["incident"] is False
+
+
+def test_alert_steps_after_the_close_leave_the_incident_closed() -> None:
+    live = LiveState()
+    live.on_agent_event({"type": "alert", "step": "detected"})
+    assert live.payload()["incident"] is True
+    live.on_agent_event({"type": "alert", "step": "closed"})
+    live.on_agent_event({"type": "alert", "step": "webhook_call_analyzed"})
+    assert live.payload()["incident"] is False
+
+
+def test_escalation_keeps_the_incident_open() -> None:
+    live = LiveState()
+    live.on_agent_event({"type": "alert", "step": "detected"})
+    live.on_agent_event({"type": "alert", "step": "escalated"})
+    assert live.payload()["incident"] is True
+
+
+def test_only_a_confirmed_fall_opens_an_incident() -> None:
+    live = LiveState()
+    live.on_agent_event({"type": "fall", "stage": "suspected"})
+    live.on_agent_event({"type": "fall"})
+    assert live.payload()["incident"] is False
+    live.on_agent_event({"type": "fall", "stage": "confirmed"})
+    assert live.payload()["incident"] is True
 
 
 def test_existing_fields_unchanged() -> None:

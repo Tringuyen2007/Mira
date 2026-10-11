@@ -65,8 +65,8 @@ device/kiosk/
 | 4 | Cue | `phase == "active"` and a correction cue arrived < 4 s ago, or balance off > 15 % | worried |
 | 5 | Rep | `phase == "active"` otherwise; cheering 1.5 s after a `rep` with `quality == "good"` | cheering → idle |
 | 6 | Paused | `live.paused` / `phase == "paused"` | sleeping |
-| 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "Even weight L / R" | celebrating |
-| 8 | Fall alert | `live.incident` true or an open `alert` / `fall` / `cue check_in` | — (full screen, red border) |
+| 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "EVEN WEIGHT L / R" (balanced) or "WEIGHT L / R" | celebrating |
+| 8 | Fall alert | `live.incident` true, an `alert` opened by step `detected` (until a closing step: `resolved` / `closed` / `resolved_by_therapist`), a `fall` with `stage == "confirmed"` or `cue check_in` | — (full screen, red border) |
 | — | Idle | no session / `phase == "idle"` with no greeting yet: greeting layout, "Mira" hero, no plan | idle |
 | — | Offline | events socket down > 3 s: small "Reconnecting…" pill top-centre over the last screen | unchanged |
 | — | Not paired | socket rejected (1008): full-screen plain message "This screen isn't paired" | — |
@@ -114,7 +114,7 @@ ask Victoria for full-colour 2× exports and, for richer animation, layered part
 - Token arrives once as `/device/#token=<MIRA_DEVICE_TOKEN>` (fragment: never sent to the server, logs or
   Referer), is saved to `localStorage["mira.deviceToken"]`, and the fragment is removed with
   `history.replaceState`. It is then only sent as the WebSocket `?token=` query (browsers cannot set WS headers).
-- CSP: `default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; media-src 'self';
+- CSP: `default-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self';
   style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'`.
   No inline script or style attributes that need `unsafe-inline` (dynamic values via CSS custom properties set
   from JS with `style.setProperty`, which CSP allows).
@@ -134,7 +134,8 @@ ask Victoria for full-colour 2× exports and, for richer animation, layered part
   - `/ws/live`: full or device.
   - `/ws/events`: full or device. Device clients:
     - may send only `device_health` (anything else dropped, logged at debug); the server sets `app="lcd"`
-      and `t` on what it injects, and drops keys outside an allow-list (`t, app, screen, version, battery_pct`).
+      and `t` on what it injects, and drops keys outside an allow-list (`t, app, screen, version, battery_pct`);
+      kept values must be scalars (strings cut to 64 chars, `battery_pct` numeric and clamped to 0–100).
     - receive only an allow-list of event types (Hub client `accept` filter): `arrived, greeting,
       awaiting_gesture, gesture, countdown, cue, rep, set_done, paused, resumed, stopped, fall, alert,
       summary_ready, hr, device_status, ping`. No proposals, coach_adapt, notifications.
@@ -162,7 +163,7 @@ ask Victoria for full-colour 2× exports and, for richer animation, layered part
 | `caption` `{text, source, t}` | latest `greeting.text`, `cue.text`, `summary_ready.spoken` |
 | `first_name` | session start (`SessionRegistry` current session's first name) |
 | `exercise_name` | display name for `exercise_id` (small map; "Mini squats" for `squat`) |
-| `incident` | true from `fall` / `cue check_in` / open `alert` until `incident_closed` or alert resolved |
+| `incident` | true from a confirmed `fall` / `cue check_in` / `alert` step `detected` until `incident_closed` or a closing alert step (`resolved`, `closed`, `resolved_by_therapist`); other alert steps leave it unchanged |
 
 Agent events (`hub.emit` from SessionVoice, SessionCoach, SafetyGuardian) currently bypass `LiveState`. Hub gets
 an emit observer list; the bridge registers `live.on_event` so every published event updates live state once.
@@ -170,8 +171,8 @@ Existing fields and their behaviour are unchanged.
 
 ### Mock engine
 
-After `arrived` the mock emits `awaiting_gesture {gesture:"thumbs_up"}`, waits `MOCK_GESTURE_DELAY_S`
-(4 s), emits `gesture {name:"thumbs_up"}`, then the countdown — the same sequence the vision engine is expected
+`MOCK_GREETING_HOLD_S` (3 s) after `arrived` (so the greeting is on screen) the mock emits
+`awaiting_gesture {gesture:"thumbs_up"}`, waits `MOCK_GESTURE_AFTER_S` (4 s), emits `gesture {name:"thumbs_up"}`, then the countdown — the same sequence the vision engine is expected
 to produce. Tests that wait for the first countdown get the extra delay accounted for.
 
 ### Vision contract (for Eric)

@@ -59,7 +59,8 @@ export function render(root, vm, mascot) {
   if (vm.summary) {
     text(root, "done-now", String(vm.summary.reps));
     text(root, "done-target", vm.summary.repsTarget === null ? "" : ` / ${vm.summary.repsTarget}`);
-    text(root, "done-balance", vm.summary.balance ? `EVEN WEIGHT ${vm.summary.balance}` : "");
+    const weight = vm.summary.balanceOk ? "EVEN WEIGHT" : "WEIGHT";
+    text(root, "done-balance", vm.summary.balance ? `${weight} ${vm.summary.balance}` : "");
     show(root, "done-pill", vm.summary.balance !== null);
   }
 

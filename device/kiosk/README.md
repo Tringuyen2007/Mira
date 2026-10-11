@@ -49,8 +49,8 @@ make run   # from the repo root
 ```
 
 then open `http://localhost:8000/device/#token=<MIRA_DEVICE_TOKEN>` in Chrome at any window size. With
-`MIRA_SOURCE=mock` (the default) the mock session plays through every screen: `arrived` → greeting →
-`awaiting_gesture` → (~4 s later) `gesture {name: "thumbs_up"}` → countdown → reps → set done → summary. To see
+`MIRA_SOURCE=mock` (the default) the mock session plays through every screen: `arrived` → greeting (held ~3 s)
+→ `awaiting_gesture` → (~4 s later) `gesture {name: "thumbs_up"}` → countdown → reps → set done → summary. To see
 the fall screen, start the server with `DEMO_TOOLS_ENABLED=1` and trigger it:
 
 ```sh
@@ -92,8 +92,8 @@ to update itself mid-session.
 | 4 | Cue | `phase == "active"` and a correction cue arrived < 4 s ago, or balance off > 15 % | worried |
 | 5 | Rep | `phase == "active"` otherwise; cheering 1.5 s after a `rep` with `quality == "good"` | cheering → idle |
 | 6 | Paused | `live.paused` / `phase == "paused"` | sleeping |
-| 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "Even weight L / R" | celebrating |
-| 8 | Fall alert | `live.incident` true or an open `alert` / `fall` / `cue check_in` | — (full screen, red border) |
+| 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "EVEN WEIGHT L / R" (balanced) or "WEIGHT L / R" | celebrating |
+| 8 | Fall alert | `live.incident` true, an `alert` opened by step `detected` (until a closing step: `resolved` / `closed` / `resolved_by_therapist`), a `fall` with `stage == "confirmed"` or `cue check_in` | — (full screen, red border) |
 | — | Idle | no session / `phase == "idle"` with no greeting yet: greeting layout, "Mira" hero, no plan | idle |
 | — | Offline | events socket down > 3 s: small "Reconnecting…" pill top-centre over the last screen | unchanged |
 | — | Not paired | socket rejected (1008): full-screen plain message "This screen isn't paired" | — |
@@ -122,8 +122,9 @@ animation would need (the 750×750 frame sequences named in the Figma component 
   `/ws/pose` / `/ws/notifications` (1008). On `/ws/events` a device-scoped client may only *send*
   `device_health` (anything else is dropped) and only *receives* an allow-listed slice of events (no
   proposals, `coach_adapt`, or notifications) — see `server/devices.py` `DEVICE_EVENT_TYPES` /
-  `DEVICE_HEALTH_KEYS`.
-- CSP (`index.html` `<meta>`): `default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:;
+  `DEVICE_HEALTH_KEYS`. `device_health` values are bounded (`server/main.py` `sanitize_device_health`):
+  strings cut to 64 chars, `battery_pct` must be a number and is clamped to 0–100, objects/lists/nulls dropped.
+- CSP (`index.html` `<meta>`): `default-src 'self'; connect-src 'self'; img-src 'self' data:;
   media-src 'self'; style-src 'self'; script-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'`.
   No inline script or style attributes.
 - All server-supplied text (captions are AI-generated) is written with `textContent`, never `innerHTML`.
