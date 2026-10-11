@@ -68,18 +68,29 @@ finds up to 3 people. A person counts as the same in both cameras when their hip
 midpoints line up in 3D; of those near the mat, the one closest to the mat centre is tracked, and
 tracking only switches to someone else when they are 30 cm closer to the centre for half a second.
 Everyone else is drawn grey and labelled "ignored". If the two cameras disagree (e.g. a hand over one
-lens), the camera whose person stands at the mat is kept and the other is ignored for that frame
-("ignoring camera A (disagrees)"). Recordings keep everyone found, so `--retriangulate` re-runs the
-selection.
+lens), the camera whose person stands at the mat and is person-sized (0.8–2.4 m from feet to head,
+judged from how far away they stand) is kept and the other is ignored for that frame ("ignoring camera A
+(disagrees)"). With only one camera, tracking never switches to someone nearer the centre: it stays
+with whoever is closest to where the tracked person was. The tracked person's position is remembered
+through up to 1 s of frames with nobody, so a dropout doesn't hand tracking to someone else.
+Recordings keep everyone found, so `--retriangulate` re-runs the selection. `calib_refine` uses each
+camera's person as found whenever each camera sees exactly one person, so a calibration that is off
+still gets data to fix it.
+
+Pose cost grows with the number of people it looks for. `--poses N` (debug view live mode and
+`checks`; default 3) changes it; `checks` reports "pose time A/B" (target ≤ 45 ms per frame).
 
 ### Foot anchoring
 
 A planted foot (heel and toe within 12 cm of the floor, barely moving for 0.2 s) is held still at its
-average position with its lowest point on the mat surface, so MediaPipe's wobble doesn't make the
-feet jitter while standing or squatting. It releases on a real step or lift (the detected foot more
+average position (it is not snapped down to the mat surface, so a floor error stays visible), so
+MediaPipe's wobble doesn't make the feet jitter while standing or squatting. It releases on a real step or lift (the detected foot more
 than 5 cm away, or the heel off the floor, for 2 frames) and fades back to the live position over
-0.1 s. The debug view's top view draws a white square under an anchored foot; `checks` reports
-"feet anchored while standing". `Pipeline(..., anchor_feet=False)` turns it off.
+0.1 s. The debug view's top view draws a white square under an anchored foot.
+`Pipeline(..., anchor_feet=False)` (and `replay_outputs(..., anchor_feet=False)`) turns it off. `checks`
+measures unanchored joints: it reports "feet anchored while standing" (how often both feet would
+anchor) and "foot height above mat" (median height of the lowest heel/toe, target -1 to 5 cm; off
+means the floor or calibration is off).
 
 ### Left/right flips
 
