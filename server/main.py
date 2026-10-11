@@ -6,6 +6,8 @@ Run exactly one process: uvicorn server.main:app --host 0.0.0.0 --port 8000 --wo
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +16,9 @@ from typing import Any
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
@@ -32,6 +37,7 @@ from server.db import queries
 from server.db.persist import DbStats, SessionPersistence
 from server.db.pool import Database, DBError
 from server.db.writer import FrameWriter
+from server.devices import DEVICE_EVENT_TYPES, DEVICE_HEALTH_KEYS, DeviceRegistry
 from server.engine_bridge import EngineBridge
 from server.hub import Hub, RateLimiter
 from server.logging_setup import get_logger, setup_logging, shutdown_logging
@@ -39,7 +45,7 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import TunnelFilterMiddleware, require_token, ws_token_ok
+from server.security import TunnelFilterMiddleware, require_token, ws_scope, ws_token_ok
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -51,6 +57,7 @@ CLIENT_EVENT_TYPES = frozenset({"command", "hr", "wrist", "watch_button", "devic
 # handle off the broadcast event). These are forwarded to the engine over the reverse channel.
 SESSION_COMMANDS = frozenset({"start", "pause", "skip", "stop"})
 MAX_CLIENT_MSG_KEYS = 32
+DEVICE_HEALTH_STR_MAX = 64  # chars kept of a device_health string (screen, version)
 CLIENT_MSGS_PER_S = 20.0
 MOCK_EXERCISE_ID = "squat"
 # Static web pages, mounted only when the directory exists. `device/` itself holds the iOS sources, so it is
@@ -66,9 +73,22 @@ class MultiDirStaticFiles(StaticFiles):
         self.all_directories = [str(d) for d in directories]
 
 
+class KioskStaticFiles(StaticFiles):
+    """The LCD page, minus what only developers need: the kiosk's dev/ preview, its tests/ and READMEs are
+    never served on the origin that holds the device token. Compared case-insensitively (macOS volumes)."""
+
+    HIDDEN_DIRS = frozenset({"dev", "tests"})
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        parts = [p.lower() for p in Path(path).parts]
+        if (parts and parts[0] in self.HIDDEN_DIRS) or (parts and parts[-1] == "readme.md"):
+            raise HTTPException(status_code=404)
+        return await super().get_response(path, scope)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    problem = cfg.token_problem()
+    problem = cfg.token_problem() or cfg.device_token_problem()
     if problem:
         raise RuntimeError(f"{problem}; refusing to start. Generate one with: "
                            "python -c \"import secrets;print(secrets.token_urlsafe(32))\"")
@@ -96,6 +116,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bridge = EngineBridge(hub, asyncio.get_running_loop(), session_provider=current_session_id)
     state = AppState(cfg, hub, bridge, sessions, db=db)
     state.stat_providers.update({"hub": hub.stats, "bridge": bridge.stats, "ai": gemini.stats})
+    devices = DeviceRegistry(hub)
+    state.devices = devices
+    state.stat_providers["devices"] = devices.status
+    devices.start()
     writer: FrameWriter | None = None
     if db is not None and persistence is not None and cfg.TIGER_DSN:  # narrowed for the type checker
         writer = FrameWriter(cfg.TIGER_DSN, patient_provider=current_patient_id)
@@ -134,6 +158,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
     # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
+    sessions.on_start.append(lambda session: bridge.live.on_session_start(session.profile.first_name,
+                                                                        session.exercise_id))
     sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id))
     sessions.on_start.append(voice.prepare_greeting)
 
@@ -148,6 +174,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await notifications.stop()
         await notifier.stop()
         await guardian.stop()
+        await devices.stop()
         await bridge.stop()
         await voice.close()
         await coach.close()
@@ -200,6 +227,45 @@ def _on_client_event(msg: dict[str, Any]) -> None:
         _forward_session_command(state, msg)
 
 
+def sanitize_device_health(msg: dict[str, Any]) -> dict[str, Any]:
+    """A device's device_health, reduced to the allow-listed keys with bounded scalar values, stamped as the
+    LCD: strings are cut to DEVICE_HEALTH_STR_MAX chars, battery_pct must be a number (clamped to 0-100), and
+    objects, lists and nulls are dropped."""
+    out: dict[str, Any] = {}
+    for k, v in msg.items():
+        if k not in DEVICE_HEALTH_KEYS:
+            continue
+        if k == "battery_pct":
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                out[k] = min(100, max(0, v))
+        elif isinstance(v, str):
+            out[k] = v[:DEVICE_HEALTH_STR_MAX]
+        elif isinstance(v, (int, float, bool)):
+            out[k] = v
+    out.update(type="device_health", app="lcd", t=round(time.time(), 3))
+    return out
+
+
+def _device_event_handler() -> Callable[[dict[str, Any]], None]:
+    """Per-connection handler for a device-scoped /ws/events client: rate-limited, device_health only."""
+    limiter = RateLimiter(CLIENT_MSGS_PER_S)
+
+    def handle(msg: dict[str, Any]) -> None:
+        if not limiter.allow() or msg.get("type") != "device_health" or len(msg) > MAX_CLIENT_MSG_KEYS:
+            return
+        state = get_state()
+        clean = sanitize_device_health(msg)
+        state.bridge.inject(clean)
+        if state.devices is not None:
+            state.devices.on_health(clean)
+
+    return handle
+
+
+def _device_accepts(msg: dict[str, Any]) -> bool:
+    return msg.get("type") in DEVICE_EVENT_TYPES
+
+
 def _forward_session_command(state: AppState, msg: dict[str, Any]) -> None:
     """start/pause/skip/stop go to the engine over the reverse channel (`EngineBridge.send_to_engine`), same
     as `incident_closed`. A user `start` must never resume a session the Safety Guardian is holding open
@@ -224,12 +290,27 @@ def _parse_since_id(raw: str | None) -> int | None:
         return None
 
 
-async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None) -> None:
-    if not await ws_token_ok(ws):
+async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allow_device: bool = False) -> None:
+    scope = await ws_scope(ws)
+    if scope is None or (scope == "device" and not allow_device):
         await ws.close(code=1008)
         return
     await ws.accept()
-    await get_state().hub.connect(channel, ws, on_message)
+    hub = get_state().hub
+    if scope == "full":
+        await hub.connect(channel, ws, on_message)
+        return
+    if channel != "events":
+        await hub.connect(channel, ws)
+        return
+    devices = get_state().devices
+    if devices is not None:
+        devices.connected()
+    try:
+        await hub.connect(channel, ws, _device_event_handler(), accept=_device_accepts)
+    finally:
+        if devices is not None:
+            devices.disconnected()
 
 
 def _mount_static(app: FastAPI) -> None:
@@ -240,7 +321,8 @@ def _mount_static(app: FastAPI) -> None:
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
     for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
-            app.mount(f"/{name}", StaticFiles(directory=directory, html=True), name=name)
+            static_cls = KioskStaticFiles if name == "device" else StaticFiles
+            app.mount(f"/{name}", static_cls(directory=directory, html=True), name=name)
 
 
 def create_app() -> FastAPI:
@@ -263,11 +345,11 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/live")
     async def ws_live(ws: WebSocket) -> None:
-        await _serve_ws(ws, "live")
+        await _serve_ws(ws, "live", allow_device=True)
 
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket) -> None:
-        await _serve_ws(ws, "events", _client_event_handler())
+        await _serve_ws(ws, "events", _client_event_handler(), allow_device=True)
 
     @app.websocket("/ws/notifications")
     async def ws_notifications(ws: WebSocket) -> None:

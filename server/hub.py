@@ -111,6 +111,7 @@ class Hub:
         self._pose_interval_s = 1.0 / pose_hz
         self._pose_next_due = 0.0
         self._clock = clock
+        self.emit_observers: list[Callable[[dict[str, Any]], None]] = []
 
     async def connect(self, channel: str, ws: WebSocketLike,
                       on_message: Callable[[dict[str, Any]], None] | None = None,
@@ -168,7 +169,15 @@ class Hub:
                 self._enqueue(client, text)
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
-        self.publish("events", {"type": event_type, **payload})
+        """Publish an agent event (Voice, Coach, Guardian). Observers (the bridge's LiveState) see it first, so
+        /ws/live reflects agent captions and alerts too; engine events go through EngineBridge._route instead."""
+        msg = {"type": event_type, **payload}
+        for observer in self.emit_observers:
+            try:
+                observer(msg)
+            except Exception:  # noqa: BLE001 - an observer bug must not stop the event
+                log.exception("emit observer failed", extra={"event_type": event_type})
+        self.publish("events", msg)
 
     def stats(self) -> dict[str, Any]:
         return {

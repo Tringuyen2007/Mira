@@ -1,0 +1,261 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/615a17da-9e77-48dd-a8c0-5731989335ad";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgOrbitRing = `${assetPathPrefix}/7103f.svg`;
+const imgOrbitRing2 = `${assetPathPrefix}/9f179.svg`;
+const imgLcdHiFiSparkle = `${assetPathPrefix}/bb90c.svg`;
+const imgLcdHiFiSparkle1 = `${assetPathPrefix}/9e75c.svg`;
+const imgIconUser = `${assetPathPrefix}/7cf95.svg`;
+const imgIconPencil = `${assetPathPrefix}/4b36b.svg`;
+const imgIconHeart = `${assetPathPrefix}/ccc08.svg`;
+const imgIconDevice = `${assetPathPrefix}/25ce3.svg`;
+const imgIconCheck = `${assetPathPrefix}/4fc57.svg`;
+const imgIconShield = `${assetPathPrefix}/18e03.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function Onboarding5ReviewConfirm() {
+  return (
+    <div className="relative size-full" data-node-id="156:825" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 1097' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 54.85 215 548.5)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Onboarding / 5 Review & Confirm">
+      <div className="absolute left-[230px] size-[420px] top-[-190px]" data-node-id="156:826" data-name="Orbit ring">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing} />
+      </div>
+      <div className="absolute left-[290px] size-[300px] top-[-130px]" data-node-id="156:827" data-name="Orbit ring 2">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing2} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute block cursor-pointer h-[64px] left-0 top-[54px] w-[430px]" step="Review" />
+      <div className="absolute drop-shadow-[0px_0px_5px_rgba(143,186,204,0.7)] left-[352px] size-[20px] top-[128px]" data-node-id="156:830" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_3px_rgba(143,186,204,0.7)] left-[330px] size-[12px] top-[166px]" data-node-id="156:831" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle1} />
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[8px] items-start left-[32px] not-italic overflow-clip top-[138px]" data-node-id="156:832" data-name="Intro">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px] whitespace-nowrap" data-node-id="156:833">
+          ALMOST DONE
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[48px] relative shrink-0 text-[40px] text-[transparent] to-[#391323] whitespace-nowrap" data-node-id="156:834">
+          Check your details
+        </p>
+        <p className="font-['Inter:Regular'] font-normal leading-[28px] relative shrink-0 text-[20px] text-[color:var(--color\/ink-soft,#5e5a63)] w-[366px]" data-node-id="156:835">
+          Tap Edit to change anything.
+        </p>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch cursor-pointer drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[971px] w-[366px]" label="Yes, this is right" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[1063px] w-[430px]" />
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[190px] left-[32px] rounded-[28px] top-[267px] w-[366px]" data-node-id="156:887" data-name="Review / About you">
+        <div className="absolute bg-[var(--aurora\/peach,#f7e2cd)] left-[17px] rounded-[20px] size-[40px] top-[13px]" data-node-id="156:888" data-name="Icon disc" />
+        <div className="absolute left-[26px] size-[22px] top-[22px]" data-node-id="156:889" data-name="icon/user">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconUser} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[69px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[22px] whitespace-nowrap" data-node-id="156:892">
+          About you
+        </p>
+        <a className="absolute bg-white block border-[#857f8a] border-[1.5px] border-solid cursor-pointer h-[52px] left-[261px] rounded-[26px] top-[7px] w-[96px]" data-node-id="156:893" data-name="Button / Edit About you">
+          <div className="absolute left-[16.5px] size-[20px] top-[13.5px]" data-node-id="164:889" data-name="icon/pencil">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconPencil} />
+          </div>
+          <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[1.28] left-[44.5px] not-italic text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] text-left top-[13.5px] whitespace-nowrap" data-node-id="164:925">
+            Edit
+          </p>
+        </a>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[91px] whitespace-nowrap" data-node-id="156:898">
+          Height
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[90px] whitespace-nowrap" data-node-id="156:899">
+          5 ft 4 in
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[121px] whitespace-nowrap" data-node-id="156:900">
+          Weight
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[120px] whitespace-nowrap" data-node-id="156:901">
+          150 lb
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[151px] whitespace-nowrap" data-node-id="156:904">
+          Condition
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[150px] whitespace-nowrap" data-node-id="156:905">
+          Knee replacement
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[61px] whitespace-nowrap" data-node-id="172:150">
+          Name
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[60px] whitespace-nowrap" data-node-id="172:151">
+          Maya
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[160px] left-[32px] rounded-[28px] top-[641px] w-[366px]" data-node-id="156:906" data-name="Review / Your therapist">
+        <div className="absolute bg-[var(--aurora\/blush,#edccd3)] left-[17px] rounded-[20px] size-[40px] top-[13px]" data-node-id="156:907" data-name="Icon disc" />
+        <div className="absolute left-[26px] size-[22px] top-[22px]" data-node-id="156:908" data-name="icon/heart">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconHeart} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[69px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[22px] whitespace-nowrap" data-node-id="156:910">
+          Your therapist
+        </p>
+        <a className="absolute bg-white block border-[#857f8a] border-[1.5px] border-solid cursor-pointer h-[52px] left-[261px] rounded-[26px] top-[7px] w-[96px]" data-node-id="156:911" data-name="Button / Edit Your therapist">
+          <div className="absolute left-[16.5px] size-[20px] top-[13.5px]" data-node-id="164:891" data-name="icon/pencil">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconPencil} />
+          </div>
+          <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[1.28] left-[44.5px] not-italic text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] text-left top-[13.5px] whitespace-nowrap" data-node-id="164:926">
+            Edit
+          </p>
+        </a>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[61px] whitespace-nowrap" data-node-id="156:916">
+          Therapist
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[60px] whitespace-nowrap" data-node-id="156:917">
+          Dr. Sam Lee, PT
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[91px] whitespace-nowrap" data-node-id="156:918">
+          Plan
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[90px] whitespace-nowrap" data-node-id="156:919">
+          3 exercises, 15 min a day
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[121px] whitespace-nowrap" data-node-id="156:920">
+          Goal
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[120px] whitespace-nowrap" data-node-id="156:921">
+          Bend knee to 110°
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[130px] left-[32px] rounded-[28px] top-[813px] w-[366px]" data-node-id="156:922" data-name="Review / Your Mira">
+        <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] left-[17px] rounded-[20px] size-[40px] top-[13px]" data-node-id="156:923" data-name="Icon disc" />
+        <div className="absolute left-[26px] size-[22px] top-[22px]" data-node-id="156:924" data-name="icon/device">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconDevice} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[69px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[22px] whitespace-nowrap" data-node-id="156:927">
+          Your Mira
+        </p>
+        <a className="absolute bg-white block border-[#857f8a] border-[1.5px] border-solid cursor-pointer h-[52px] left-[261px] rounded-[26px] top-[7px] w-[96px]" data-node-id="156:928" data-name="Button / Edit Your Mira">
+          <div className="absolute left-[16.5px] size-[20px] top-[13.5px]" data-node-id="164:893" data-name="icon/pencil">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconPencil} />
+          </div>
+          <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[1.28] left-[44.5px] not-italic text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] text-left top-[13.5px] whitespace-nowrap" data-node-id="164:927">
+            Edit
+          </p>
+        </a>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[61px] whitespace-nowrap" data-node-id="156:933">
+          Status
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[60px] whitespace-nowrap" data-node-id="156:934">
+          Connected
+        </p>
+        <div className="absolute left-[217px] size-[20px] top-[62px]" data-node-id="156:935" data-name="icon/check">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCheck} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[91px] whitespace-nowrap" data-node-id="156:937">
+          Room
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[90px] whitespace-nowrap" data-node-id="156:938">
+          Living room
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[160px] left-[32px] rounded-[28px] top-[469px] w-[366px]" data-node-id="159:131" data-name="Review / Emergency contact">
+        <div className="absolute bg-[var(--aurora\/blush,#edccd3)] left-[17px] rounded-[20px] size-[40px] top-[13px]" data-node-id="159:132" data-name="Icon disc" />
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[69px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[22px] whitespace-nowrap" data-node-id="159:136">
+          Emergency contact
+        </p>
+        <a className="absolute bg-white block border-[#857f8a] border-[1.5px] border-solid cursor-pointer h-[52px] left-[261px] rounded-[26px] top-[7px] w-[96px]" data-node-id="159:137" data-name="Button / Edit Emergency contact">
+          <div className="absolute left-[16.5px] size-[20px] top-[13.5px]" data-node-id="164:895" data-name="icon/pencil">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconPencil} />
+          </div>
+          <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[1.28] left-[44.5px] not-italic text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] text-left top-[13.5px] whitespace-nowrap" data-node-id="164:928">
+            Edit
+          </p>
+        </a>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[61px] whitespace-nowrap" data-node-id="159:141">
+          Name
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[60px] whitespace-nowrap" data-node-id="159:142">
+          Anna Ruiz (daughter)
+        </p>
+        <div className="absolute left-[292px] size-[20px] top-[122px]" data-node-id="159:143" data-name="icon/check">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCheck} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[91px] whitespace-nowrap" data-node-id="159:145">
+          Phone
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[90px] whitespace-nowrap" data-node-id="159:146">
+          (555) 012-3456
+        </p>
+        <div className="absolute left-[26px] size-[22px] top-[22px]" data-node-id="159:147" data-name="icon/shield">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconShield} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[121px] whitespace-nowrap" data-node-id="159:150">
+          Alert Dr. Lee
+        </p>
+        <p className="-translate-x-full [word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[347px] not-italic text-[19px] text-[color:var(--color\/ink,#1c1a22)] text-right top-[120px] whitespace-nowrap" data-node-id="159:151">
+          On
+        </p>
+      </div>
+    </div>
+  );
+}

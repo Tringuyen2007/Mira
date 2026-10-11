@@ -1,0 +1,7 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="icon/warning">
+<path id="Triangle" d="M11.3883 6.62068C12.5367 4.58891 15.4633 4.58891 16.6117 6.62068L24.47 20.5238C25.6004 22.5237 24.1555 25 21.8583 25H6.1417C3.84448 25 2.39965 22.5237 3.53001 20.5238L11.3883 6.62068Z" fill="#D92D20"/>
+<rect id="Rectangle" x="12.5" y="10" width="3" height="8" rx="1.5" fill="white"/>
+<circle id="Ellipse" cx="14" cy="21.2" r="1.7" fill="white"/>
+</g>
+</svg>

@@ -46,6 +46,8 @@ LAG_WARN_P95_MS = 50.0
 FALL_STATUS_EVERY_S = 2.0
 MOCK_FALL_AT_S = 20.0
 MOCK_ARRIVE_AT_S = 3.0  # simulated seconds after start when the mock patient arrives
+MOCK_GREETING_HOLD_S = 3.0  # simulated seconds between arrived and awaiting_gesture (the LCD greeting shows)
+MOCK_GESTURE_AFTER_S = 4.0  # simulated seconds between awaiting_gesture and the mock's thumbs-up
 JOIN_TIMEOUT_S = 2.0
 
 # Reverse-channel message types understood by the mock source (beyond incident_closed).
@@ -352,6 +354,10 @@ class MockSource:
         self._auto_fall_done = False
         self._arrived = False
         self._arrive_due_s = MOCK_ARRIVE_AT_S
+        self._awaiting = False
+        self._awaiting_due_s = 0.0
+        self._ready = False
+        self._gesture_due_s = 0.0
         self._patient_id = cfg.MOCK_PATIENT_ID
         self._paused = False  # user `pause`/`start` (§ reverse channel); independent of a Guardian `paused`
         self._stopped = False  # user `stop`: the program is over, no more reps for this session
@@ -367,7 +373,19 @@ class MockSource:
             # (REST or boot) restarts this via `_restart_session`, so later sessions get their own arrival too.
             if not self._arrived and self._sim_s >= self._arrive_due_s:
                 self._arrived = True
-                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id})
+                # The plan rides on `arrived` so the greeting can show "3 sets · 10 reps" before the first countdown.
+                self._emit(emit, {"type": "arrived", "patient_id": self._patient_id, "exercise_id": _EXERCISE,
+                                  "reps_target": _REPS, "sets_target": _SETS})
+                self._awaiting_due_s = self._sim_s + MOCK_GREETING_HOLD_S
+            # Like the vision engine: after the greeting has been on screen a moment, ask for a thumbs-up, and
+            # start the program once it is seen.
+            if self._arrived and not self._awaiting and self._fall is None and self._sim_s >= self._awaiting_due_s:
+                self._awaiting = True
+                self._emit(emit, {"type": "awaiting_gesture", "gesture": "thumbs_up"})
+                self._gesture_due_s = self._sim_s + MOCK_GESTURE_AFTER_S
+            if self._awaiting and not self._ready and self._fall is None and self._sim_s >= self._gesture_due_s:
+                self._ready = True
+                self._emit(emit, {"type": "gesture", "name": "thumbs_up"})
             if self.fall_at_s is not None and not self._auto_fall_done and self._sim_s >= self.fall_at_s:
                 self._auto_fall_done = True
                 self._start_fall(self.responds_at_s)
@@ -383,8 +401,8 @@ class MockSource:
             else:
                 pose = _program_pose(self._program_s)
                 body = squat_frame_body(pose.depth, pose.depth * 0.9, pose.knee_in, self._rng)
-                events = list(self._events_between(self._prev_program_s, self._program_s)) if self._arrived else []
-                if self._arrived:
+                events = list(self._events_between(self._prev_program_s, self._program_s)) if self._ready else []
+                if self._ready:
                     self._prev_program_s = self._program_s
             self._emit(emit, {"type": "frame", "exercise_id": _EXERCISE, "set_no": pose.set_no, **body})
             for ev in events:
@@ -393,7 +411,7 @@ class MockSource:
                 self._emit(emit, {"type": "hr", "bpm": self._heart_rate(pose)})
 
             self._sim_s += dt
-            if self._fall is None and self._arrived and not self._paused and not self._stopped:
+            if self._fall is None and self._ready and not self._paused and not self._stopped:
                 self._program_s += dt
             next_tick += dt / self.speed
             delay = next_tick - time.monotonic()
@@ -456,6 +474,8 @@ class MockSource:
         self._patient_id = patient_id or cfg.MOCK_PATIENT_ID
         self._arrived = False
         self._arrive_due_s = self._sim_s + MOCK_ARRIVE_AT_S
+        self._awaiting = False
+        self._ready = False
         self._program_s = 0.0
         self._prev_program_s = -1e-9
         self._paused = False
@@ -641,6 +661,12 @@ class LagMonitor:
             log.info("event loop lag", extra={"event_loop_lag_ms": stats})
 
 
+# Display names for the LCD and the app ("REPS · MINI SQUATS"); unknown ids are title-cased.
+EXERCISE_NAMES = {"squat": "Mini squats"}
+CAPTION_SOURCES = {"greeting": "text", "cue": "text", "summary_ready": "spoken"}
+CLOSED_ALERT_STEPS = frozenset({"resolved", "closed", "resolved_by_therapist"})
+
+
 @dataclass
 class LiveState:
     """The /ws/live payload, maintained from frames and events."""
@@ -659,6 +685,49 @@ class LiveState:
     flags: list[str] = field(default_factory=list)
     cue_id: str | None = None
     paused: bool = False
+    caption: dict[str, Any] | None = None  # {text, source, t}: what Mira last said (late joiners repaint it)
+    first_name: str | None = None
+    exercise_name: str | None = None
+    incident: bool = False
+
+    def on_session_start(self, first_name: str, exercise_id: str) -> None:
+        self.first_name = first_name
+        self.exercise_id = exercise_id
+        self.exercise_name = EXERCISE_NAMES.get(exercise_id, exercise_id.replace("_", " ").capitalize())
+        self.caption = None
+        self.incident = False
+        self.phase = "idle"
+        self.rep = 0
+        self.paused = False
+        self.countdown = None
+        self.cue_id = None
+        self.set = None
+        self.reps_target = None
+        self.sets_target = None
+        self.hr = None
+        self.load_l_pct = None
+        self.load_conf = None
+        self.main_angle = None
+        self.flags = []
+
+    def on_agent_event(self, ev: Message) -> None:
+        """Caption and incident only. Agent events (hub.emit) come here directly; they must not move phase,
+        rep or cue_id (a Coach focus cue during the countdown would otherwise end the countdown)."""
+        kind = ev.get("type")
+        text_key = CAPTION_SOURCES.get(str(kind))
+        text = ev.get(text_key) if text_key else None
+        if isinstance(text, str) and text.strip():
+            self.caption = {"text": text.strip(), "source": kind, "t": ev.get("t", round(time.time(), 3))}
+        if (kind == "fall" and ev.get("stage") == "confirmed") or (kind == "cue" and ev.get("id") == "check_in"):
+            self.incident = True
+        elif kind == "alert":
+            # Only `detected` opens and only a closing step ends it: steps that arrive after the close (Retell
+            # call_*/webhook_*, a late checked_in/escalated) leave it as it is.
+            step = ev.get("step")
+            if step == "detected":
+                self.incident = True
+            elif step in CLOSED_ALERT_STEPS:
+                self.incident = False
 
     def on_frame(self, frame: Message) -> None:
         angles = frame.get("angles") or {}
@@ -671,6 +740,7 @@ class LiveState:
         self.set = frame.get("set_no", self.set)
 
     def on_event(self, ev: Message) -> None:
+        self.on_agent_event(ev)
         kind = ev.get("type")
         for key in ("reps_target", "sets_target", "exercise_id"):
             if key in ev:
@@ -695,7 +765,7 @@ class LiveState:
         elif kind == "fall":
             self.phase = "incident"
         elif kind == INCIDENT_CLOSED:
-            self.phase = "idle"
+            self.phase, self.incident = "idle", False
         elif kind == "hr" and isinstance(ev.get("bpm"), (int, float)):
             self.hr = int(ev["bpm"])
 
@@ -704,7 +774,8 @@ class LiveState:
                 "reps_target": self.reps_target, "set": self.set, "sets_target": self.sets_target,
                 "countdown": self.countdown, "main_angle": self.main_angle, "load_l_pct": self.load_l_pct,
                 "load_conf": self.load_conf, "hr": self.hr, "flags": self.flags, "cue_id": self.cue_id,
-                "paused": self.paused}
+                "paused": self.paused, "caption": self.caption, "first_name": self.first_name,
+                "exercise_name": self.exercise_name, "incident": self.incident}
 
 
 @dataclass(eq=False)
@@ -736,6 +807,7 @@ class EngineBridge:
         self.session_provider = session_provider
         self.ring_buffer = RingBuffer()
         self.live = LiveState()
+        hub.emit_observers.append(self.live.on_agent_event)
         self.lag = LagMonitor()
 
         self._frame_subs: list[FrameCallback] = []

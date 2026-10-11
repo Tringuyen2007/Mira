@@ -1,0 +1,125 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/68739e8c-3e48-4a9f-869f-5ebf7d2bbdaa";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgOrbitRing = `${assetPathPrefix}/7103f.svg`;
+const imgIconInfo = `${assetPathPrefix}/6d6de.svg`;
+const imgIconMic = `${assetPathPrefix}/6a657.svg`;
+const imgIconSend = `${assetPathPrefix}/81716.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function Care4Messages() {
+  return (
+    <div className="relative size-full" data-node-id="155:818" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Care / 4 Messages">
+      <div className="absolute left-[230px] size-[420px] top-[-190px]" data-node-id="155:904" data-name="Orbit ring">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute block cursor-pointer h-[64px] left-0 top-[54px] w-[430px]" step="Care" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+      <p className="[word-break:break-word] absolute bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[1.2] left-[24px] not-italic text-[34px] text-[transparent] to-[#391323] top-[126px] whitespace-nowrap" data-node-id="155:906">
+        Messages
+      </p>
+      <div className="[word-break:break-word] absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] font-['Inter:Regular'] font-normal h-[134px] left-[24px] not-italic rounded-bl-[8px] rounded-br-[24px] rounded-tl-[24px] rounded-tr-[24px] top-[190px] w-[304px]" data-node-id="155:907" data-name="Message / Dr. Lee">
+        <p className="absolute leading-[1.36] left-[17px] text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[13px] w-[268px]" data-node-id="155:908">
+          Hi Maya, I saw you leaned left on Tuesday. How is the knee feeling?
+        </p>
+        <p className="absolute leading-[1.28] left-[17px] text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[97px] whitespace-nowrap" data-node-id="155:909">
+          Dr. Lee · Oct 9
+        </p>
+      </div>
+      <div className="[word-break:break-word] absolute bg-[#1e1e1e] font-['Inter:Regular'] font-normal h-[108px] left-[102px] not-italic rounded-bl-[24px] rounded-br-[8px] rounded-tl-[24px] rounded-tr-[24px] top-[338px] w-[304px]" data-node-id="155:910" data-name="Message / You">
+        <p className="absolute leading-[1.36] left-[18px] text-[19px] text-white top-[14px] w-[268px]" data-node-id="155:911">
+          A little stiff in the morning, but better after the exercises.
+        </p>
+        <p className="absolute leading-[1.28] left-[18px] text-[17px] text-[rgba(255,255,255,0.82)] top-[72px] whitespace-nowrap" data-node-id="155:912">
+          You · Oct 9
+        </p>
+      </div>
+      <div className="[word-break:break-word] absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] font-['Inter:Regular'] font-normal h-[134px] left-[24px] not-italic rounded-bl-[8px] rounded-br-[24px] rounded-tl-[24px] rounded-tr-[24px] top-[460px] w-[304px]" data-node-id="155:913" data-name="Message / Dr. Lee">
+        <p className="absolute leading-[1.36] left-[17px] text-[19px] text-[color:var(--color\/ink,#1c1a22)] top-[13px] w-[268px]" data-node-id="155:914">
+          That is normal. Keep going, and try the heel tip in my note.
+        </p>
+        <p className="absolute leading-[1.28] left-[17px] text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[97px] whitespace-nowrap" data-node-id="155:915">
+          Dr. Lee · Today
+        </p>
+      </div>
+      <div className="absolute h-[48px] left-[24px] top-[708px] w-[382px]" data-node-id="155:916" data-name="Reply note">
+        <div className="absolute left-0 size-[22px] top-px" data-node-id="155:917" data-name="icon/info">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconInfo} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[32px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-0 w-[350px]" data-node-id="155:920">
+          Dr. Lee usually replies within a day. In an emergency, call 911.
+        </p>
+      </div>
+      <div className="absolute h-[64px] left-[24px] top-[768px] w-[382px]" data-node-id="155:921" data-name="Compose">
+        <div className="absolute bg-white border-[#857f8a] border-[1.5px] border-solid h-[64px] left-0 rounded-[32px] top-0 w-[306px]" data-node-id="155:922" data-name="Message field">
+          <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[20.5px] not-italic text-[19px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[18.5px] whitespace-nowrap" data-node-id="155:923">
+            Write a message
+          </p>
+          <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] left-[248.5px] rounded-[24px] size-[48px] top-[6.5px]" data-node-id="155:924" data-name="Button / Speak">
+            <div className="absolute left-[13px] size-[22px] top-[13px]" data-node-id="155:925" data-name="icon/mic">
+              <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconMic} />
+            </div>
+          </div>
+        </div>
+        <div className="absolute bg-[#1e1e1e] left-[318px] rounded-[32px] size-[64px] top-0" data-node-id="155:928" data-name="Button / Send">
+          <div className="absolute left-[20px] size-[24px] top-[20px]" data-node-id="155:929" data-name="icon/send">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconSend} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

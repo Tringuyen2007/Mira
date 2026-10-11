@@ -1,0 +1,278 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/f5fc212c-2505-45ce-a10e-886dc61b78c8";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgOrbitRing = `${assetPathPrefix}/7103f.svg`;
+const imgThumbDrag = `${assetPathPrefix}/c6897.svg`;
+const imgIconMic = `${assetPathPrefix}/df1c7.svg`;
+const imgCheckboxChecked = `${assetPathPrefix}/a4c4c.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiTextLinkProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiTextLink({ className, label = "I don't have a code" }: IPhoneHiFiTextLinkProps) {
+  return (
+    <div className={className || "content-stretch flex h-[56px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="103:172" data-name="iPhone Hi-Fi / Text Link">
+      <p className="[text-underline-position:from-font] [word-break:break-word] decoration-from-font decoration-solid font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/accent-text-small,#0b5a47)] underline whitespace-nowrap" data-node-id="103:173">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function SessionSummary3HowItFeltSend() {
+  return (
+    <div className="relative size-full" data-node-id="130:510" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 1370' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 68.5 215 685)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Session Summary / 3 How It Felt & Send">
+      <div className="absolute left-[230px] size-[420px] top-[-190px]" data-node-id="130:511" data-name="Orbit ring">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute h-[64px] left-0 top-[54px] w-[430px]" step="Last step" />
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[6px] items-start left-[24px] not-italic overflow-clip top-[126px] whitespace-nowrap" data-node-id="130:530" data-name="Header">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px]" data-node-id="130:531">
+          YOUR CHECK-IN
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[44px] relative shrink-0 text-[36px] text-[transparent] to-[#391323]" data-node-id="130:532">
+          How did it feel?
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white h-[250px] left-[24px] overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[220px] w-[382px]" data-node-id="130:533" data-name="Pain Scale (slider)">
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[23px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[19px] whitespace-nowrap" data-node-id="130:534">
+          Pain
+        </p>
+        <div className="[word-break:break-word] absolute content-stretch flex gap-[14px] items-baseline left-[23px] not-italic overflow-clip text-[color:var(--color\/ink,#1c1a22)] top-[49px] whitespace-nowrap" data-node-id="130:535" data-name="Readout">
+          <p className="font-['Inter:Light'] font-light leading-[72px] relative shrink-0 text-[64px]" data-node-id="130:536">
+            3
+          </p>
+          <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[24px]" data-node-id="130:537">
+            Mild
+          </p>
+        </div>
+        <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] border border-[#857f8a] border-solid h-[12px] left-[39px] rounded-[6px] top-[139px] w-[302px]" data-node-id="130:538" data-name="Track" />
+        <div className="absolute bg-[#1e1e1e] h-[12px] left-[39px] rounded-[6px] top-[139px] w-[90.6px]" data-node-id="130:539" data-name="Track Fill" />
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[38px] top-[159px] w-[2px]" data-node-id="130:540" data-name="Tick 0" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[33.5px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:541">
+          0
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[68.2px] top-[159px] w-[2px]" data-node-id="130:542" data-name="Tick 1" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[65.2px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:543">
+          1
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[98.4px] top-[159px] w-[2px]" data-node-id="130:544" data-name="Tick 2" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[93.9px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:545">
+          2
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[128.6px] top-[159px] w-[2px]" data-node-id="130:546" data-name="Tick 3" />
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[123.6px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[171px] whitespace-nowrap" data-node-id="130:547">
+          3
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[158.8px] top-[159px] w-[2px]" data-node-id="130:548" data-name="Tick 4" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[154.3px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:549">
+          4
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[189px] top-[159px] w-[2px]" data-node-id="130:550" data-name="Tick 5" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[184.5px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:551">
+          5
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[219.2px] top-[159px] w-[2px]" data-node-id="130:552" data-name="Tick 6" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[214.7px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:553">
+          6
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[249.4px] top-[159px] w-[2px]" data-node-id="130:554" data-name="Tick 7" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[245.4px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:555">
+          7
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[279.6px] top-[159px] w-[2px]" data-node-id="130:556" data-name="Tick 8" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[275.1px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:557">
+          8
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[309.8px] top-[159px] w-[2px]" data-node-id="130:558" data-name="Tick 9" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[305.3px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:559">
+          9
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[340px] top-[159px] w-[2px]" data-node-id="130:560" data-name="Tick 10" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[331.5px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:561">
+          10
+        </p>
+        <div className="absolute left-[107.6px] size-[44px] top-[123px]" data-node-id="130:562" data-name="Thumb (drag)">
+          <div className="absolute inset-[-18.18%_-27.27%_-36.36%_-27.27%]">
+            <img alt="" className="block max-w-none size-full" src={imgThumbDrag} />
+          </div>
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[23px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[211px] whitespace-nowrap" data-node-id="130:563">
+          No pain
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[271px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[211px] whitespace-nowrap" data-node-id="130:564">
+          Worst pain
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white h-[250px] left-[24px] overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[490px] w-[382px]" data-node-id="130:565" data-name="Effort Scale (slider)">
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[23px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[19px] whitespace-nowrap" data-node-id="130:566">
+          Effort
+        </p>
+        <div className="[word-break:break-word] absolute content-stretch flex gap-[14px] items-baseline left-[23px] not-italic overflow-clip text-[color:var(--color\/ink,#1c1a22)] top-[49px] whitespace-nowrap" data-node-id="130:567" data-name="Readout">
+          <p className="font-['Inter:Light'] font-light leading-[72px] relative shrink-0 text-[64px]" data-node-id="130:568">
+            6
+          </p>
+          <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[24px]" data-node-id="130:569">
+            Moderate
+          </p>
+        </div>
+        <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] border border-[#857f8a] border-solid h-[12px] left-[39px] rounded-[6px] top-[139px] w-[302px]" data-node-id="130:570" data-name="Track" />
+        <div className="absolute bg-[#1e1e1e] h-[12px] left-[39px] rounded-[6px] top-[139px] w-[167.778px]" data-node-id="130:571" data-name="Track Fill" />
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[38px] top-[159px] w-[2px]" data-node-id="130:572" data-name="Tick 1" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[35px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:573">
+          1
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[71.56px] top-[159px] w-[2px]" data-node-id="130:574" data-name="Tick 2" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[67.06px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:575">
+          2
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[105.11px] top-[159px] w-[2px]" data-node-id="130:576" data-name="Tick 3" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[100.61px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:577">
+          3
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[138.67px] top-[159px] w-[2px]" data-node-id="130:578" data-name="Tick 4" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[134.17px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:579">
+          4
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[172.22px] top-[159px] w-[2px]" data-node-id="130:580" data-name="Tick 5" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[167.72px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:581">
+          5
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[205.78px] top-[159px] w-[2px]" data-node-id="130:582" data-name="Tick 6" />
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[200.78px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[171px] whitespace-nowrap" data-node-id="130:583">
+          6
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[239.33px] top-[159px] w-[2px]" data-node-id="130:584" data-name="Tick 7" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[235.33px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:585">
+          7
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[272.89px] top-[159px] w-[2px]" data-node-id="130:586" data-name="Tick 8" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[268.39px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:587">
+          8
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[306.44px] top-[159px] w-[2px]" data-node-id="130:588" data-name="Tick 9" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[301.94px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:589">
+          9
+        </p>
+        <div className="absolute bg-[rgba(94,90,99,0.6)] h-[8px] left-[340px] top-[159px] w-[2px]" data-node-id="130:590" data-name="Tick 10" />
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[331.5px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[171px] whitespace-nowrap" data-node-id="130:591">
+          10
+        </p>
+        <div className="absolute left-[184.78px] size-[44px] top-[123px]" data-node-id="130:592" data-name="Thumb (drag)">
+          <div className="absolute inset-[-18.18%_-27.27%_-36.36%_-27.27%]">
+            <img alt="" className="block max-w-none size-full" src={imgThumbDrag} />
+          </div>
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[23px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[211px] whitespace-nowrap" data-node-id="130:593">
+          Very easy
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[normal] left-[253px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[211px] whitespace-nowrap" data-node-id="130:594">
+          Hardest ever
+        </p>
+      </div>
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[24px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[768px] whitespace-nowrap" data-node-id="130:595">
+        Anything to tell Dr. Lee?
+      </p>
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid h-[112px] left-[24px] overflow-clip rounded-[20px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[804px] w-[382px]" data-node-id="130:596" data-name="Note">
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[28px] left-[20.5px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[16.5px] w-[338px]" data-node-id="130:597">
+          My knee felt stiff on the stairs this morning.
+        </p>
+      </div>
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex gap-[10px] h-[60px] items-center justify-center left-[24px] overflow-clip rounded-[999px] top-[928px] w-[382px]" data-node-id="130:598" data-name="Speak Instead">
+        <div className="relative shrink-0 size-[22px]" data-node-id="130:599" data-name="icon/mic">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconMic} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="130:603">
+          Speak instead
+        </p>
+      </div>
+      <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] content-stretch flex gap-[16px] items-start left-[24px] overflow-clip p-[20px] rounded-[24px] top-[1016px] w-[382px]" data-node-id="130:604" data-name="Consent">
+        <div className="relative shrink-0 size-[32px]" data-node-id="130:605" data-name="Checkbox (checked)">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgCheckboxChecked} />
+        </div>
+        <div className="[word-break:break-word] content-stretch flex flex-[1_0_0] flex-col gap-[6px] items-start min-w-px not-italic overflow-clip relative text-[color:var(--color\/ink,#1c1a22)]" data-node-id="130:607" data-name="Copy">
+          <p className="font-['Inter:Semi_Bold'] font-semibold leading-[normal] relative shrink-0 text-[20px] whitespace-nowrap" data-node-id="130:608">
+            Share with Dr. Lee
+          </p>
+          <p className="font-['Inter:Regular'] font-normal leading-[24px] min-w-full relative shrink-0 text-[17px] w-[min-content]" data-node-id="130:609">
+            Scores, reps, ratings, your note and the stick-figure replays. No video leaves your home.
+          </p>
+        </div>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[1186px] w-[366px]" label="Send to my therapist" />
+      <IPhoneHiFiTextLink className="absolute content-stretch flex h-[56px] items-center justify-center left-[32px] rounded-[999px] top-[1262px] w-[366px]" label="Not now" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[1336px] w-[430px]" />
+    </div>
+  );
+}

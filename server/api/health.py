@@ -52,6 +52,8 @@ async def health_data() -> dict[str, Any]:
     """Latest Data Guard result per check (from data_checks) and an overall ok | failing | unavailable."""
     state = get_state()
     out: dict[str, Any] = {"status": "unavailable", "checks": [], "last_run": None}
+    if state.devices is not None:
+        out["lcd"] = state.devices.status()
     if state.scheduler is not None:
         out["scheduler"] = state.scheduler.stats().get("data_guard")
     if state.db is None:

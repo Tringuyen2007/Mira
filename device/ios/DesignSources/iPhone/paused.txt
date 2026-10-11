@@ -1,0 +1,140 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/ca9d57e6-d147-4dec-b254-f52c217c73c2";
+const imgColor = `${assetPathPrefix}/a8b70.png`;
+const imgColor1 = `${assetPathPrefix}/a121c.png`;
+const imgLiveDot = `${assetPathPrefix}/eabae.svg`;
+const imgGlow = `${assetPathPrefix}/13b9b.svg`;
+const imgRing200 = `${assetPathPrefix}/92dd8.svg`;
+const imgRing280 = `${assetPathPrefix}/f3d55.svg`;
+const imgRing400 = `${assetPathPrefix}/6b95f.svg`;
+const imgHalo = `${assetPathPrefix}/ec40f.svg`;
+const imgInnerRing = `${assetPathPrefix}/09dd1.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiTextLinkProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiTextLink({ className, label = "I don't have a code" }: IPhoneHiFiTextLinkProps) {
+  return (
+    <div className={className || "content-stretch flex h-[56px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="103:172" data-name="iPhone Hi-Fi / Text Link">
+      <p className="[text-underline-position:from-font] [word-break:break-word] decoration-from-font decoration-solid font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/accent-text-small,#0b5a47)] underline whitespace-nowrap" data-node-id="103:173">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function LiveSession2Paused() {
+  return (
+    <div className="relative size-full" data-node-id="123:521" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Live Session / 2 Paused">
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[24px] not-italic text-[18px] text-[color:var(--color\/ink,#1c1a22)] top-[72px] whitespace-nowrap" data-node-id="123:533">
+        Mini squats · Set 2 of 3
+      </p>
+      <div className="absolute bg-[var(--color\/surface,white)] content-stretch flex gap-[8px] items-center left-[249px] overflow-clip pl-[12px] pr-[14px] py-[8px] rounded-[999px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[64px]" data-node-id="123:534" data-name="Live with Mira">
+        <div className="relative shrink-0 size-[10px]" data-node-id="123:535" data-name="Live dot">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLiveDot} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="123:536">
+          Live with Mira
+        </p>
+      </div>
+      <div className="absolute left-[65px] size-[300px] top-[118px]" data-node-id="123:537" data-name="Glow">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgGlow} />
+      </div>
+      <div className="absolute left-[115px] size-[200px] top-[168px]" data-node-id="123:538" data-name="Ring 200">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing200} />
+      </div>
+      <div className="absolute left-[75px] size-[280px] top-[128px]" data-node-id="123:539" data-name="Ring 280">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing280} />
+      </div>
+      <div className="absolute left-[15px] size-[400px] top-[68px]" data-node-id="123:540" data-name="Ring 400">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing400} />
+      </div>
+      <div className="absolute h-[224px] left-[114.2px] top-[156px] w-[201.6px]" data-node-id="123:541" data-name="Mira · Sleeping">
+        <div className="absolute left-[-5.6px] size-[212.8px] top-0" data-node-id="I123:541;38:291" data-name="Halo">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHalo} />
+        </div>
+        <div className="absolute left-[8.4px] size-[184.8px] top-[14px]" data-node-id="I123:541;38:292" data-name="Inner ring">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgInnerRing} />
+        </div>
+        <div className="absolute contents left-[11.76px] top-[12.32px]" data-node-id="I123:541;75:382" data-name="Mascot · sleeping">
+          <div className="absolute h-[201.04px] left-[6.59px] mask-alpha mask-intersect mask-no-clip mask-no-repeat mask-size-[318px_359px] top-[6.9px] w-[178.08px]" data-node-id="I123:541;75:380" style={{ maskImage: `url("${imgColor}")` }} data-name="Color">
+            <img alt="" className="absolute inset-0 max-w-none object-contain pointer-events-none size-full" src={imgColor1} />
+          </div>
+        </div>
+      </div>
+      <div className="absolute bg-[#1e1e1e] content-stretch flex items-center justify-center left-[285px] overflow-clip rounded-[26px] size-[52px] top-[328px]" data-node-id="123:547" data-name="Pause badge">
+        <div className="overflow-clip relative shrink-0 size-[24px]" data-node-id="123:548" data-name="Frame">
+          <div className="absolute bg-[var(--color\/surface,white)] h-[18px] left-[5px] rounded-[2px] top-[3px] w-[5px]" data-node-id="123:549" data-name="Rectangle" />
+          <div className="absolute bg-[var(--color\/surface,white)] h-[18px] left-[14px] rounded-[2px] top-[3px] w-[5px]" data-node-id="123:550" data-name="Rectangle" />
+        </div>
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[8px] items-center left-[40px] not-italic overflow-clip top-[428px] whitespace-nowrap" data-node-id="123:551" data-name="Paused text">
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[54px] relative shrink-0 text-[46px] text-[transparent] to-[#391323]" data-node-id="123:552">
+          Paused
+        </p>
+        <p className="font-['Inter:Regular'] font-normal leading-[normal] relative shrink-0 text-[20px] text-[color:var(--color\/ink-soft,#5e5a63)] text-center" data-node-id="123:553">
+          Take your time. Mira will wait for you.
+        </p>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[598px] w-[366px]" label="Resume" />
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[674px] w-[366px]" data-node-id="123:556" data-name="iPhone Hi-Fi / Button Secondary">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="I123:556;111:228">
+          Skip this exercise
+        </p>
+      </div>
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[750px] w-[366px]" data-node-id="123:558" data-name="iPhone Hi-Fi / Button Secondary">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="I123:558;111:228">
+          End session
+        </p>
+      </div>
+      <IPhoneHiFiTextLink className="absolute content-stretch flex h-[56px] items-center justify-center left-[32px] rounded-[999px] top-[826px] w-[366px]" label="Report pain" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

@@ -1,0 +1,8 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Lock">
+<rect width="52" height="52" rx="26" fill="#E2ECF6"/>
+<rect id="Lock body" x="16" y="24" width="20" height="15" rx="4" fill="#0F6E56"/>
+<path id="Shackle" d="M20 24V21C20 17.69 22.24 15 26 15C29.76 15 32 17.69 32 21V24" stroke="#0F6E56" stroke-width="2.5" stroke-linecap="round"/>
+<rect id="Keyhole" x="24.5" y="28.5" width="3" height="6" rx="1.5" fill="white"/>
+</g>
+</svg>

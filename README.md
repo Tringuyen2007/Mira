@@ -5,7 +5,15 @@ the engine bridge (mock / replay / live vision), the safety path (fall check-in,
 and the REST API. This README is everything a new developer needs; the team plan (TRI.md, kept by Tri) has the
 design background, but no setup step depends on it.
 
+Open `device/Mira.xcworkspace` in Xcode to see the iPhone and Watch projects
+together. Choose **Mira** for the patient app, **MiraWatchPreview** for the
+interactive Watch mockup on iPhone, or **MiraWatchMock** for watchOS.
+
 iOS networking setup and tests: [Networking guide](device/ios/NETWORKING.md).
+
+Onboarding flow, remaining integrations, and checks: [Onboarding guide](device/ios/ONBOARDING.md).
+
+Interactive Watch concept and preview instructions: [Watch mockup](device/watch/README.md).
 
 ## Repo layout
 
@@ -15,6 +23,7 @@ iOS networking setup and tests: [Networking guide](device/ios/NETWORKING.md).
 | `vision/` | Eric | vision engine (camera, pose, reps, falls) — plugs in via the frame contract below |
 | `device/ios/` | Josie | iOS app (Xcode project) — networking contract in `device/ios/NETWORKING.md` |
 | `device/dashboard/` | Victoria | therapist dashboard (served at `/dashboard` when present) |
+| `device/kiosk/` | Victoria / Tri | Mira LCD kiosk page (served at `/device`) |
 | `data/` | shared | cues, audio, recordings (recordings and AI cache are git-ignored) |
 | `tools/` | shared | dev utilities (seeders, mocks, scripts) |
 
@@ -45,6 +54,9 @@ make db-local                                  # optional: local TimescaleDB wit
 `MIRA_API_TOKEN` is required: the server **refuses to start** without one, with the `.env.example`
 placeholder, or with a token shorter than 24 characters (anyone on the hall Wi-Fi could otherwise drive the API).
 The server starts without any external keys and without a database (`MIRA_SOURCE=mock` is the default).
+`MIRA_DEVICE_TOKEN` is optional: set it (same rules as `MIRA_API_TOKEN`, but it must differ from it) to let the
+Mira LCD kiosk connect with a least-privilege token instead of the full API one — see
+[device/kiosk/README.md](device/kiosk/README.md).
 Use `make ... VENV=/path/to/venv` if your virtual environment lives elsewhere.
 
 The tests never read your `.env` (`server/tests/conftest.py` sets `MIRA_SKIP_DOTENV=1` before importing the
@@ -148,6 +160,14 @@ make test
 
 Always exactly **one** server process (`--workers 1`): live state is in memory.
 
+### Deploy (Vultr)
+
+The demo server runs on a Vultr box as the systemd unit `mira` (`/opt/mira/app`, port 8000, plain HTTP).
+`tools/deploy_vultr.sh [ref]` (default `origin/main`) ships the tracked files of that ref with rsync, keeps the
+box's own `.env`, `.venv`, logs and generated data, installs requirements, creates a `MIRA_DEVICE_TOKEN` on first
+deploy, restarts and checks `/health`. Override with `MIRA_HOST`, `MIRA_SSH_USER`, `MIRA_SSH_KEY`.
+Plain HTTP sends both tokens in clear text; put Caddy or a tunnel with TLS in front before real patient use.
+
 ## Troubleshooting
 
 - **`RuntimeError: MIRA_API_TOKEN ...; refusing to start`**: set a generated token (Quick start).
@@ -241,6 +261,21 @@ knee flexion. The database rollup (`max_knee`, `p95_knee` = deepest bend), the s
 `main_angle` (the deeper knee) and the mock source all use this convention, so the vision engine must emit it too.
 See `server/samples/engine_frame.json`.
 Logs are JSON lines in `logs/server.log` (phone numbers masked, secrets redacted).
+
+### What the LCD needs from the engine
+
+The Mira LCD kiosk (`device/kiosk/`, see its README) renders from the same event/frame stream as the iOS app —
+no new engine API — but it depends on these specifically:
+
+- `arrived`, then `awaiting_gesture` a few seconds later, before each session's first set: the gap is what
+  keeps the greeting on screen, and `awaiting_gesture` makes the kiosk show "give me a thumbs up" instead of
+  jumping straight to a countdown. (The mock holds the greeting `MOCK_GREETING_HOLD_S` = 3 s.) Put
+  `reps_target`, `sets_target` and `exercise_id` on `arrived` so the greeting can show the plan ("3 sets · 10 reps").
+- `gesture {name}` on a thumbs-up or raised hand.
+- `countdown {n, set, reps_target, sets_target, exercise_id}`.
+- `rep {index, set, quality}`.
+- frames with `load_l_pct` (drives the L/R balance bar) and `hr` when available (drives the heart-rate chip;
+  hidden when null).
 
 ## Engine reverse channel
 
