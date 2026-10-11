@@ -157,6 +157,45 @@ charts, `coach_adapt.detail`, command payloads, unknown future events):
 `GET /notifications/count`, `POST /copilot/ask {question, patient_id?}`.
 History routes need the database and return 503 with `DB_DISABLED=1`.
 
+## Mira LCD
+
+A separate device (`device/kiosk/`, a Raspberry Pi running Chromium) connects to `/ws/live` and `/ws/events`
+with its own, separately-scoped `MIRA_DEVICE_TOKEN` — **not** the app's `MIRA_API_TOKEN`, and not something
+the app sends or reads. The device token only unlocks those two streams (401 on every REST route, 1008 on
+`/ws/pose` and `/ws/notifications`), and on `/ws/events` it may only send `device_health` and only receives an
+allow-listed slice of event types (no proposals, `coach_adapt`, or notifications).
+
+When at least one LCD is connected and reporting health, the server emits on `/ws/events`:
+
+```json
+{
+  "type": "device_status",
+  "device": "lcd",
+  "online": true,
+  "t": 1791662260.102,
+  "last_health": {
+    "t": 1791662260.101,
+    "app": "lcd",
+    "screen": "1024x600",
+    "version": "1"
+  }
+}
+```
+
+(`online` flips to `false`, `last_health` keeps the last value, on disconnect or once health goes stale.) The
+app could use this to show "Mira's screen is offline" — e.g. a small indicator on Home/Live that appears only
+after the first `device_status{online:false}` (so a household with no LCD never sees it) and clears on the
+next `online:true`. Sample: `server/samples/ws_events_device_status.json`.
+
+`/ws/live` gained four additive, nullable fields (existing `LiveMessage` decoding is unaffected by new keys):
+
+| Field | Type | What |
+|---|---|---|
+| `caption` | `{text: string, source: string, t: number} \| null` | the latest thing Mira said (greeting/cue/summary text); late joiners get it repainted immediately |
+| `first_name` | `string \| null` | the current session's patient first name |
+| `exercise_name` | `string \| null` | display name for `exercise_id` (e.g. "Mini squats" for `squat`) |
+| `incident` | `boolean` | true while a fall/check-in/open alert is active, until it's resolved or closed |
+
 ## Open items
 
 - Session commands (`start/pause/skip/stop`) are forwarded to the engine over the
