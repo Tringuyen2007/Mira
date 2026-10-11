@@ -16,6 +16,7 @@ from server.api.scope import patient_for as _patient_for
 from server.db import queries, writes
 from server.db.pool import Database
 from server.state import get_state
+from server.watch_prefs import merge_watch_prefs
 
 router = APIRouter()
 
@@ -68,12 +69,18 @@ async def put_me(body: MeUpdate, principal: security.Principal = Depends(securit
     p, c = body.profile, body.emergency_contact
     if principal.locked_demo:  # a demo-code phone may not rewrite who Retell dials (other fields still apply)
         p, c = None, None
+    device_prefs = body.device_prefs
+    if device_prefs is not None:
+        # The iPhone Settings screen sends device_prefs without the watch's watch_* keys; keep those as stored
+        # so an iPhone-originated save doesn't wipe the watch's settings (iPhone behaviour is unchanged).
+        existing = await queries.patient_me_row(db, pid)
+        device_prefs = merge_watch_prefs(existing["device_prefs"] if existing else None, device_prefs)
     ok = await writes.update_patient_profile(
         db, pid, name=p.name if p else None, height_cm=p.height_cm if p else None, mass_kg=p.mass_kg if p else None,
         affected_side=p.affected_side if p else None, condition=p.condition if p else None,
         emergency_contact_name=c.name if c else None, emergency_contact_phone=c.phone if c else None,
         emergency_contact_relationship=c.relationship if c else None, alert_therapist=body.alert_therapist,
-        share_by_default=body.share_by_default, device_prefs=body.device_prefs)
+        share_by_default=body.share_by_default, device_prefs=device_prefs)
     if not ok:
         raise HTTPException(status_code=503, detail="database unavailable: could not save")
     me = await build_me(db, pid)

@@ -27,3 +27,15 @@ def watch_prefs(device_prefs: dict[str, Any] | None) -> dict[str, Any]:
 def watch_arm(device_prefs: dict[str, Any] | None) -> str:
     """"left" or "right": the arm the watch is worn on."""
     return str(watch_prefs(device_prefs)["watch_arm"])
+
+
+def merge_watch_prefs(stored: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    """`PUT /me` replaces `device_prefs` wholesale, but the iPhone Settings screen sends the whole object
+    without the watch's `watch_*` keys. Carry over any `watch_*` key missing from `incoming` so the watch's
+    settings survive an iPhone-originated save; every other key keeps today's replace semantics."""
+    out = dict(incoming)
+    old = stored if isinstance(stored, dict) else {}
+    for key in WATCH_PREF_DEFAULTS:
+        if key not in out and key in old:
+            out[key] = old[key]
+    return out

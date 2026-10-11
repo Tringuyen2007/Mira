@@ -48,6 +48,11 @@ def _reset_maya(dsn: str) -> Iterator[None]:
     _sql(dsn, "UPDATE patients SET hr_limit = 130, hr_limit_set_by = NULL, tremor_monitoring = false, "
               "device_prefs = '{}' WHERE id = 'maya'")
     _sql(dsn, "DELETE FROM tremor_daily")
+    # Undo any prescription another test in this module added (e.g. forearm_rotation), back to the seeded squat.
+    _sql(dsn, "DELETE FROM prescriptions WHERE patient_id = 'maya' AND exercise_id != 'squat'")
+    # ...and any reps another test logged against a (non-boot) session, so done_sets starts at 0 again.
+    _sql(dsn, "DELETE FROM reps WHERE session_id IN (SELECT id FROM sessions WHERE patient_id = 'maya' "
+              "AND exercise_id != 'squat')")
     yield
 
 
@@ -107,6 +112,33 @@ def test_get_me_watch_prefs_and_watch_plan_items(client: TestClient, phone: dict
     turns = next(p for p in body["plan"] if p["exercise_id"] == "forearm_rotation")
     assert turns == {"exercise_id": "forearm_rotation", "name": "Forearm turns", "sets": 3, "reps": 10,
                      "done_sets": 2, "watch": True, "goal_deg": 75.0}
+
+
+def test_get_me_watch_appends_catalog_watch_exercises_under_mock_wrist(
+        make_client: Callable[..., TestClient], dsn: str) -> None:
+    """MOCK_WRIST=1 (no watch): Maya's only prescription is the default squat, so the watch's Rotation list
+    would otherwise be empty. GET /me/watch should append the catalog's watch exercises (defaults for
+    sets/reps/goal_deg, done_sets from today's rows) so the demo has something to show."""
+    client = make_client(TIGER_DSN=dsn, COPILOT_DSN=ro_dsn(dsn), MOCK_WRIST="1")
+    r = client.post("/pair", json={"code": "K7P4M2", "profile": PROFILE, "emergency_contact": CONTACT})
+    assert r.status_code == 200
+    phone = {"Authorization": f"Bearer {r.json()['token']}"}
+    body = client.get("/me/watch", headers=phone).json()
+    plan_ids = {p["exercise_id"] for p in body["plan"]}
+    from server import exercises
+
+    assert exercises.WATCH_EXERCISES <= plan_ids  # every catalog watch exercise is present
+    forearm = next(p for p in body["plan"] if p["exercise_id"] == "forearm_rotation")
+    assert forearm == {"exercise_id": "forearm_rotation", "name": "Forearm turns", "sets": 3, "reps": 10,
+                       "done_sets": 0, "watch": True, "goal_deg": 80.0}
+    squat = next(p for p in body["plan"] if p["exercise_id"] == "squat")
+    assert squat["watch"] is False  # the prescribed, non-watch exercise is unaffected
+
+
+def test_get_me_watch_unchanged_without_mock_wrist_flag(client: TestClient, phone: dict[str, str]) -> None:
+    """Flag off: no catalog watch exercises are appended (today's behaviour, unprescribed watch exercise)."""
+    body = client.get("/me/watch", headers=phone).json()
+    assert {p["exercise_id"] for p in body["plan"]} == {"squat"}
 
 
 # ---- PATCH /patients/{id}/limits --------------------------------------------------------------------------------

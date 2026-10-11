@@ -14,6 +14,7 @@ from server import exercises, security
 from server.api import ratelimit
 from server.api.db_dep import require_db
 from server.api.scope import patient_for
+from server.config import cfg
 from server.db import queries, writes
 from server.db.pool import Database
 from server.state import get_state
@@ -39,11 +40,26 @@ def plan_item(rx: dict[str, Any], done: dict[str, int]) -> dict[str, Any]:
     return item
 
 
+def catalog_watch_item(exercise_id: str, done: dict[str, int]) -> dict[str, Any]:
+    """A catalog watch exercise with no prescription row (MOCK_WRIST=1 demo): catalog defaults for sets/reps/goal,
+    `done_sets` still from today's actual rows so a demo session already run shows progress."""
+    return {"exercise_id": exercise_id, "name": exercises.display_name(exercise_id),
+            "sets": exercises.CATALOG_DEFAULT_SETS, "reps": exercises.CATALOG_DEFAULT_REPS,
+            "done_sets": int(done.get(exercise_id, 0)), "watch": True,
+            "goal_deg": exercises.rotation_goal_deg(None)}
+
+
 async def build_me_watch(db: Database, patient_id: str) -> dict[str, Any]:
     row, rx, done = await asyncio.gather(queries.me_watch_row(db, patient_id), queries.prescriptions(db, patient_id),
                                          queries.sets_done_today(db, patient_id))
     if row is None:
         raise HTTPException(status_code=404, detail="patient not found")
+    plan = [plan_item(r, done) for r in rx]
+    if cfg.MOCK_WRIST:
+        # The demo (no watch) needs something for the watch's Rotation list even without a prescribed watch
+        # exercise: append the catalog's watch exercises not already prescribed. Flag off: unchanged.
+        prescribed = {r["exercise_id"] for r in rx}
+        plan += [catalog_watch_item(eid, done) for eid in sorted(exercises.WATCH_EXERCISES) if eid not in prescribed]
     return {
         "first_name": _first_name(row["name"]),
         "hr_limit": row["hr_limit"],
@@ -51,7 +67,7 @@ async def build_me_watch(db: Database, patient_id: str) -> dict[str, Any]:
         "therapist_name": row["therapist_name"],
         "tremor_monitoring": bool(row["tremor_monitoring"]),
         "prefs": watch_prefs(row["device_prefs"]),
-        "plan": [plan_item(r, done) for r in rx],
+        "plan": plan,
     }
 
 
