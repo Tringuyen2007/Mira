@@ -202,6 +202,78 @@ final class PatientStoreTests: XCTestCase {
         XCTAssertEqual(store.messages.count, 1)
     }
 
+    // I1: the server echoes a patient's own message back over /ws/events; `send`
+    // must not append it a second time once the echo has already landed.
+    func testSendSkipsAppendingAMessageAlreadyAddedByTheEcho() async throws {
+        let message = CareMessage(id: 5, sender: "patient", kind: "message", body: "hi", createdAt: "2026-10-01T00:00:00Z", readAt: nil)
+        StubProtocol.handler = { _ in
+            (200, #"{"message":{"id":5,"sender":"patient","kind":"message","body":"hi","created_at":"2026-10-01T00:00:00Z","read_at":null}}"#)
+        }
+        let api = APIClient(address: try ServerAddress("http://mira.test:8000"), token: "t", session: StubProtocol.session())
+        let store = PatientStore()
+        store.appendIncoming(MessageEvent(patientId: "maya", message: message))
+        try await store.send("hi", api: api)
+        XCTAssertEqual(store.messages.count, 1)
+    }
+
+    // I3: only `kind == "message"` events belong in the message list; note/
+    // visit_highlight events are handled elsewhere (refetching care), not appended.
+    func testAppendIncomingIgnoresNonMessageKinds() {
+        let store = PatientStore()
+        let note = CareMessage(id: 2, sender: "therapist", kind: "note", body: "great progress", createdAt: "2026-10-01T00:00:00Z", readAt: nil)
+        store.appendIncoming(MessageEvent(patientId: "maya", message: note))
+        XCTAssertTrue(store.messages.isEmpty)
+    }
+
+    // I3: refreshCare refetches /me/care directly (used when a note/visit_highlight
+    // event arrives), independent of refreshAll.
+    func testRefreshCareUpdatesCareFromTheServer() async throws {
+        StubProtocol.handler = { _ in
+            (200, #"{"therapist":null,"next_visit_at":null,"hr_limit":null,"emergency_contact":null,"alert_therapist":false,"notes":[],"highlights":[],"unread_messages":0}"#)
+        }
+        let api = APIClient(address: try ServerAddress("http://mira.test:8000"), token: "t", session: StubProtocol.session())
+        let store = PatientStore()
+        XCTAssertNil(store.care)
+        await store.refreshCare(api: api)
+        XCTAssertNotNil(store.care)
+    }
+
+    // I4: the Messages screen's refresh must mark messages read; any other refresh
+    // (e.g. refreshAll) must not, so the unread badge doesn't clear unseen.
+    func testRefreshMessagesPassesMarkReadThroughToTheQuery() async throws {
+        StubProtocol.requests = []
+        StubProtocol.handler = { _ in (200, #"{"messages":[]}"#) }
+        let api = APIClient(address: try ServerAddress("http://mira.test:8000"), token: "t", session: StubProtocol.session())
+        let store = PatientStore()
+        await store.refreshMessages(api: api, markRead: true)
+        let url = try XCTUnwrap(StubProtocol.requests.last?.url)
+        XCTAssertTrue(url.query?.contains("mark_read=true") ?? false)
+
+        await store.refreshMessages(api: api, markRead: false)
+        let url2 = try XCTUnwrap(StubProtocol.requests.last?.url)
+        XCTAssertTrue(url2.query?.contains("mark_read=false") ?? false)
+    }
+
+    // I7: Progress/Care need more than the server's unqualified default page of
+    // session history, so refreshAll asks for a bigger window explicitly.
+    func testRefreshAllRequestsSessionsWithALimitOfOneHundred() async throws {
+        StubProtocol.requests = []
+        StubProtocol.handler = { request in
+            if request.url?.path.contains("/sessions") == true { return (200, #"{"sessions":[]}"#) }
+            if request.url?.path.contains("/me/care") == true {
+                return (200, #"{"therapist":null,"next_visit_at":null,"hr_limit":null,"emergency_contact":null,"alert_therapist":false,"notes":[],"highlights":[],"unread_messages":0}"#)
+            }
+            if request.url?.path.contains("/me/messages") == true { return (200, #"{"messages":[]}"#) }
+            if request.url?.path.contains("/milestones") == true { return (200, #"{"milestones":[]}"#) }
+            return (200, "{}")
+        }
+        let api = APIClient(address: try ServerAddress("http://mira.test:8000"), token: "t", session: StubProtocol.session())
+        let store = PatientStore()
+        await store.refreshAll(api: api, patientID: "maya")
+        let sessionsRequest = try XCTUnwrap(StubProtocol.requests.first { $0.url?.path.contains("/sessions") == true })
+        XCTAssertTrue(sessionsRequest.url?.query?.contains("limit=100") ?? false)
+    }
+
     // MARK: WireDates
 
     func testWireDatesParsesWithAndWithoutFractionalSeconds() {

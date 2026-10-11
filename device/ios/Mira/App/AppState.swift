@@ -211,7 +211,18 @@ final class AppState {
         // Note: patientID's didSet isn't called from init, which is what we want.
         patientID = defaults.string(forKey: "patientID.v1")
         watch = WatchBridge(liveSession: liveSession)
-        liveSession.onMessageEvent = { [store] event in store.appendIncoming(event) }
+        liveSession.onMessageEvent = { [weak self, store] event in
+            if event.message.kind == "message" {
+                store.appendIncoming(event)
+            } else {
+                // note / visit_highlight: no message to append, just refetch /me/care
+                // so the Care screens pick up the change.
+                Task { [weak self] in
+                    guard let self, let api = self.apiClient else { return }
+                    await self.store.refreshCare(api: api)
+                }
+            }
+        }
         liveSession.onSessionSummary = { [weak self] _ in Task { await self?.refreshMe() } }
         #if canImport(WatchConnectivity)
         watch.activate()
@@ -341,6 +352,18 @@ final class AppState {
         defaults.removeObject(forKey: "miraPreferences.v1")
         defaults.removeObject(forKey: "hasCompletedOnboarding.v2")
         defaults.removeObject(forKey: "patientID.v1")
+        Self.deleteExportedDataFiles()
+    }
+
+    /// Removes any `mira-export-*.json` temp files left behind by Settings'
+    /// "Download my data" share sheet (I10): once on a confirmed delete, and the
+    /// caller also removes the one it just shared once that sheet is dismissed.
+    static func deleteExportedDataFiles() {
+        let directory = FileManager.default.temporaryDirectory
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in contents where url.lastPathComponent.hasPrefix("mira-export-") && url.pathExtension == "json" {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     /// Builds the /pair request from the onboarding draft and preferences.
@@ -422,11 +445,14 @@ final class AppState {
         }
     }
 
-    /// PUT /me (profile/emergency-contact/alert-therapist patch), then refreshes
-    /// `me` and `store.me` so the Care/Settings screens show the saved values.
+    /// PUT /me (profile/emergency-contact/alert-therapist patch). The PUT response is
+    /// itself a full `MeResponse`, so `me`/`store.me` are set directly from it instead
+    /// of triggering another `refreshAll` round trip.
     func updateMe(_ body: MeUpdate) async throws {
-        _ = try await requireClient().updateMe(body)
-        await refreshMe()
+        let updated = try await requireClient().updateMe(body)
+        me = updated
+        store.apply(me: updated)
+        configurationError = nil
     }
 
     /// POST /me/test-alert.

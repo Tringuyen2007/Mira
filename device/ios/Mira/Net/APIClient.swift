@@ -166,9 +166,11 @@ struct APIClient {
     // MARK: Care, messaging, milestones (Plan 3)
 
     func care() async throws -> CareResponse { try await request(path: ["me", "care"]) }
-    /// `sinceID`: only messages after this id (also marks unread therapist/mira messages as read).
-    func messages(sinceID: Int? = nil) async throws -> MessageList {
-        var query: [URLQueryItem] = []
+    /// `sinceID`: only messages after this id. `markRead` controls the server's
+    /// `?mark_read=` query param (default `false`): only the Messages screen passes
+    /// `true` to clear the therapist/mira unread badge; background refreshes must not.
+    func messages(sinceID: Int? = nil, markRead: Bool = false) async throws -> MessageList {
+        var query: [URLQueryItem] = [URLQueryItem(name: "mark_read", value: markRead ? "true" : "false")]
         if let sinceID { query.append(URLQueryItem(name: "since_id", value: String(sinceID))) }
         return try await request(path: ["me", "messages"], query: query)
     }

@@ -85,7 +85,6 @@ struct CareView: View {
         .task {
             guard !preview else { return }
             await state.refreshMe()
-            if let api = state.apiClient { await state.store.refreshMessages(api: api) }
         }
         .navigationTitle("").toolbar(.hidden, for: .navigationBar)
     }
@@ -102,6 +101,7 @@ struct CareDetailView: View {
     @Environment(AppState.self) private var state
     @State private var message = ""
     @State private var sending = false
+    @State private var sendError: String?
     @State private var speech = MiraSpeech()
 
     /// Highlight kinds that read as a warning (red border, alert color), matching
@@ -135,10 +135,18 @@ struct CareDetailView: View {
             }
         }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Text("Care").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft) } }
+            .task {
+                // The Messages screen marks therapist/mira messages read on appear
+                // (`mark_read=true`); every other refresh (CareView.task, refreshAll)
+                // leaves them unread so the badge doesn't clear before they're seen.
+                guard !preview, screen == .messages, let api = state.apiClient else { return }
+                await state.store.refreshMessages(api: api, markRead: true)
+            }
             .safeAreaInset(edge: .bottom) {
                 if screen == .messages {
                     VStack(alignment: .leading, spacing: 10) {
                         if preview { Text("Messaging isn’t connected yet. Your text stays on this screen.").font(MiraUI.font(14)).foregroundStyle(MiraUI.soft) }
+                        if let sendError { Text(sendError).font(MiraUI.font(14)).foregroundStyle(.red) }
                         HStack(spacing: 12) {
                             TextField("Write a message", text: $message, axis: .vertical).font(MiraUI.font(18)).lineLimit(1...4).padding(18).background(.white, in: Capsule()).overlay { Capsule().stroke(MiraUI.border) }
                             Button { send() } label: { FigmaIcon(screen: "messages", slot: "imgIconSend", size: 24) }.buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.large).disabled(preview || sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityLabel("Send message")
@@ -148,14 +156,23 @@ struct CareDetailView: View {
             }.onDisappear { speech.stop() }
     }
 
+    /// Clears the composer only once the send succeeds; on failure the text is
+    /// restored so the patient doesn't lose what they typed, and a one-line error
+    /// shows above the composer.
     private func send() {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending, let api = state.apiClient else { return }
         message = ""
         sending = true
+        sendError = nil
         Task {
             defer { sending = false }
-            try? await state.store.send(text, api: api)
+            do {
+                try await state.store.send(text, api: api)
+            } catch {
+                message = text
+                sendError = "Couldn't send. Try again."
+            }
         }
     }
 
@@ -317,6 +334,7 @@ struct EmergencyContactView: View {
     @State private var saved = false
     @State private var loaded = false
     @State private var testAlertNote: String?
+    @State private var syncRemoteTask: Task<Void, Never>?
     @FocusState private var focus: String?
     var body: some View {
         MiraPage(inset: onboarding ? 32 : 24, top: onboarding ? 28 : 12) {
@@ -392,13 +410,20 @@ struct EmergencyContactView: View {
     private var valid: Bool { var draft = state.onboarding; draft.emergencyContactName = name; draft.emergencyContactPhone = phone; return draft.contactIsValid }
     private func save() { state.onboarding.emergencyContactName = name; state.onboarding.emergencyContactPhone = phone; state.preferences.contactRelationship = relationship; state.preferences.alertTherapist = alertTherapist }
     /// Pushes the contact/alert choice to the server once paired, matching `save()`'s
-    /// local persistence; a best-effort background sync (errors stay silent here —
-    /// the next `refreshMe()` will reconcile).
+    /// local persistence; debounced 600 ms like `SettingsView.syncDevicePrefs` so
+    /// rapid edits (typing a name, flipping the toggle) don't fire a request per
+    /// keystroke. A best-effort background sync (errors stay silent here — the next
+    /// `refreshMe()` will reconcile).
     private func syncRemote() {
         guard state.isLinked, valid else { return }
+        syncRemoteTask?.cancel()
         let contact = PairContact(name: name, phone: phone, relationship: relationship.isEmpty ? nil : relationship)
         let body = MeUpdate(emergencyContact: contact, alertTherapist: alertTherapist)
-        Task { try? await state.updateMe(body) }
+        syncRemoteTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            try? await state.updateMe(body)
+        }
     }
     private func sendTestAlert() {
         Task {

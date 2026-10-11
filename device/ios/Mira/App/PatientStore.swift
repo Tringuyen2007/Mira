@@ -18,6 +18,12 @@ final class PatientStore {
     private(set) var lastError: String?
     private(set) var isRefreshing = false
 
+    /// Applies a fresh `/me` payload directly (e.g. the `PUT /me` response), without
+    /// a full `refreshAll` round trip.
+    func apply(me newMe: MeResponse) {
+        me = newMe
+    }
+
     /// Clears every cached record, e.g. after `DELETE /me` wipes this phone's copy
     /// of the patient's data.
     func reset() {
@@ -40,9 +46,9 @@ final class PatientStore {
 
         async let meResult: MeResponse? = try? await api.me()
         async let careResult: CareResponse? = try? await api.care()
-        async let sessionsResult: SessionList? = try? await api.sessions(patientID: patientID)
+        async let sessionsResult: SessionList? = try? await api.sessions(patientID: patientID, limit: 100)
         async let milestonesResult: MilestoneList? = try? await api.milestones(patientID: patientID)
-        async let messagesResult: MessageList? = try? await api.messages()
+        async let messagesResult: MessageList? = try? await api.messages(markRead: false)
 
         let (meValue, careValue, sessionsValue, milestonesValue, messagesValue) =
             await (meResult, careResult, sessionsResult, milestonesResult, messagesResult)
@@ -73,30 +79,50 @@ final class PatientStore {
         }
     }
 
-    /// Pulls any messages newer than the last one already held (therapist/mira
-    /// messages read as a side effect, matching `GET /me/messages`'s contract).
-    func refreshMessages(api: APIClient) async {
+    /// Pulls any messages newer than the last one already held. `markRead` decides
+    /// whether this call clears the therapist/mira unread badge server-side
+    /// (`GET /me/messages?mark_read=`): the Messages screen passes `true` on appear;
+    /// any other refresh (e.g. `refreshAll`) must pass `false` so a background
+    /// refresh doesn't silently mark messages read before the patient has seen them.
+    func refreshMessages(api: APIClient, markRead: Bool = true) async {
         do {
-            let result = try await api.messages(sinceID: messages.last?.id)
-            if !result.messages.isEmpty { messages.append(contentsOf: result.messages) }
+            let result = try await api.messages(sinceID: messages.last?.id, markRead: markRead)
+            appendNewMessages(result.messages)
         } catch {
             lastError = error.localizedDescription
         }
     }
 
+    /// Refetches just the care payload (therapist, notes, highlights) — used when a
+    /// `note`/`visit_highlight` event arrives over the socket, so those screens pick
+    /// up the change without a full `refreshAll`.
+    func refreshCare(api: APIClient) async {
+        if let result = try? await api.care() { care = result }
+    }
+
     /// Sends the patient's own message and appends the server's copy (with its
-    /// assigned id) to `messages`.
+    /// assigned id) to `messages`, unless the server already echoed it back over
+    /// `/ws/events` first (`appendIncoming` beat this call).
     func send(_ body: String, api: APIClient) async throws {
         let sent = try await api.sendMessage(body)
-        messages.append(sent.message)
+        appendNewMessages([sent.message])
     }
 
     /// A `message` event arriving on /ws/events (therapist/mira sent, or the
-    /// patient's own echoed back). Ignored if already present (REST already
+    /// patient's own echoed back). Only `kind == "message"` belongs in the message
+    /// list; `note`/`visit_highlight` events are handled by refetching care
+    /// (`refreshCare`), not appended here. Ignored if already present (REST already
     /// appended it, or the event arrived twice).
     func appendIncoming(_ event: MessageEvent) {
-        guard !messages.contains(where: { $0.id == event.message.id }) else { return }
-        messages.append(event.message)
+        guard event.message.kind == "message" else { return }
+        appendNewMessages([event.message])
+    }
+
+    private func appendNewMessages(_ incoming: [CareMessage]) {
+        let existingIDs = Set(messages.map(\.id))
+        let fresh = incoming.filter { !existingIDs.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        messages.append(contentsOf: fresh)
     }
 
     // MARK: - Pure helpers (unit-tested directly; no instance state)
@@ -192,9 +218,12 @@ final class PatientStore {
     }
 
     /// Percent of load on the affected leg, oldest first: `affected_load_pct` when the
-    /// server computed it, else `50 - avg_asymmetry` (asymmetry is signed toward the
-    /// unaffected side in the server's convention). `affectedSide` is accepted for the
-    /// caller's context even though both formulas are already side-aware upstream.
+    /// server computed it, else `50 - avg_asymmetry`. The server's `avg_asymmetry` is
+    /// unsigned (`abs(load_left - 50)`), so this fallback is only a neutral "how far
+    /// from even" figure, not a side-aware one — it can't say which leg is carrying
+    /// more. `affectedSide` is accepted for the caller's context (e.g. labeling the
+    /// fallback case neutrally, such as "uneven load" rather than "lighter leg") even
+    /// though it isn't used by either formula above.
     static func balanceSeries(_ progress: PatientProgress, affectedSide: String?) -> [(Date, Double)] {
         progress.series.compactMap { day -> (Date, Double)? in
             guard let date = WireDates.parse(day.day) else { return nil }

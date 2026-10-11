@@ -78,11 +78,19 @@ struct SettingsDetailView: View {
     @State private var speech = MiraSpeech()
     @State private var devicePrefsTask: Task<Void, Never>?
     @State private var exportFile: ExportFile?
+    /// Mirrors `exportFile.url` so the sheet's `onDismiss` can delete the temp file
+    /// even though SwiftUI nils the `item` binding before calling `onDismiss`.
+    @State private var exportFileURLPendingCleanup: URL?
     @State private var exportError: String?
     @State private var isExporting = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var deleteError: String?
+    /// Optimistic local mirror of `me.patient.shareByDefault` (I11): the toggle
+    /// flips immediately on tap, and reverts with an error line if the `PUT /me`
+    /// fails, instead of waiting on the round trip or silently snapping back.
+    @State private var shareOverride: Bool?
+    @State private var shareError: String?
     var body: some View {
         MiraPage {
             if screen == .delete { Image("MascotWorried").resizable().scaledToFit().frame(width: 120, height: 134).accessibilityHidden(true) }
@@ -91,7 +99,12 @@ struct SettingsDetailView: View {
         }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Text("Settings").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft) } }
             .sheet(isPresented: $showSetup) { NavigationStack { SetupView(initialStep: camerasOnly ? 1 : 0) } }
-            .sheet(item: $exportFile) { file in ActivityShareSheet(items: [file.url]) }
+            .sheet(item: $exportFile, onDismiss: {
+                // The share sheet is done with the temp file either way (shared,
+                // saved elsewhere, or cancelled); delete it so it doesn't linger.
+                if let url = exportFileURLPendingCleanup { try? FileManager.default.removeItem(at: url) }
+                exportFileURLPendingCleanup = nil
+            }) { file in ActivityShareSheet(items: [file.url]) }
             .alert("Delete everything?", isPresented: $showDeleteConfirm) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete everything", role: .destructive) { Task { await deleteEverything() } }
@@ -205,14 +218,28 @@ struct SettingsDetailView: View {
                 Text("Mira is designed to share skeleton numbers: angles, reps, balance and your ratings. Never your video.").font(MiraUI.font(18)).foregroundStyle(MiraUI.soft)
             }.padding(20).background(MiraUI.mist, in: RoundedRectangle(cornerRadius: 28))
             MiraCard { Toggle(isOn: preview ? .constant(true) : shareBinding) { VStack(alignment: .leading, spacing: 6) { Text(preview ? "Share with Dr. Lee" : "Share with your therapist").font(MiraUI.font(20, "SemiBold")); Text("After each session").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) } }.tint(MiraUI.accent).disabled(preview) }
+            if let shareError { Text(shareError).font(MiraUI.font(15)).foregroundStyle(.red) }
             MiraButton(title: isExporting ? "Preparing…" : "Download my data", secondary: true, icon: ("privacy", "imgIconDownload")) { Task { await downloadData() } }.disabled(isExporting)
             if let exportError { Text(exportError).font(MiraUI.font(15)).foregroundStyle(.red) }
             NavigationLink { SettingsDetailView(screen: .delete) } label: { HStack { FigmaIcon(screen: "privacy", slot: "imgIconTrash"); Text("Delete all my data").font(MiraUI.font(19, "SemiBold")) }.foregroundStyle(MiraUI.ink).frame(maxWidth: .infinity, minHeight: 64).background(.white, in: Capsule()).overlay { Capsule().stroke(MiraUI.border, lineWidth: 1.5) } }.buttonStyle(.plain)
         }
     }
     private var shareBinding: Binding<Bool> {
-        Binding(get: { state.me?.patient.shareByDefault ?? false },
-                set: { newValue in Task { try? await state.updateMe(MeUpdate(shareByDefault: newValue)) } })
+        Binding(get: { shareOverride ?? state.me?.patient.shareByDefault ?? false },
+                set: { newValue in
+                    let previous = shareOverride ?? state.me?.patient.shareByDefault ?? false
+                    shareOverride = newValue
+                    shareError = nil
+                    Task {
+                        do {
+                            try await state.updateMe(MeUpdate(shareByDefault: newValue))
+                            shareOverride = nil
+                        } catch {
+                            shareOverride = previous
+                            shareError = "Couldn't save. Try again."
+                        }
+                    }
+                })
     }
     private func downloadData() async {
         guard let client = state.apiClient else { exportError = APIError.invalidAddress.localizedDescription; return }
@@ -225,6 +252,7 @@ struct SettingsDetailView: View {
             formatter.dateFormat = "yyyy-MM-dd"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("mira-export-\(formatter.string(from: Date())).json")
             try data.write(to: url, options: .atomic)
+            exportFileURLPendingCleanup = url
             exportFile = ExportFile(url: url)
         } catch {
             exportError = error.localizedDescription
