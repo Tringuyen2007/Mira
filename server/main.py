@@ -22,6 +22,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from server.agents.haptics import HapticCoach
+from server.agents.recovery import RecoveryAgent
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
 from server.agents.session_analyst import SessionAnalyst
@@ -207,6 +208,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     state.coach = coach
     haptics = HapticCoach(hub)
     bridge.subscribe_events(haptics.on_event)
+    recovery = RecoveryAgent(hub, sessions)
+    bridge.subscribe_events(recovery.on_event)
 
     ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
@@ -245,6 +248,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await bridge.stop()
         await voice.close()
         await coach.close()
+        await recovery.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
         await analyst.close()
