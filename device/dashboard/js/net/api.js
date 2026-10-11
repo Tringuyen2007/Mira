@@ -1,0 +1,38 @@
+// REST client: bearer token, JSON, 10 s timeout. Errors are ApiError{status, detail}; status 0 = offline/timeout.
+
+export class ApiError extends Error {
+  constructor(status, detail) { super(`${status} ${detail}`); this.status = status; this.detail = detail; }
+}
+
+export function createApi({ token, fetchImpl = globalThis.fetch.bind(globalThis), base = "", timeoutMs = 10000,
+                            onUnauthorized } = {}) {
+  async function request(method, path, { query, body } = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(query || {})) if (v !== null && v !== undefined) qs.set(k, String(v));
+    const url = `${base}${path}${qs.size ? `?${qs}` : ""}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    let res;
+    try {
+      res = await fetchImpl(url, { method, headers, signal: ctrl.signal, cache: "no-store", credentials: "omit",
+        body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (e) {
+      throw new ApiError(0, e?.name === "AbortError" ? "timeout" : "offline");
+    } finally {
+      clearTimeout(timer);
+    }
+    let data = null;
+    try { data = await res.json(); } catch { /* empty or non-JSON body */ }
+    if (res.status === 401) onUnauthorized?.();
+    if (!res.ok) throw new ApiError(res.status, (data && typeof data.detail === "string") ? data.detail : res.statusText);
+    return data;
+  }
+  return {
+    get: (path, query) => request("GET", path, { query }),
+    post: (path, body) => request("POST", path, { body: body ?? {} }),
+    put: (path, body) => request("PUT", path, { body }),
+    patch: (path, body) => request("PATCH", path, { body }),
+  };
+}
