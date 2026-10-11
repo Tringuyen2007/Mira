@@ -8,7 +8,8 @@ from server.hub import POSE_FIELDS
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 SERVER_EVENTS = {"arrived", "greeting", "awaiting_gesture", "gesture", "countdown", "cue", "rep", "set_done",
                  "paused", "resumed", "fatigue", "fall", "fall_status", "alert", "haptic", "summary_ready",
-                 "proposal_created", "coach_adapt", "device_health", "device_status", "session_summary", "message"}
+                 "proposal_created", "coach_adapt", "device_health", "device_status", "session_summary", "message",
+                 "say"}
 CLIENT_EVENTS = {"command", "hr", "wrist", "watch_button", "device_health"}
 REST_SAMPLES_REQUIRED_KEYS = {
     "rest_get_me.json": {"patient", "therapist", "prescriptions", "lcd", "calibration"},

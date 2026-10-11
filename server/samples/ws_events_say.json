@@ -1,0 +1,8 @@
+{
+  "type": "say",
+  "session_id": "s_01",
+  "t": 1760000000.0,
+  "id": "count_3",
+  "text": "Three!",
+  "audio_url": "/audio/count_3_1.mp3"
+}
