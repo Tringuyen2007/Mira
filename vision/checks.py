@@ -53,6 +53,20 @@ def knee_angle_deg(joints: np.ndarray, side: str) -> float:
     return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
 
 
+def body_tilt_deg(seq: np.ndarray) -> float:
+    """Median tilt from vertical of the ankles-to-shoulders line in frames where both knees are straight
+    (> 165°). Someone standing straight is near 0°; a few degrees for everyone points at a tilted calibration."""
+    tilts = []
+    for J in seq:
+        if not np.isfinite(J[[11, 12, 23, 24, 25, 26, 27, 28]]).all():
+            continue
+        if min(knee_angle_deg(J, "l"), knee_angle_deg(J, "r")) <= 165:
+            continue
+        v = (J[11] + J[12]) / 2 - (J[27] + J[28]) / 2
+        tilts.append(float(np.degrees(np.arctan2(np.hypot(v[0], v[2]), v[1]))))
+    return float(np.median(tilts)) if tilts else float("nan")
+
+
 def estimate_height_cm(seq: np.ndarray) -> float:
     """Stature from the median eye height above the mat surface (y = 0)."""
     eye_y = np.nanmean(seq[:, list(EYES), 1], axis=1)
@@ -130,6 +144,9 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
     checks.append(_check("feet anchored while standing", anchored_fraction(outputs), "%", "≥ 80", lambda v: v >= 80))
     foot_h = foot_height_cm(seq) if seq is not None else None
     checks.append(_check("foot height above mat", foot_h, "cm", "-1 to 5", lambda v: -1 <= v <= 5))
+
+    tilt = body_tilt_deg(seq) if seq is not None else None
+    checks.append(_check("standing straight", tilt, "°", "≤ 3 (else run calib_refine)", lambda v: v <= 3))
 
     if height_cm is not None:
         est = estimate_height_cm(seq) if seq is not None else None

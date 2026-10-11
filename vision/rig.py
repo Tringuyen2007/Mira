@@ -19,6 +19,7 @@ import numpy as np
 from vision import constraints as C
 
 FRAMES_NEEDED = 40
+NECK_MAX_DEG = 10.0  # head direction from the shoulders, at most this far off the spine (body rules on)
 HOLD_S = 1.0  # both hips missing for up to this long: keep showing the last pose
 FORGET_S = 5.0  # nobody tracked for this long: assume someone new and measure again
 
@@ -42,6 +43,18 @@ def _ok(*pts) -> bool:
 def _unit(v, fallback=None):
     n = np.linalg.norm(v) if v is not None and np.isfinite(v).all() else 0.0
     return v / n if n > 1e-9 else fallback
+
+
+def _within_angle(v, axis, max_deg: float) -> np.ndarray:
+    """v turned toward axis so the angle between them is at most max_deg."""
+    c = float(np.clip(v @ axis, -1.0, 1.0))
+    if np.degrees(np.arccos(c)) <= max_deg:
+        return v
+    side = _unit(v - c * axis, None)
+    if side is None:
+        return axis
+    a = np.radians(max_deg)
+    return np.cos(a) * axis + np.sin(a) * side
 
 
 def two_bone_ik(root, target, pole, l1: float, l2: float, fallback_bend=None):
@@ -164,6 +177,8 @@ class BodyRig:
         ears = (J[7] + J[8]) / 2 if _ok(J[7], J[8]) else None
         if ears is not None and tracked_sh is not None and "neck" in L:
             neck = self._hold("neck_dir", _unit(ears - tracked_sh))
+            if self.constraints:  # MediaPipe's ears sit well in front of its shoulders: keep the head over the spine
+                neck = _within_angle(neck, spine, NECK_MAX_DEG)
             P[HEAD] = J[HEAD] + (sh_mid + neck * L["neck"] - ears)
         elif tracked_sh is not None:
             P[HEAD] = J[HEAD] + (sh_mid - tracked_sh)

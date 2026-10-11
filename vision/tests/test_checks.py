@@ -113,3 +113,19 @@ def test_pose_time_checks():
     assert checks["pose time A"].passed is True and checks["pose time B"].passed is False
     assert checks["pose time B"].value == 60.0 and checks["pose time B"].target == "≤ 45"
     assert "pose time A" not in {c.name for c in run_checks([], {}, MAT)}
+
+
+def test_standing_straight_check_catches_a_tilted_calibration():
+    from vision.checks import body_tilt_deg
+
+    X = standing_skeleton()
+    assert body_tilt_deg(np.stack([X] * 10)) < 1.0
+    a = np.radians(5.0)  # whole body tipped 5° toward +z (what a slightly tilted calibration does)
+    R = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+    tilted = X @ R.T
+    assert abs(body_tilt_deg(np.stack([tilted] * 10)) - 5.0) < 0.5
+    cams = _cams()
+    pipe = Pipeline(cams)
+    outs = [pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0) for k in range(20)]
+    c = {c.name: c for c in run_checks(outs, cams, MAT)}["standing straight"]
+    assert c.passed is True and c.unit == "°"

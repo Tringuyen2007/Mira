@@ -296,3 +296,21 @@ def test_both_hips_briefly_missing_holds_the_last_pose():
     P2 = rig.update(AFTER + DT, J, "3d")
     np.testing.assert_allclose(P2, P1)  # a brief gap keeps the body on screen
     assert rig.update(AFTER + DT + HOLD_S + 0.01, J, "3d") is None  # a long one doesn't
+
+
+def test_neck_stays_close_to_the_spine():
+    from vision.rig import NECK_MAX_DEG
+
+    X = standing_skeleton()
+    J = X.copy()
+    J[0:11] += [0.0, 0.0, 0.10]  # MediaPipe puts the ears ~26° in front of the shoulders
+    for constraints, limit in ((True, NECK_MAX_DEG + 1e-6), (False, 90.0)):
+        rig = BodyRig(constraints=constraints)
+        _measure(rig, X)
+        P = rig.update(AFTER, J, "3d")
+        spine = (P[11] + P[12]) / 2 - (P[23] + P[24]) / 2
+        neck = (P[7] + P[8]) / 2 - (P[11] + P[12]) / 2
+        angle = np.degrees(np.arccos(spine @ neck / np.linalg.norm(spine) / np.linalg.norm(neck)))
+        assert angle <= limit
+        if not constraints:
+            assert angle > 20  # the plain rig follows MediaPipe's forward ears
