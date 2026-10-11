@@ -70,12 +70,26 @@ final class SessionFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testLiveSessionStoreTracksSessionSummaryAndCurrentSessionID() throws {
+    func testLiveSessionStoreTracksSessionSummaryWithoutStealingCurrentSessionID() throws {
+        // session_summary arrives late, for the session that just ended; it must not
+        // clobber currentSessionID, which may already belong to the next session.
         let store = LiveSessionStore()
+        store.eventSocket.onMessage?(try fixture("ws_events_arrived"))
+        XCTAssertEqual(store.currentSessionID, "219b6491-aff5-461e-9e5e-39ef73bde60f")
         store.eventSocket.onMessage?(try fixture("ws_events_session_summary"))
         XCTAssertNotNil(store.sessionSummary)
-        XCTAssertEqual(store.currentSessionID, "54bdaf2b-4097-483e-b429-998d6a1af011")
+        XCTAssertEqual(store.currentSessionID, "219b6491-aff5-461e-9e5e-39ef73bde60f")
         XCTAssertEqual(store.cue, store.sessionSummary?.spoken)
+    }
+
+    @MainActor
+    func testArrivedResetsCurrentSessionIDToTheNewSessionBoundary() throws {
+        let store = LiveSessionStore()
+        store.eventSocket.onMessage?(try fixture("ws_events_session_summary"))
+        XCTAssertNil(store.currentSessionID, "session_summary alone must not set currentSessionID")
+        store.eventSocket.onMessage?(try fixture("ws_events_arrived"))
+        XCTAssertEqual(store.currentSessionID, "219b6491-aff5-461e-9e5e-39ef73bde60f")
+        XCTAssertNil(store.sessionSummary, "arrived clears the previous session's summary")
     }
 
     @MainActor
@@ -93,5 +107,20 @@ final class SessionFlowTests: XCTestCase {
         store.connect(to: try ServerAddress("http://mira.local:8000"), token: nil, reset: true)
         XCTAssertNil(store.sessionSummary)
         XCTAssertNil(store.currentSessionID)
+    }
+
+    @MainActor
+    func testServerURLOnlyAcceptsAudioPaths() {
+        let state = AppState(defaults: UserDefaults(suiteName: "SessionFlowTests-\(UUID().uuidString)")!,
+                              tokenStore: MemoryTokenStore())
+        _ = state.connect(address: "http://mira.test:8000")
+        XCTAssertEqual(state.serverURL(for: "/audio/a1.mp3")?.absoluteString, "http://mira.test:8000/audio/a1.mp3")
+        XCTAssertEqual(state.serverURL(for: "/audio/hello_world-2.mp3")?.absoluteString,
+                        "http://mira.test:8000/audio/hello_world-2.mp3")
+        XCTAssertNil(state.serverURL(for: "https://evil.example/audio/a1.mp3"), "an absolute URL must be rejected")
+        XCTAssertNil(state.serverURL(for: "/audio/../../etc/passwd"), "path traversal must be rejected")
+        XCTAssertNil(state.serverURL(for: "/audio/a1.wav"), "only .mp3 is accepted")
+        XCTAssertNil(state.serverURL(for: "/notaudio/a1.mp3"), "only /audio/ is accepted")
+        XCTAssertNil(state.serverURL(for: "not a url at all"))
     }
 }

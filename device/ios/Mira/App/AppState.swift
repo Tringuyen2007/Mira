@@ -348,9 +348,14 @@ final class AppState {
         _ = try await requireClient().shareSession(id: id)
     }
 
-    /// An absolute URL for a server-relative path such as `/audio/xyz.mp3`.
+    /// Only a server-relative `/audio/<name>.mp3` path is accepted; anything else (an
+    /// absolute URL, a path outside /audio/, unexpected characters) returns nil so the
+    /// caller falls back to TTS instead of opening an arbitrary or malformed URL.
+    private static let audioPathPattern = try! NSRegularExpression(pattern: #"^/audio/[A-Za-z0-9._-]+\.mp3$"#)
+
     func serverURL(for path: String) -> URL? {
-        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
+        let range = NSRange(path.startIndex..<path.endIndex, in: path)
+        guard Self.audioPathPattern.firstMatch(in: path, range: range) != nil else { return nil }
         guard let address = try? ServerAddress(serverAddress) else { return nil }
         return URL(string: path, relativeTo: address.url)?.absoluteURL
     }

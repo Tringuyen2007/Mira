@@ -204,19 +204,25 @@ final class LiveSessionStore {
         }
         eventSocket.onMessage = { [weak self] data in
             guard !WireJSON.isPing(data) else { return }
-            if let stamp = try? WireJSON.decoder().decode(SessionStamp.self, from: data), let sessionId = stamp.sessionId {
-                self?.currentSessionID = sessionId
-            }
             self?.decode(data, as: SocketEvent.self) { event in
                 self?.latestEvent = event
+                if case .sessionSummary(let summary) = event {
+                    // session_summary arrives late, for the session that just ended, after the
+                    // next session's events may already have stamped currentSessionID — never
+                    // let it clobber that boundary.
+                    self?.sessionSummary = summary
+                    self?.cue = summary.spoken
+                    return
+                }
+                // Every other /ws/events message carries the current session's stamp.
+                if let stamp = try? WireJSON.decoder().decode(SessionStamp.self, from: data), let sessionId = stamp.sessionId {
+                    self?.currentSessionID = sessionId
+                }
                 switch event {
                 case .arrived: self?.sessionSummary = nil
                 case .cue(let cue): self?.cue = cue.text
                 case .greeting(let greeting): self?.cue = greeting.text
                 case .summaryReady(let summary): self?.cue = summary.spoken
-                case .sessionSummary(let summary):
-                    self?.sessionSummary = summary
-                    self?.cue = summary.spoken
                 case .deviceStatus(let status):
                     if status.device == nil || status.device == "lcd" { self?.lcdOnline = status.online }
                 case .alert(let alert):

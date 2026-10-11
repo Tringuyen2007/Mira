@@ -129,18 +129,24 @@ struct HomeView: View {
             }
         }
     }
+    /// Always opens an ended session — /patients/{id}/sessions already filters to ended
+    /// ones — and never the one currently in progress, even if that live session's id is
+    /// known locally.
     private func openSummary() {
-        if let sid = state.liveSession.currentSessionID ?? state.startedSessionID {
-            flow = .summary(sessionID: sid); return
-        }
         guard state.isLinked else { actionMessage = "No sessions yet"; return }
         guard !isWorking else { return }
         isWorking = true; actionMessage = nil
+        let liveSessionRunning = state.startedSessionID != nil || state.liveSession.live != nil
         Task {
             defer { isWorking = false }
             do {
-                if let sid = try await state.latestEndedSessionID() { flow = .summary(sessionID: sid) }
-                else { actionMessage = "No sessions yet" }
+                if let sid = try await state.latestEndedSessionID() {
+                    flow = .summary(sessionID: sid)
+                } else if liveSessionRunning {
+                    actionMessage = "Your session is still running — finish it to see the summary."
+                } else {
+                    actionMessage = "No sessions yet"
+                }
             } catch {
                 actionMessage = "Mira couldn’t load your sessions. \(error.localizedDescription)"
             }

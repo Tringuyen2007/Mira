@@ -15,7 +15,10 @@ struct LiveView: View {
         _screen = State(initialValue: initialScreen)
         self.onEnded = onEnded
     }
-    private var sessionID: String? { state.liveSession.currentSessionID ?? state.startedSessionID }
+    // startedSessionID is this phone's own REST-started session and is cleared only after
+    // a successful stop; prefer it so a late session_summary (or a relaunch of the socket
+    // for the next session) can never substitute the wrong id for "end this session".
+    private var sessionID: String? { state.startedSessionID ?? state.liveSession.currentSessionID }
     private var exerciseTitle: String {
         let live = state.liveSession.live
         return live?.exerciseName ?? live?.exerciseId ?? state.me?.prescriptions.first?.exerciseName ?? "Live session"
