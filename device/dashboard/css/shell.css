@@ -1,0 +1,606 @@
+/* App shell: sidebar + main grid (Figma components frame 203:109), and the main-column + 280px rail layout
+   used by screens that pair a list/detail view with a side panel. Designed at 1440x1024, must work from
+   1280px wide; the rail collapses to one column below that. */
+
+#app {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100vh;
+}
+
+/* Signed out / still booting: #sidebar and #main are hidden, so #signin is the only grid item and should
+   span and centre on the whole canvas rather than sit inside the 232px sidebar column (I3). */
+#app[data-state="signin"], #app[data-state="booting"] {
+  grid-template-columns: 1fr;
+}
+
+#sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--color-sidebar);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid var(--color-line);
+  padding: var(--space-6) var(--space-4);
+}
+
+#sidebar .nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  color: var(--color-ink-soft);
+  font-size: var(--text-body);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#sidebar .nav-item:hover {
+  background: var(--color-card-sunk);
+}
+
+#sidebar .nav-item[aria-current="page"] {
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-weight: 600;
+}
+
+#content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#main {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 32px 32px 24px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* A visually-hidden link that becomes visible on focus (keyboard "Tab" from the very top of the page), so a
+   keyboard user can jump past the sidebar nav straight to the screen content (#main, tabindex="-1" below). */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: var(--space-4);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus-visible {
+  top: var(--space-4);
+}
+
+/* ---------- Safety alerts banner (persistent above #main; never re-created on route change) ---------- */
+
+#alertBanner[hidden] {
+  display: none;
+}
+
+.alert-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-4) var(--space-4) 0;
+  padding: var(--space-4);
+  background: var(--color-alert-bg);
+  border: 1.5px solid var(--color-alert);
+  border-radius: var(--radius-control);
+}
+
+.alert-banner__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.alert-banner__title {
+  font-weight: 700;
+  color: var(--color-alert-text);
+  flex: 1 0 auto;
+}
+
+.alert-banner__steps {
+  display: flex;
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: var(--text-meta);
+  color: var(--color-ink-soft);
+}
+
+.alert-banner__steps li {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-card-sunk);
+}
+
+.alert-banner__step--done {
+  background: var(--color-accent);
+  color: var(--color-on-ink);
+  font-weight: 600;
+}
+
+.alert-banner__replay {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--color-accent-text-small);
+}
+
+.alert-banner__resolve {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex: 1 0 100%;
+}
+
+.alert-banner__note {
+  flex: 1;
+  min-height: 36px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+
+.alert-banner__error {
+  color: var(--color-alert-text);
+  font-size: var(--text-meta);
+}
+
+.alert-banner__more {
+  font-size: var(--text-meta);
+  color: var(--color-ink-soft);
+}
+
+.grid-main-rail {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (max-width: 1279.98px) {
+  .grid-main-rail {
+    grid-template-columns: 1fr;
+  }
+}
+
+#toasts {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 10;
+}
+
+#signin {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+/* ---------- Sidebar contents (Figma caseload frame, sidebar column) ---------- */
+
+.sidebar__inner {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 2 * var(--space-6));
+}
+
+.sidebar__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-6) var(--space-4);
+}
+
+/* "Mira" / "Care team" each stay on one line; the bell keeps a fixed size at the far right (browser bug 2). */
+.sidebar__brand-block {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sidebar__brand, .sidebar__subbrand {
+  white-space: nowrap;
+}
+
+.sidebar__mark {
+  flex: none;
+}
+
+.sidebar__bell {
+  position: relative;
+  flex: 0 0 36px;
+  margin-left: auto;
+  color: var(--color-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sidebar__bell:hover {
+  background: var(--color-card-sunk);
+}
+
+.sidebar__bell .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar__bell-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-alert);
+  color: var(--color-on-alert);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ---------- Notifications popover (persistent element outside #sidebar; survives the sidebar's own
+   route-driven re-renders so the open panel and its fetched list are never reset mid-session) ---------- */
+
+#notifications[hidden] {
+  display: none;
+}
+
+.notif-panel {
+  position: fixed;
+  top: 64px;
+  left: 240px;
+  z-index: 20;
+  width: 360px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--color-card);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+}
+
+.notif-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.notif-panel__title {
+  flex: 1;
+  font-size: var(--text-card-title);
+  font-weight: 600;
+}
+
+.notif-panel__close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.notif-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.notif-panel__item {
+  border-bottom: 1px solid var(--color-line);
+  padding-bottom: var(--space-2);
+}
+
+.notif-item__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+}
+
+.notif-item__row--unread {
+  background: var(--color-card-sunk);
+  font-weight: 600;
+}
+
+.notif-item__title {
+  flex: 1;
+  font-size: var(--text-meta);
+}
+
+.notif-panel__empty {
+  color: var(--color-ink-soft);
+  font-size: var(--text-meta);
+}
+
+.notif-panel__desktop {
+  margin-bottom: var(--space-3);
+}
+
+.sidebar__mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.sidebar__brand {
+  font-weight: 700;
+  font-size: var(--text-card-title);
+  line-height: 1.1;
+}
+
+.sidebar__subbrand {
+  margin-top: 2px;
+  color: var(--color-ink-soft);
+  font-size: var(--text-meta);
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-item .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-item[aria-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.nav-item__label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.nav-item__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#sidebar .nav-item[aria-current="page"] .nav-item__badge {
+  /* This badge sits on the ink-filled active pill, which flips (dark-on-light vs light-on-dark) with the theme;
+     --color-card/--color-ink flip the same way, giving the badge the inverse of whatever the pill is now. */
+  background: var(--color-card);
+  color: var(--color-ink);
+}
+
+.sidebar__spacer {
+  flex: 1;
+}
+
+.sidebar__privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-6) var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-card-sunk);
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
+  color: var(--color-ink-soft);
+}
+
+.sidebar__privacy .icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+.sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.sidebar__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------- Projector-mode switch ---------- */
+
+.sidebar__theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--color-ink);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sidebar__theme-toggle:hover {
+  background: var(--color-card-sunk);
+}
+
+.sidebar__theme-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--color-line);
+  transition: background-color 0.15s ease;
+}
+
+.sidebar__theme-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-card);
+  box-shadow: 0 1px 2px rgba(28, 26, 34, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.sidebar__theme-toggle[aria-checked="true"] .sidebar__theme-toggle-track {
+  background: var(--color-accent);
+}
+
+.sidebar__theme-toggle[aria-checked="true"] .sidebar__theme-toggle-thumb {
+  transform: translateX(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__theme-toggle-track, .sidebar__theme-toggle-thumb { transition: none; }
+}
+
+.sidebar__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sidebar__name {
+  font-weight: 600;
+  font-size: var(--text-meta);
+}
+
+.sidebar__clinic {
+  color: var(--color-ink-soft);
+  font-size: 12px;
+}
+
+/* ---------- Toasts ---------- */
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 360px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+  /* --color-ink/--color-on-ink flip together between themes, so the default toast stays readable in both. */
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  box-shadow: var(--shadow-card);
+}
+
+/* Alert/accent fills carry --color-on-alert / --color-on-accent text: white in the light theme, dark in the
+   projector theme, where both fills are lightened for contrast against the dark surfaces (tokens.css). */
+.toast--error { background: var(--color-alert); color: var(--color-on-alert); }
+.toast--success { background: var(--color-accent); color: var(--color-on-accent); }
+
+.toast__text {
+  flex: 1;
+  font-size: var(--text-meta);
+}
+
+.toast__action, .toast__close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.toast__close {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ---------- Loading / empty / error states ---------- */
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 240px;
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-ink-soft);
+}
+
+.state .icon {
+  width: 28px;
+  height: 28px;
+}
+
+.state__title {
+  font-size: var(--text-card-title);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.state__text {
+  font-size: var(--text-body);
+}

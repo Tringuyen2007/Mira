@@ -245,3 +245,21 @@ def test_cors_allows_separately_hosted_dashboard_but_token_still_required(client
     resp = client.get("/stats", headers={"Origin": origin})
     assert resp.status_code == 401
     assert client.get("/stats", headers={"Origin": origin, **AUTH}).status_code == 200
+
+
+def test_dashboard_served_without_its_tests_dev_or_readme(make_client: Callable[..., TestClient],
+                                                          monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from server import main
+
+    dash = tmp_path / "device" / "dashboard"
+    for rel, body in {"index.html": "<h1>dashboard</h1>", "dev/fixtures.html": "<h1>dev</h1>",
+                      "tests/router.test.mjs": "// test", "README.md": "# notes"}.items():
+        (dash / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dash / rel).write_text(body)
+    monkeypatch.setattr(main, "STATIC_PAGES", {"dashboard": dash, "device": tmp_path / "device" / "kiosk"})
+    client = make_client()
+    resp = client.get("/dashboard/")
+    assert resp.status_code == 200 and "dashboard" in resp.text
+    assert client.get("/dashboard/dev/fixtures.html").status_code == 404
+    assert client.get("/dashboard/tests/router.test.mjs").status_code == 404
+    assert client.get("/dashboard/README.md").status_code == 404

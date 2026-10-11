@@ -32,6 +32,7 @@ from server.api import care as care_api
 from server.api import me as me_api
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
+from server.api import dashboard
 from server.api import insight as insight_api
 from server.api import pair as pair_api
 from server.api import proposals
@@ -86,8 +87,8 @@ class MultiDirStaticFiles(StaticFiles):
 
 
 class KioskStaticFiles(StaticFiles):
-    """The LCD page, minus what only developers need: the kiosk's dev/ preview, its tests/ and READMEs are
-    never served on the origin that holds the device token. Compared case-insensitively (macOS volumes)."""
+    """Static pages minus what only developers need: dev/, tests/ and READMEs are never served.
+    Compared case-insensitively (macOS volumes)."""
 
     HIDDEN_DIRS = frozenset({"dev", "tests"})
 
@@ -449,7 +450,7 @@ def _mount_static(app: FastAPI) -> None:
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
     for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
-            static_cls = KioskStaticFiles if name == "device" else StaticFiles
+            static_cls = KioskStaticFiles if name in ("device", "dashboard") else StaticFiles
             app.mount(f"/{name}", static_cls(directory=directory, html=True), name=name)
 
 
@@ -465,7 +466,7 @@ def create_app() -> FastAPI:
         app.include_router(module.router, dependencies=[Depends(require_principal)])
     for module in (calibration, alerts, notifications_api, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
-    for module in (copilot_api, proposals):
+    for module in (copilot_api, proposals, dashboard):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token

@@ -1,0 +1,108 @@
+/* Design tokens from the Figma "MIRA Hi-Fi" variable collection (palette frame 59:305). */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* Text and surfaces */
+  --color-ink: #1c1a22;
+  --color-ink-soft: #5e5a63;
+  --color-surface: #ffffff;
+  --color-dose: #6e6875;          /* Greeting dose line (24:278), a literal in Figma */
+  --color-voice: #1e1e1e;         /* caption voice disc as overridden on every screen */
+
+  /* Aurora background */
+  --color-canvas: #fbf2eb;        /* color/canvas, "Seashell" */
+  --color-mist: #e5eeed;          /* aurora/mist */
+  --color-sky: #f5faf8;           /* aurora/sky */
+
+  /* Accents */
+  --color-accent: #0f6e56;
+  --color-accent-text-small: #0b5a47;
+  --color-accent-bright: #1d9e75;
+  --color-berry: #9f3462;
+  --color-berry-deep: #391323;    /* end of the hero text gradient */
+  --color-mauve: #ddc3da;
+
+  /* Alerts */
+  --color-alert: #d92d20;
+  --color-alert-text: #b42318;
+  --color-alert-bg: #fef3f2;
+
+  /* Halo rings */
+  --color-ring-cool: #90bbcc;
+
+  /* Radii */
+  --radius-pill: 999px;
+  --radius-caption: 40px;
+  --radius-track: 11px;
+
+  /* Shadows (Figma drop-shadows; box-shadow on round/rect shapes is identical and needs no filter) */
+  --shadow-caption: 0 -12px 30px rgba(143, 186, 204, 0.18);
+  --shadow-gesture: 0 0 22px rgba(143, 186, 204, 0.5);
+  --shadow-pause: 0 0 20px rgba(143, 186, 204, 0.5);
+  --shadow-call: 0 8px 32px rgba(217, 46, 33, 0.25);
+
+  /* Type */
+  --font: "Inter", system-ui, sans-serif;
+  --hero-gradient: linear-gradient(90deg, var(--color-berry), var(--color-berry-deep));
+}
+:root {
+  --color-watch: #b54708;
+  --color-watch-text: #b54708;    /* >= 4.9:1 on card, card-sunk and canvas */
+  /* Text/icon colour on accent- and alert-filled controls (primary button, toasts, bell badge). */
+  --color-on-accent: #ffffff;
+  --color-on-alert: #ffffff;
+  --color-line: #e7e3ea;
+  --color-line-strong: #1c1a22;
+  --color-good: var(--color-accent-bright);
+  --color-flag: var(--color-alert);
+  --color-card: #ffffff;
+  --color-card-sunk: #f6f4f7;
+  --color-sidebar: rgba(255, 255, 255, 0.72);
+  /* Focus ring: the accent is ~6:1 against both the light canvas and white (WCAG non-text contrast >= 3:1). */
+  --color-ring-focus: var(--color-accent);
+  /* Text/icon colour for elements filled with --color-ink (active nav pill, avatar, selected pill tab). */
+  --color-on-ink: #ffffff;
+  --radius-card: 20px;
+  --radius-control: 12px;
+  --shadow-card: 0 1px 2px rgba(28, 26, 34, 0.04), 0 8px 24px rgba(143, 186, 204, 0.12);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px;
+  --text-meta: 14px; --text-body: 16px; --text-card-title: 20px; --text-page-title: 32px;
+  --canvas: radial-gradient(1200px 800px at 85% -10%, var(--color-mist), transparent 60%),
+            radial-gradient(900px 700px at -10% 110%, var(--color-sky), transparent 60%), var(--color-canvas);
+}
+:root[data-theme="projector"] {
+  --color-ink: #f4f1f6; --color-ink-soft: #c9c3cf; --color-card: #211d27; --color-card-sunk: #2b2632;
+  --color-line: #3a3442; --color-line-strong: #f4f1f6; --color-sidebar: rgba(24, 21, 29, 0.9);
+  --canvas: #15121a; --text-meta: 16px; --text-body: 18px; --text-card-title: 22px; --text-page-title: 36px;
+  /* --color-ink flips to a light colour here, so anything filled with it needs dark (not white) text/icons,
+     and the focus ring needs a light colour to stay visible against the dark canvas/cards (M18/I6). */
+  --color-on-ink: #15121a;
+  --color-ring-focus: var(--color-ink);
+  /* --color-alert-text is normally #b42318, a dark red meant for light surfaces (card/canvas); that drops to
+     ~2.4:1 against the dark projector card/canvas, so it's lightened here. Checked >= 4.5:1 against
+     --color-card, --color-card-sunk, --canvas and --color-alert-bg in this theme. */
+  --color-alert-text: #ff8a80;
+  --color-alert-bg: #3a1712;
+  /* Final review B, I6: the light theme's accent (#0f6e56), small accent text (#0b5a47), berry (#9f3462, the
+     "AI draft" chip) and watch (#b54708) are dark colours that drop to 2-2.7:1 on the dark projector surfaces.
+     These lighter values are >= 6.4:1 against --color-card, --color-card-sunk and --canvas here (text), and the
+     fills (--color-alert, --color-good) >= 5.2:1 (non-text >= 3:1). Fills carrying text switch that text to a
+     dark --color-on-accent / --color-on-alert (>= 6.8:1). tests/contrast.test.mjs checks every pair. */
+  --color-accent: #5fd3ae;
+  --color-accent-text-small: #7ee2c0;
+  --color-accent-bright: #3cc495;
+  --color-berry: #f08cb8;
+  --color-watch: #f5b04c;
+  --color-watch-text: #f5b04c;
+  --color-alert: #ff6b5e;
+  --color-on-accent: #0d1f19;
+  --color-on-alert: #1a0b09;
+}

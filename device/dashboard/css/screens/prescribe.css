@@ -1,0 +1,306 @@
+/* Prescribe screen (Figma 207:282): exercise plan, editor, flag thresholds, heart-rate limit, emergency
+   contact and the Mira Assistant proposals rail. */
+
+/* Head: meta, title and subtitle on the left; Discard / Save at the top right (Figma). */
+.prescribe__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.prescribe__subtitle {
+  margin-top: var(--space-1);
+  color: var(--color-ink-soft);
+}
+
+/* Three columns (Figma): plan + emergency | editor + flags + heart rate | reference rep + proposals. */
+.prescribe__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.45fr) minmax(0, 0.85fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 1279px) {
+  .prescribe__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  }
+  .prescribe__col:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.prescribe__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.prescribe__card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.prescribe__title-icon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prescribe__today {
+  margin-top: var(--space-2);
+}
+
+.prescribe__reference-btn {
+  margin-top: var(--space-3);
+}
+
+.prescribe__card + .prescribe__card {
+  margin-top: 0;
+}
+
+/* ---- Exercise plan ---- */
+
+.prescribe__exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.prescribe__exercise-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-card-sunk);
+  cursor: pointer;
+  text-align: left;
+}
+
+.prescribe__exercise-row.is-selected {
+  border-color: var(--color-ink);
+  background: var(--color-card);
+}
+
+/* A drawn, checked box in the accent colour (every listed exercise is in the active plan). */
+.prescribe__check {
+  flex: none;
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--color-accent);
+}
+
+.prescribe__check::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--color-on-accent);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+.prescribe__staged {
+  font-weight: 400;
+}
+
+.prescribe__exercise-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.prescribe__exercise-dose {
+  color: var(--color-ink-soft);
+}
+
+.prescribe__search-wrap {
+  position: relative;
+  margin-top: var(--space-4);
+}
+
+.prescribe__search-icon {
+  position: absolute;
+  left: var(--space-4);
+  top: 12px;
+  color: var(--color-ink-soft);
+}
+
+.prescribe__search-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.prescribe__search {
+  width: 100%;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-3) var(--space-2) 44px;
+  min-height: 42px;
+  font: inherit;
+  background: var(--color-card);
+  color: var(--color-ink);
+}
+
+.prescribe__search-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* ---- Editor ---- */
+
+.prescribe__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.prescribe__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.prescribe__field-label {
+  font-weight: 500;
+}
+
+.chip--stretch {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-3);
+  background: var(--color-card-sunk);
+  font-size: var(--text-meta);
+}
+
+/* ---- Stepper (js/ui/stepper.js) ---- */
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-control);
+}
+
+.stepper__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-card-sunk);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stepper__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stepper__value {
+  min-width: 48px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ---- Slider (js/ui/slider.js) ---- */
+
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slider__value {
+  font-weight: 600;
+}
+
+.slider__input {
+  width: 100%;
+  accent-color: var(--color-ink);
+}
+
+/* ---- Emergency contact ---- */
+
+.prescribe__emergency {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.prescribe__emergency-name {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.prescribe__emergency-phone {
+  font-weight: 500;
+}
+
+/* ---- Mira Assistant proposals rail ---- */
+
+.prescribe__rail {
+  min-width: 0;
+}
+
+.prescribe__proposals-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+/* ---- Save / discard (page head) ---- */
+
+.prescribe__save-bar {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* ---- Unsaved-changes bar ---- */
+
+.prescribe__unsaved-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1.5px solid var(--color-watch);
+  border-radius: var(--radius-control);
+  background: var(--color-card);
+}
+
+.prescribe__unsaved-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}

@@ -1,0 +1,25 @@
+{
+  "answer": "Maya Ellis: squat depth 60.6\u00b0 \u2192 83.5\u00b0 over the last 21 days, affected-leg load 47.3% \u2192 37.2%. This looks like compensation; I left a plan proposal for you to review.",
+  "charts": [],
+  "evidence": [
+    "progress_v (squat), last 21 days"
+  ],
+  "sql": [
+    {
+      "query": "WITH w AS (SELECT v.patient_id, p.name, p.affected_side, v.day, v.p95_knee, v.affected_load_pct, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day) AS first_n, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day DESC) AS last_n, COUNT(*) OVER (PARTITION BY v.patient_id) AS days FROM progress_v AS v JOIN patients AS p ON p.id = v.patient_id WHERE v.exercise_id = 'squat' AND p.id = 'maya' AND v.day >= CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 21 AND v.day < CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE)) SELECT patient_id, name, affected_side, MAX(days) AS days, ROUND(CAST(AVG(p95_knee) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS depth_from, ROUND(CAST(AVG(p95_knee) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS depth_to, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS load_from, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS load_to, ROUND(CAST((AVG(affected_load_pct) FILTER(WHERE first_n <= 3) - AVG(affected_load_pct) FILTER(WHERE last_n <= 3)) AS DECIMAL), 1) AS load_drop FROM w GROUP BY patient_id, name, affected_side ORDER BY load_drop DESC NULLS LAST LIMIT 200",
+      "rows": 1,
+      "ms": 7
+    },
+    {
+      "query": "WITH d AS (SELECT CAST((started_at AT TIME ZONE 'America/Chicago') AS DATE) AS day, MAX(pain_post) AS pain_post FROM sessions WHERE patient_id = 'maya' AND exercise_id = 'squat' AND CAST((started_at AT TIME ZONE 'America/Chicago') AS DATE) BETWEEN CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 21 AND CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 1 GROUP BY 1), t AS (SELECT day, pain_post, COALESCE(day - LAG(day) OVER (ORDER BY day) = 1, FALSE) AS after_training_day FROM d) SELECT after_training_day, COUNT(*) AS days, ROUND(CAST(AVG(pain_post) AS DECIMAL), 1) AS avg_pain_post FROM t GROUP BY after_training_day ORDER BY after_training_day LIMIT 200",
+      "rows": 2,
+      "ms": 3
+    }
+  ],
+  "cached": false,
+  "proposals": [
+    1
+  ],
+  "drafts": [],
+  "fallback": null
+}

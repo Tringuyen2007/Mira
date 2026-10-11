@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' 'sha256-kaEog0AsPo4/9apXRMvp5eF3zpfBg9ltlJNNm2KUPio='; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Mira · Care team</title>
+<script src="js/theme-boot.js"></script>
+<link rel="preload" href="assets/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/shell.css">
+<link rel="stylesheet" href="css/screens/signin.css">
+<link rel="stylesheet" href="css/screens/caseload.css">
+<link rel="stylesheet" href="css/screens/assistant.css">
+<link rel="stylesheet" href="css/screens/patient.css">
+<link rel="stylesheet" href="css/screens/prescribe.css">
+<link rel="stylesheet" href="css/screens/live.css">
+<link rel="stylesheet" href="css/screens/timelapse.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+<script type="module" src="js/main.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<div id="app" data-state="booting">
+  <section id="signin" hidden></section>
+  <aside id="sidebar" hidden></aside>
+  <div id="content" hidden>
+    <div id="alertBanner"></div>
+    <main id="main" tabindex="-1"></main>
+  </div>
+</div>
+<div id="notifications" hidden></div>
+<div id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

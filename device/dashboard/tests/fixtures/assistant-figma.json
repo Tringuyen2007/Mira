@@ -1,0 +1,23 @@
+{
+  "answer": "Over 3 weeks her squat depth rose from 70° to 92°, while time-weighted load on her right leg fell from 47% to 36%. She reaches depth by shifting onto her left leg. 9 of 36 reps were flagged this week.\n\nWhat I would check next:\n- Pain after back-to-back days\n- Weight shift on the last set",
+  "charts": [
+    {
+      "type": "line",
+      "title": "Maya Ruiz: squat depth vs load on the right leg",
+      "x_label": "day",
+      "y_label": "degrees / % body weight",
+      "series": [
+        { "name": "Squat depth (°)", "points": [["2026-09-20", 70], ["2026-09-27", 81], ["2026-10-04", 88], ["2026-10-11", 92]] },
+        { "name": "Right leg load (%)", "points": [["2026-09-20", 47], ["2026-09-27", 44], ["2026-10-04", 40], ["2026-10-11", 36]] }
+      ]
+    }
+  ],
+  "evidence": ["Today's session", "3-week trend", "Rep 7 replay"],
+  "sql": [{ "query": "SELECT day, p95_knee FROM progress_v WHERE patient_id = 'maya'", "rows": 4, "ms": 2 }],
+  "cached": false,
+  "proposals": [1],
+  "drafts": [
+    { "patient_id": "linda", "text": "Hi Linda, I noticed you have missed a few sessions this week. Is your knee feeling okay? Even a short session today helps. Reply here if anything hurts. – Sam" }
+  ],
+  "fallback": null
+}
