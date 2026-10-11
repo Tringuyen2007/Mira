@@ -1,7 +1,7 @@
 // Boot: sign-in -> shell. Owns the single ctx object every screen is mounted with, the hash router outlet,
 // the sidebar re-render on route/store changes, and sign-out (which tears every listener/socket down).
 import { clear, h } from "./core/dom.js";
-import { parseRoute, href } from "./core/router.js";
+import { parseRoute, href, redirectFor } from "./core/router.js";
 import { createStore } from "./core/store.js";
 import { loadAuth, clearAuth } from "./net/auth.js";
 import { createApi } from "./net/api.js";
@@ -13,10 +13,11 @@ import { createToaster } from "./ui/toasts.js";
 import { empty } from "./ui/states.js";
 import { mountSignIn } from "./screens/signin/index.js";
 import { screen as caseloadScreen } from "./screens/caseload/index.js";
+import { screen as assistantScreen } from "./screens/assistant/index.js";
 
 // Screens land here in later milestones; a route that resolves but has no entry shows "Coming soon".
-const SCREENS = { caseload: caseloadScreen };
-const SCREEN_ALIAS = { replay: "patient", proposal: "copilot" };
+const SCREENS = { caseload: caseloadScreen, assistant: assistantScreen };
+const SCREEN_ALIAS = { replay: "patient", proposal: "assistant" };
 
 const appEl = document.getElementById("app");
 const signinEl = document.getElementById("signin");
@@ -73,6 +74,12 @@ async function bootShell({ token, therapistId }) {
     unmount = null;
     clear(mainEl);
     currentRoute = parseRoute(globalThis.location.hash);
+    // Old links (#/copilot) forward to their new route; replace() fires hashchange, which renders again.
+    const redirect = redirectFor(currentRoute);
+    if (redirect) {
+      globalThis.location.replace(redirect);
+      return;
+    }
     if (currentRoute.params.pid) store.set({ selectedPatientId: currentRoute.params.pid });
     renderSidebarInto();
     const key = SCREEN_ALIAS[currentRoute.name] || currentRoute.name;

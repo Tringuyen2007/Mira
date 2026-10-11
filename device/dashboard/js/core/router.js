@@ -15,6 +15,8 @@ const ROUTES = [
   ["proposal", new RegExp(`^/proposals/(${PROPOSAL_ID})$`), ["id"]],
   ["live", new RegExp(`^/live/(${PID})$`), ["pid"]],
   ["live", new RegExp(`^/live$`), []],
+  ["assistant", new RegExp(`^/assistant$`), []],
+  // Legacy name of the Mira Assistant screen; main.js redirects it (redirectFor) so old links keep working.
   ["copilot", new RegExp(`^/copilot$`), []],
 ];
 
@@ -40,6 +42,7 @@ const PATHS = {
   replay: (p) => `/replay/${p.sid}`,
   proposal: (p) => `/proposals/${p.id}`,
   live: (p) => (p && p.pid ? `/live/${p.pid}` : "/live"),
+  assistant: () => "/assistant",
   copilot: () => "/copilot",
 };
 
@@ -47,4 +50,10 @@ export function href(name, params = {}, query = {}) {
   const path = PATHS[name](params);
   const qs = new URLSearchParams(query).toString();
   return qs ? `#${path}?${qs}` : `#${path}`;
+}
+
+// Routes that only exist to forward to another one: returns the hash to replace the current one with, or null.
+export function redirectFor(route) {
+  if (route && route.name === "copilot") return href("assistant", {}, route.query || {});
+  return null;
 }

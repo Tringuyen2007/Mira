@@ -22,7 +22,7 @@ test("renders six nav links in order", () => {
   const links = navLinks(root);
   const labels = links.map((a) => a.querySelector(".nav-item__label").textContent);
   assert.deepEqual(labels,
-    ["Caseload", "Patient review", "Prescribe", "Time-lapse", "Live sessions", "Care Copilot"]);
+    ["Caseload", "Patient review", "Prescribe", "Time-lapse", "Live sessions", "Mira Assistant"]);
 });
 
 test("the active route carries aria-current=page", () => {
@@ -52,7 +52,7 @@ test("Patient review links to the selected patient", () => {
   assert.equal(byLabel["Patient review"].getAttribute("href"), "#/patients/maya");
 });
 
-test("Care Copilot shows a proposals-waiting badge", () => {
+test("Mira Assistant shows a proposals-waiting badge", () => {
   const root = renderSidebar({
     route: { name: "prescribe" },
     proposalsWaiting: 3,
@@ -62,7 +62,7 @@ test("Care Copilot shows a proposals-waiting badge", () => {
   });
   const links = navLinks(root);
   const byLabel = Object.fromEntries(links.map((a) => [a.querySelector(".nav-item__label").textContent, a]));
-  const badge = byLabel["Care Copilot"].querySelector(".nav-item__badge");
+  const badge = byLabel["Mira Assistant"].querySelector(".nav-item__badge");
   assert.equal(badge.textContent, "3");
   assert.equal(badge.getAttribute("aria-label"), "3 proposals waiting");
 });
@@ -125,4 +125,13 @@ test("the clinic line is rendered when the therapist has a clinic", () => {
     route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
   });
   assert.equal(root.querySelector(".sidebar__clinic").textContent, "Lakeside Rehab");
+});
+
+test("Mira Assistant links to #/assistant and is active on assistant, copilot and proposal routes", () => {
+  for (const name of ["assistant", "copilot", "proposal"]) {
+    const root = renderSidebar({ route: { name }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null });
+    const a = navLinks(root).find((l) => l.querySelector(".nav-item__label").textContent === "Mira Assistant");
+    assert.equal(a.getAttribute("href"), "#/assistant");
+    assert.equal(a.getAttribute("aria-current"), "page", name);
+  }
 });

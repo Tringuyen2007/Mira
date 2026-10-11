@@ -143,6 +143,7 @@
 
 .nav-item__label {
   flex: 1;
+  white-space: nowrap;
 }
 
 .nav-item__badge {

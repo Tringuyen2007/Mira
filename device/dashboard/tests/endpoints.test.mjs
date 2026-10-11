@@ -76,3 +76,20 @@ test("more endpoints: query building, omission rules, and other writes", async (
     ["GET", "/stats", undefined],
   ]);
 });
+
+test("assistant calls: context only when non-empty, review route, 30 s timeout per call", async () => {
+  const calls = [];
+  const api = { post: async (path, body, opts) => { calls.push([path, body, opts]); return {}; } };
+  const ep = createEndpoints(api, "okafor");
+  const ctx = [{ question: "Who is compensating?", answer: "Maya." }];
+  await ep.copilotAsk("And her pain?", "maya", ctx);
+  await ep.copilotAsk("Summarise today", null, []);
+  await ep.assistantReview("a/b");
+  await ep.sendMessage("maya", "Hi Maya");
+  assert.deepEqual(calls, [
+    ["/copilot/ask", { question: "And her pain?", patient_id: "maya", context: ctx }, { timeoutMs: 30000 }],
+    ["/copilot/ask", { question: "Summarise today" }, { timeoutMs: 30000 }],
+    ["/copilot/review/a%2Fb", {}, { timeoutMs: 30000 }],
+    ["/patients/maya/messages", { therapist_id: "okafor", text: "Hi Maya" }, undefined],
+  ]);
+});

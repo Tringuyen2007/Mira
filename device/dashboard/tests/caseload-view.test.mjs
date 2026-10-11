@@ -118,8 +118,17 @@ test("Show N more on track triggers the handler", () => {
   assert.equal(called, true);
 });
 
-test("copilot card is absent when proposals failed to load", () => {
+test("Mira Assistant card is absent when proposals failed to load", () => {
   const model = caseloadModel(figma, null, { now });
   const root = render(model, handlers());
-  assert.doesNotMatch(root.textContent, /Care Copilot/);
+  assert.doesNotMatch(root.textContent, /Mira Assistant/);
+});
+
+test("Mira Assistant rail card links to #/assistant", () => {
+  const model = caseloadModel(figma, { proposals: [] }, { now });
+  const root = render(model, handlers());
+  assert.match(root.textContent, /Mira Assistant/);
+  assert.doesNotMatch(root.textContent, /Copilot/);
+  const link = root.querySelectorAll("a").find((a) => /Open Mira Assistant/.test(a.textContent));
+  assert.equal(link.getAttribute("href"), "#/assistant");
 });

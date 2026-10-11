@@ -1,4 +1,4 @@
-// DOM builder. Text is always a text node: server strings (names, AI drafts, Copilot answers) can never become markup.
+// DOM builder. Text is always a text node: server strings (names, AI drafts, Mira Assistant answers) can never become markup.
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Every attribute name that can carry a URL, checked case-insensitively so HREF/Src/XLink:Href etc. can't slip

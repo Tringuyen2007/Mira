@@ -21,8 +21,9 @@ const ACTIVE_FOR = {
   prescribe: "prescribe",
   timelapse: "timelapse",
   live: "live",
-  copilot: "copilot",
-  proposal: "copilot",
+  assistant: "assistant",
+  copilot: "assistant",
+  proposal: "assistant",
 };
 
 function navItem({ id, label, iconName, active, href: linkHref, disabled, badge }) {
@@ -69,8 +70,8 @@ export function renderSidebar(state) {
         active: activeKey === "timelapse", href: timelapseHref, disabled: !hasPatient }),
       navItem({ id: "live", label: "Live sessions", iconName: "live",
         active: activeKey === "live", href: liveHref }),
-      navItem({ id: "copilot", label: "Care Copilot", iconName: "copilot",
-        active: activeKey === "copilot", href: href("copilot"), badge: waiting })),
+      navItem({ id: "assistant", label: "Mira Assistant", iconName: "copilot",
+        active: activeKey === "assistant", href: href("assistant"), badge: waiting })),
     h("div", { class: "sidebar__spacer" }),
     h("div", { class: "sidebar__privacy" },
       icon("lock", { label: "" }),

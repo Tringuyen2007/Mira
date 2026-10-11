@@ -2,6 +2,7 @@
 // injects therapist_id/resolved_by/created_by = therapistId; every id in a path is encodeURIComponent-ed.
 
 const enc = (id) => encodeURIComponent(id);
+export const ASSISTANT_TIMEOUT_MS = 30000;
 
 export function createEndpoints(api, therapistId) {
   return {
@@ -35,11 +36,16 @@ export function createEndpoints(api, therapistId) {
     setLimits: (pid, { hrLimit }) =>
       api.patch(`/patients/${enc(pid)}/limits`, { therapist_id: therapistId, hr_limit: hrLimit }),
 
-    copilotAsk: (question, patientId) => {
+    // Mira Assistant (server name: copilot). Agent runs take longer than ordinary reads, hence the 30 s timeout.
+    copilotAsk: (question, patientId, context) => {
       const body = { question };
       if (patientId !== null && patientId !== undefined) body.patient_id = patientId;
-      return api.post("/copilot/ask", body);
+      if (Array.isArray(context) && context.length > 0) body.context = context;
+      return api.post("/copilot/ask", body, { timeoutMs: ASSISTANT_TIMEOUT_MS });
     },
+    assistantReview: (pid) => api.post(`/copilot/review/${enc(pid)}`, {}, { timeoutMs: ASSISTANT_TIMEOUT_MS }),
+    // Planned route: only called when caps.has("/patients/{patient_id}/messages").
+    sendMessage: (pid, text) => api.post(`/patients/${enc(pid)}/messages`, { therapist_id: therapistId, text }),
 
     notifications: ({ unread, limit, sinceId } = {}) =>
       api.get("/notifications", { unread, limit, since_id: sinceId, therapist_id: therapistId }),

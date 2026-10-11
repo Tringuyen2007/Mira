@@ -1,4 +1,4 @@
-// REST client: bearer token, JSON, 10 s timeout. Errors are ApiError{status, detail}; status 0 = offline/timeout.
+// REST client: bearer token, JSON, 10 s timeout (overridable per request with {timeoutMs}). Errors are ApiError{status, detail}; status 0 = offline/timeout.
 
 export class ApiError extends Error {
   constructor(status, detail) { super(`${status} ${detail}`); this.status = status; this.detail = detail; }
@@ -6,7 +6,7 @@ export class ApiError extends Error {
 
 export function createApi({ token, fetchImpl = globalThis.fetch.bind(globalThis), base = "", timeoutMs = 10000,
                             onUnauthorized } = {}) {
-  async function request(method, path, { query, body } = {}) {
+  async function request(method, path, { query, body, timeoutMs: perRequestMs } = {}) {
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(query || {})) if (v !== null && v !== undefined) qs.set(k, String(v));
     // qs.toString() (not URLSearchParams.size, unsupported on Safari < 17 / Chrome < 113) so params aren't
@@ -14,7 +14,7 @@ export function createApi({ token, fetchImpl = globalThis.fetch.bind(globalThis)
     const qsStr = qs.toString();
     const url = `${base}${path}${qsStr ? `?${qsStr}` : ""}`;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const timer = setTimeout(() => ctrl.abort(), perRequestMs ?? timeoutMs);
     const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     let res;
@@ -33,8 +33,8 @@ export function createApi({ token, fetchImpl = globalThis.fetch.bind(globalThis)
     return data;
   }
   return {
-    get: (path, query) => request("GET", path, { query }),
-    post: (path, body) => request("POST", path, { body: body ?? {} }),
+    get: (path, query, opts) => request("GET", path, { query, ...opts }),
+    post: (path, body, opts) => request("POST", path, { body: body ?? {}, ...opts }),
     put: (path, body) => request("PUT", path, { body }),
     patch: (path, body) => request("PATCH", path, { body }),
   };

@@ -38,3 +38,14 @@ test("network failure and timeout", async () => {
     fetchImpl: (u, init) => new Promise((_, rej) => init.signal.addEventListener("abort", () => rej(Object.assign(new Error("a"), { name: "AbortError" })))) });
   await assert.rejects(slow.get("/x"), (e) => e.status === 0 && e.detail === "timeout");
 });
+
+test("a per-request timeout overrides the client default", async () => {
+  const hang = (u, init) => new Promise((resolve, rej) => {
+    const t = setTimeout(() => resolve(json(200, { ok: true })), 30);
+    init.signal.addEventListener("abort", () => { clearTimeout(t); rej(Object.assign(new Error("a"), { name: "AbortError" })); });
+  });
+  const api = createApi({ token: "t".repeat(24), timeoutMs: 5, fetchImpl: hang });
+  assert.deepEqual(await api.post("/slow", {}, { timeoutMs: 1000 }), { ok: true });
+  assert.deepEqual(await api.get("/slow", {}, { timeoutMs: 1000 }), { ok: true });
+  await assert.rejects(api.post("/slow", {}), (e) => e.status === 0 && e.detail === "timeout");
+});

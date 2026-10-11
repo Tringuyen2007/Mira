@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoute, href } from "../js/core/router.js";
+import { parseRoute, href, redirectFor } from "../js/core/router.js";
 
 test("parses every dashboard route", () => {
   assert.deepEqual(parseRoute(""), { name: "caseload", params: {}, query: {} });
@@ -13,6 +13,8 @@ test("parses every dashboard route", () => {
   assert.deepEqual(parseRoute("#/proposals/12"), { name: "proposal", params: { id: "12" }, query: {} });
   assert.deepEqual(parseRoute("#/live/george").params, { pid: "george" });
   assert.equal(parseRoute("#/copilot").name, "copilot");
+  assert.deepEqual(parseRoute("#/assistant"), { name: "assistant", params: {}, query: {} });
+  assert.deepEqual(parseRoute("#/assistant?patient=maya"), { name: "assistant", params: {}, query: { patient: "maya" } });
   assert.equal(parseRoute("#/nope").name, "notfound");
 });
 
@@ -42,4 +44,14 @@ test("href round-trips and encodes", () => {
     href("replay", { sid: "0590e71e-b7a4-4add-ab11-c14a27b7a1d6" })]) {
     assert.notEqual(parseRoute(h).name, "notfound");
   }
+});
+
+test("assistant hrefs, and the legacy copilot route redirects to the assistant", () => {
+  assert.equal(href("assistant"), "#/assistant");
+  assert.equal(href("assistant", {}, { patient: "maya" }), "#/assistant?patient=maya");
+  assert.equal(href("proposal", { id: 4 }), "#/proposals/4");
+  assert.equal(redirectFor(parseRoute("#/copilot")), "#/assistant");
+  assert.equal(redirectFor(parseRoute("#/copilot?patient=maya")), "#/assistant?patient=maya");
+  assert.equal(redirectFor(parseRoute("#/assistant")), null);
+  assert.equal(redirectFor(parseRoute("#/caseload")), null);
 });

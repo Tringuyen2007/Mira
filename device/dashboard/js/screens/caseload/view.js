@@ -127,15 +127,15 @@ function copilotCard(model) {
   const count = model.copilot.count;
   return h("div", { class: "card rail-card" },
     h("div", { class: "rail-card__head" },
-      h("h2", { class: "card__title" }, "Care Copilot"),
+      h("h2", { class: "card__title" }, "Mira Assistant"),
       aiDraftChip()),
     h("p", { class: "meta" }, copilotSummary(count)),
     count > 0
       ? h("ul", { class: "copilot-list" }, model.copilot.items.map((item) => h("li", { class: "copilot-list__item" }, item.text)))
       : null,
     count > 0
-      ? h("a", { class: "btn btn--secondary", href: href("copilot") }, "Review proposals")
-      : h("a", { class: "link-quiet", href: href("copilot") }, "Open Care Copilot"));
+      ? h("a", { class: "btn btn--secondary", href: href("assistant") }, "Review proposals")
+      : h("a", { class: "link-quiet", href: href("assistant") }, "Open Mira Assistant"));
 }
 
 function liveCard(model) {
