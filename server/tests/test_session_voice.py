@@ -82,6 +82,7 @@ async def test_greeting_voiced_when_eleven_available(monkeypatch: pytest.MonkeyP
     requests: list[httpx.Request] = []
     monkeypatch.setenv("ELEVEN_API_KEY", "k-not-real")
     monkeypatch.setenv("ELEVEN_VOICE_ID", "voice")
+    monkeypatch.setenv("ELEVEN_RUNTIME_TTS", "1")
     reload_config()
     monkeypatch.setattr(eleven, "transport",
                         httpx.MockTransport(lambda r: requests.append(r) or httpx.Response(200, content=b"mp3")))
@@ -285,6 +286,7 @@ async def test_greeting_still_emitted_when_preparation_crashes(monkeypatch: pyte
 async def test_tts_write_failure_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ELEVEN_API_KEY", "test-eleven-key")
     monkeypatch.setenv("ELEVEN_VOICE_ID", "voice")
+    monkeypatch.setenv("ELEVEN_RUNTIME_TTS", "1")  # reach the disk write
     reload_config()
     monkeypatch.setattr(eleven, "transport", httpx.MockTransport(lambda r: httpx.Response(200, content=b"mp3")))
 

@@ -194,3 +194,147 @@ test("captionsOn is false only when device_prefs.captions === false", () => {
   const s = run([open, live({ device_prefs: { captions: false } })]);
   assert.equal(view(s, 1000).captionsOn, false);
 });
+
+test("speaking defaults to false and follows the speaking channel", () => {
+  let s = run([open, live({ phase: "active" })]);
+  assert.equal(view(s, 1000).speaking, false);
+  s = reduce(s, { channel: "speaking", msg: { on: true } }, 1000);
+  assert.equal(view(s, 1000).speaking, true);
+  s = reduce(s, { channel: "speaking", msg: { on: false } }, 1000);
+  assert.equal(view(s, 1000).speaking, false);
+  s = reduce(s, { channel: "speaking", msg: { on: "yes" } }, 1000);
+  assert.equal(view(s, 1000).speaking, false, "only a real true counts");
+});
+
+test("a say event changes neither screen nor mood; its caption arrives via live", () => {
+  let s = run([open, live({ phase: "active", rep: 3 })]);
+  const before = view(s, 1000);
+  s = reduce(s, ev({ type: "say", session_id: "s_01", t: 1, id: "count_3", text: "Three!",
+    audio_url: "/audio/count_3_1.mp3" }), 1000);
+  const after = view(s, 1000);
+  assert.equal(after.screen, before.screen);
+  assert.equal(after.mood, before.mood);
+  assert.equal(after.caption, "");
+  s = reduce(s, live({ phase: "active", rep: 3, caption: { text: "Three!", source: "say", t: 1 } }), 1000);
+  assert.equal(view(s, 1000).caption, "Three!");
+});
+
+const alert = (step, over = {}) => ev({ type: "alert", alert_id: "a1", kind: "fall", step, ...over });
+
+function inCall(...steps) {
+  let s = run([open, live({ phase: "active" }), alert("detected", { message: "Fall detected." })]);
+  for (const st of steps) s = reduce(s, st, 1000);
+  return s;
+}
+
+test("no call status before escalation", () => {
+  const s = inCall();
+  assert.equal(view(s, 1000).screen, "fall");
+  assert.equal(view(s, 1000).callStatus, null);
+  assert.equal(view(s, 1000).show911, false);
+  assert.equal(view(run([open, live()]), 1000).callStatus, null);
+  assert.equal(view(inCall(alert("checked_in", { message: "Maya answered." })), 1000).callStatus, null);
+});
+
+test("escalated → calling with the alert's message; show_call_911 is exposed", () => {
+  const s = inCall(alert("escalated", { message: "No response from Maya. Calling the emergency contact.",
+    show_call_911: true }));
+  const v = view(s, 1000);
+  assert.equal(v.screen, "fall");
+  assert.deepEqual(v.callStatus, { phase: "calling",
+    message: "No response from Maya. Calling the emergency contact." });
+  assert.equal(v.show911, true);
+});
+
+test("alert steps map to call phases", () => {
+  const phase = (step) => view(inCall(alert(step, { message: step })), 1000).callStatus?.phase ?? null;
+  for (const step of ["escalated", "call_registered", "call_retry"]) assert.equal(phase(step), "calling", step);
+  for (const step of ["call_ongoing", "call_update", "patient_responded"]) assert.equal(phase(step), "on_call", step);
+  for (const step of ["call_ended", "acknowledged"]) assert.equal(phase(step), "ended", step);
+  for (const step of ["call_not_connected", "call_error", "call_failed", "call_watch_timeout"]) {
+    assert.equal(phase(step), "failed", step);
+  }
+});
+
+test("call_ongoing → on_call, call_failed → failed, and a non-string message is empty", () => {
+  let s = inCall(alert("escalated", { message: "Calling." }), alert("call_ongoing", { message: "On the call." }));
+  assert.deepEqual(view(s, 1000).callStatus, { phase: "on_call", message: "On the call." });
+  s = reduce(s, alert("call_failed", { message: 42 }), 1000);
+  assert.deepEqual(view(s, 1000).callStatus, { phase: "failed", message: "" });
+  assert.equal(view(s, 1000).show911, false, "show911 follows the latest step's show_call_911");
+});
+
+test("a step that names no call state keeps the last call status", () => {
+  let s = inCall(alert("call_ongoing", { message: "On the call." }));
+  s = reduce(s, alert("therapist_call", { message: "Calling the therapist too." }), 1000);
+  assert.deepEqual(view(s, 1000).callStatus, { phase: "on_call", message: "On the call." });
+});
+
+test("resolved clears the call status (and the fall screen)", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }));
+  s = reduce(s, alert("resolved", { message: "All clear." }), 1000);
+  const v = view(s, 1000);
+  assert.equal(v.callStatus, null);
+  assert.equal(v.show911, false);
+  assert.equal(v.screen, "rep");
+});
+
+test("call steps that land after the close do not bring back a call status", () => {
+  let s = inCall(alert("escalated", { message: "Calling." }));
+  s = reduce(s, alert("closed"), 1000);
+  s = reduce(s, live({ phase: "active", incident: false }), 1000);
+  s = reduce(s, alert("call_update", { message: "late" }), 1000);
+  s = reduce(s, ev({ type: "fall", stage: "confirmed" }), 1000);
+  assert.equal(view(s, 1000).screen, "fall");
+  assert.equal(view(s, 1000).callStatus, null);
+});
+
+test("arrived resets the call status", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }));
+  s = reduce(s, ev({ type: "arrived" }), 1000);
+  s = reduce(s, live({ phase: "incident", incident: true }), 1000);
+  const v = view(s, 1000);
+  assert.equal(v.screen, "fall");
+  assert.equal(v.callStatus, null);
+  assert.equal(v.show911, false);
+});
+
+test("the fall screen (with a call) wins over every screen but unpaired", () => {
+  const calling = [alert("detected"), alert("escalated", { message: "Calling." })];
+  const cases = [
+    [live({ phase: "paused", paused: true })],
+    [live({ phase: "countdown", countdown: 2 })],
+    [live({ phase: "rest", rep: 12 })],
+    [live({ phase: "idle" }), ev({ type: "session_summary", ...summaryMsg })],
+    [live({ phase: "idle" }), ev({ type: "awaiting_gesture" })],
+    [live({ phase: "active" }), ev({ type: "cue", id: "knees_out" })],
+  ];
+  for (const inputs of cases) {
+    const v = view(run([open, ...inputs, ...calling]), 1000);
+    assert.equal(v.screen, "fall", JSON.stringify(inputs[0].msg));
+    assert.equal(v.callStatus.phase, "calling");
+  }
+  const s = run([open, live({ phase: "active" }), ...calling, { channel: "socket", msg: { status: "rejected" } }]);
+  assert.equal(view(s, 1000).screen, "unpaired");
+});
+
+test("a live snapshot with no incident clears a stale call status (missed closed alert)", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }),
+    alert("call_ongoing", { message: "Emergency contact is on the call.", show_call_911: true }));
+  s = reduce(s, live({ phase: "active", incident: false }), 1000);
+  assert.equal(s.alertStep, null);
+  assert.equal(s.alertMessage, "");
+  assert.equal(s.show911, false);
+  s = reduce(s, ev({ type: "fall", stage: "confirmed" }), 1000);
+  const v = view(s, 1000);
+  assert.equal(v.screen, "fall");
+  assert.equal(v.callStatus, null);
+  assert.equal(v.show911, false);
+});
+
+test("a live snapshot during the incident keeps the call status", () => {
+  let s = inCall(alert("escalated", { message: "Calling.", show_call_911: true }));
+  s = reduce(s, live({ phase: "incident", incident: true }), 1000);
+  assert.deepEqual(view(s, 1000).callStatus, { phase: "calling", message: "Calling." });
+  assert.equal(view(s, 1000).show911, true);
+});

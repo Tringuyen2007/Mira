@@ -30,3 +30,7 @@ read (so `read_at` is set). `rest_post_me_messages` is the response to the patie
 `POST /me/messages`. `rest_get_patient_milestones` is `GET /patients/maya/milestones` with one
 `memory_events` row of `kind='milestone'` inserted directly. `ws_events_message` is the `message` event a
 therapist's `POST /patients/{id}/messages` emits on the patient's `/ws/events` socket.
+
+LCD trainer voice: `ws_events_say` is the `say` event `server/agents/trainer_voice.py` (`TrainerVoice`) emits with
+`Hub.emit` for each scripted line (a counted good rep here): `id` is the cue-library id, `text` the caption and
+`audio_url` the pre-recorded MP3 (null when the line has no audio yet). `seq` is absent.
