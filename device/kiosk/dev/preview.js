@@ -31,6 +31,11 @@ const FIXTURES = {
   setDone: [open, live({ phase: "rest", rep: 12, load_l_pct: 52, hr: 92,
     caption: cap("Set 2 done. Twelve steady reps. Rest for 60 seconds, you earned it.") })],
   fall: [open, live({ phase: "active", incident: true, rep: 7 })],
+  // Fall screen after the check-in timed out: the emergency call is being placed.
+  calling: [open, live({ phase: "active", incident: true, rep: 7 }),
+    ev({ type: "alert", alert_id: "a_01", kind: "fall", step: "detected", message: "Fall detected." }),
+    ev({ type: "alert", alert_id: "a_01", kind: "fall", step: "escalated",
+      message: "No response from Maya. Calling the emergency contact.", show_call_911: true })],
   idle: [open, live({ caption: null })],
   unpaired: [{ channel: "socket", msg: { status: "rejected" } }],
   offline: [open, ev({ type: "arrived" }), live({ set: 1, hr: 88, caption: cap("Good morning, Maya.") }),

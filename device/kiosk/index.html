@@ -14,7 +14,7 @@
 <body>
 <!-- One 1024×600 stage, laid out with the absolute values of the Figma "LCD Hi-Fi" frames. -->
 <div id="stage" data-screen="none" data-mood="none" data-offline="false" data-speaking="false" data-rep="0"
-     data-tick="">
+     data-tick="" data-call="none">
 
   <!-- Set Done "Completion bloom" (37:305) -->
   <div class="bloom" aria-hidden="true"></div>
@@ -184,6 +184,8 @@
           <p class="gesture-label">Raise hand</p>
         </div>
       </div>
+      <!-- Live emergency-call status (alert.message), shown once the alert escalates to a call -->
+      <p id="call-status" class="call-status" aria-live="assertive" hidden></p>
       <p class="bystander">If <span id="fall-name">the patient</span> doesn't respond, anyone nearby:</p>
       <div class="call">
         <img src="assets/icons/phone.svg" alt="" width="56" height="56">

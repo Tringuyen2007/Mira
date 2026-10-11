@@ -38,7 +38,7 @@ cd device/kiosk && python3 -m http.server 8765
 then open `http://127.0.0.1:8765/dev/preview.html?screen=<name>` in Chrome, any window size (the stage scales
 uniformly to fit, letterboxed, so a laptop window looks like the 1024×600 Figma frame). `screen` is one of the
 fixtures in `dev/preview.js`: `greeting`, `gesture`, `countdown`, `cue`, `rep`, `speaking`, `paused`, `setDone`,
-`fall`, `idle`, `unpaired`, `offline`. Add `&actual` to draw the stage at exactly 1024×600 CSS px for a side-by-side
+`fall`, `calling`, `idle`, `unpaired`, `offline`. Add `&actual` to draw the stage at exactly 1024×600 CSS px for a side-by-side
 check against the Figma export. This preview draws the real stage markup from `index.html` through the pure
 reducer (`js/state.js`) with canned fixture input — no sockets, no device token, nothing server-side.
 
@@ -94,7 +94,7 @@ to update itself mid-session.
 | 6 | Paused | `live.paused` / `phase == "paused"` | sleeping |
 | 7 | Set done | `phase == "rest"` or `"done"`; count = reps of that set; pill "EVEN WEIGHT L / R" (balanced) or "WEIGHT L / R" | celebrating |
 | — | Session complete | a `session_summary` event arrived ≤ 60 s ago and `phase` is `idle`, `rest`, or `done` (a new `countdown` wins — next session started); form score /100, "N of M good reps", the AI `spoken` line | celebrating |
-| 8 | Fall alert | `live.incident` true, an `alert` opened by step `detected` (until a closing step: `resolved` / `closed` / `resolved_by_therapist`), a `fall` with `stage == "confirmed"` or `cue check_in` | — (full screen, red border) |
+| 8 | Fall alert | `live.incident` true, an `alert` opened by step `detected` (until a closing step: `resolved` / `closed` / `resolved_by_therapist`), a `fall` with `stage == "confirmed"` or `cue check_in`. Once the alert escalates, a live call status line under the gestures shows the latest `alert.message` (`#call-status`, `#stage[data-call]` = `calling` / `on_call` / `ended` / `failed`, see below); the phone icon pulses while calling and CALL 911 is emphasised when `show_call_911` is true or the call failed | — (full screen, red border) |
 | — | Idle | no session / `phase == "idle"` with no greeting yet: greeting layout, "Mira" hero, no plan | idle |
 | — | Offline | events socket down > 3 s: small "Reconnecting…" pill top-centre over the last screen | unchanged |
 | — | Not paired | socket rejected (1008): full-screen plain message "This screen isn't paired" | — |
@@ -104,6 +104,12 @@ Awaiting gesture > Greeting > Cue > Rep > Idle.
 
 The caption bar shows `live.caption.text`; the same text is what the audio plays (greeting/cue/summary_ready/
 session_summary/say events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
+
+Call status phases (from `alert.step`; reset on `arrived` and on a closing step; steps for an alert that
+already closed are ignored): `escalated` / `call_registered` / `call_retry` → calling; `call_ongoing` /
+`call_update` / `patient_responded` → on_call; `call_ended` / `acknowledged` → ended; `call_not_connected` /
+`call_error` / `call_failed` / `call_watch_timeout` → failed; `detected` / `checked_in` / closing steps → no line.
+Other steps (`therapist_call`, `webhook_*`) keep the current line.
 
 ## Events the LCD uses
 
