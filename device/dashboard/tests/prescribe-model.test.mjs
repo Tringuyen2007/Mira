@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   prescribeModel, diffPrescription, buildPutBody, hrLimitChanged, exerciseName,
   DEFAULT_REST_S, DEFAULT_TEMPO_S, DEFAULT_WEIGHT_SHIFT_PCT, DEFAULT_KNEE_CAVE_DEG, DEFAULT_TRUNK_LEAN_DEG,
-  DEFAULT_HR_LIMIT,
+  DEFAULT_HR_LIMIT, watchExerciseChoices, limitsSentText,
 } from "../js/screens/prescribe/model.js";
 
 import { sample } from "./samples.mjs";
@@ -175,4 +175,49 @@ test("hrLimitChanged", () => {
   assert.equal(hrLimitChanged(130, 130), false);
   assert.equal(hrLimitChanged(130, 140), true);
   assert.equal(hrLimitChanged(130, null), false);
+});
+
+// ---- Apple Watch exercises -------------------------------------------------------------------------------------
+
+const WATCH_RX = { exercise_id: "forearm_rotation", sets: 3, reps: 10, targets: { rotation_deg: 70, tempo_s: 3 },
+  limits: {}, rule_overrides: {}, active: true };
+
+test("prescribeModel: watch exercises are tagged and edit a turn goal (targets.rotation_deg, default 80)", () => {
+  const m = prescribeModel(PATIENT, { prescriptions: [...PRESCRIPTIONS.prescriptions, WATCH_RX] }, null,
+    "forearm_rotation");
+  const row = m.exercises.find((e) => e.id === "forearm_rotation");
+  assert.equal(row.watch, true);
+  assert.equal(row.name, "Forearm turns");
+  assert.equal(m.exercises.find((e) => e.id !== "forearm_rotation").watch, false);
+  assert.equal(m.editor.watch, true);
+  assert.equal(m.editor.rotationGoal, 70);
+  const fresh = prescribeModel(PATIENT, { prescriptions: [{ ...WATCH_RX, targets: {} }] }, null, "forearm_rotation");
+  assert.equal(fresh.editor.rotationGoal, 80);
+  const camera = prescribeModel(PATIENT, PRESCRIPTIONS, null);
+  assert.equal(camera.editor.rotationGoal, null);
+});
+
+test("diffPrescription: a changed turn goal becomes targets.rotation_deg, clamped to 10-180", () => {
+  assert.deepEqual(diffPrescription(WATCH_RX, { rotationGoal: 90 }),
+    { exercise_id: "forearm_rotation", targets: { rotation_deg: 90 } });
+  assert.deepEqual(diffPrescription(WATCH_RX, { rotationGoal: 400 }).targets, { rotation_deg: 180 });
+  assert.equal(diffPrescription(WATCH_RX, { rotationGoal: 70 }), null);
+  // An untouched default (80) on a new watch exercise is not a change; a camera exercise ignores it.
+  assert.equal(diffPrescription({ ...WATCH_RX, targets: {} }, { rotationGoal: 80 }), null);
+  assert.equal(diffPrescription({ exercise_id: "squat", sets: 3, reps: 10 }, { rotationGoal: 90 }), null);
+  const body = buildPutBody(WATCH_RX, diffPrescription(WATCH_RX, { rotationGoal: 90 }));
+  assert.deepEqual(body, { exercise_id: "forearm_rotation", targets: { rotation_deg: 90, tempo_s: 3 } });
+});
+
+test("watchExerciseChoices: the watch exercises not already in the plan", () => {
+  assert.deepEqual(watchExerciseChoices(["squat", "forearm_rotation"]).map((x) => x.id),
+    ["shoulder_rotation", "wrist_flexion"]);
+  assert.deepEqual(watchExerciseChoices([]).map((x) => x.name), ["Forearm turns", "Shoulder turns", "Wrist bends"]);
+});
+
+test("limitsSentText: 'Sent to Maya's watch' only for this patient's limits_changed", () => {
+  const ev = sample("ws_events_limits_changed.json");
+  assert.equal(limitsSentText(ev, "maya", "Maya"), "Sent to Maya's watch");
+  assert.equal(limitsSentText(ev, "sam", "Sam"), null);
+  assert.equal(limitsSentText({ type: "watch_features_changed", patient_id: "maya" }, "maya", "Maya"), null);
 });

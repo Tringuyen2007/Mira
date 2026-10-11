@@ -459,3 +459,178 @@
   color: var(--color-alert-text);
   margin-top: var(--space-2);
 }
+
+/* ---------- Apple Watch group (js/screens/patient/watchView.js) ---------- */
+
+.watch {
+  margin-top: var(--space-6);
+}
+
+.watch__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.watch__title {
+  font-size: var(--text-card-title);
+  font-weight: 600;
+}
+
+.watch__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.watch__toggle {
+  width: auto;
+  border: 1px solid var(--color-line);
+  padding: var(--space-2) var(--space-3);
+}
+
+.watch__toggle-status:empty {
+  display: none;
+}
+
+.watch__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.watch__grid > div > .card,
+.watch__grid > .card {
+  height: 100%;
+}
+
+@media (max-width: 1279px) {
+  .watch__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.watch__card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.watch__card-title .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.watch__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.watch__big {
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin: var(--space-2) 0;
+}
+
+.watch__chart svg {
+  width: 100%;
+  height: auto;
+  min-height: 160px;
+}
+
+.watch__rotation-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.watch__rotation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.watch__rotation-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.watch__rotation-name {
+  font-weight: 600;
+}
+
+.watch__goal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.watch__goal .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.watch__goal--reached { color: var(--color-accent-text-small); }
+.watch__goal--short { color: var(--color-watch-text); }
+
+.watch__tremor-wrap {
+  margin-top: var(--space-2);
+}
+
+.watch__tremor-chart {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+.watch__tremor-days {
+  display: flex;
+  justify-content: space-between;
+}
+
+.watch__tremor-seg--none { fill: var(--color-line); background: var(--color-line); }
+.watch__tremor-seg--slight { fill: var(--color-accent-bright); background: var(--color-accent-bright); }
+.watch__tremor-seg--mild { fill: var(--color-watch); background: var(--color-watch); }
+.watch__tremor-seg--strong { fill: var(--color-alert); background: var(--color-alert); }
+
+.watch__legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.watch__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.watch__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.watch__monitoring-note {
+  margin-top: var(--space-2);
+}

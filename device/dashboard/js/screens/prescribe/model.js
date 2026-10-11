@@ -2,7 +2,7 @@
 // GET /patients/{id}/progress JSON -> the data the cards render, plus diffPrescription for the Save flow.
 // No DOM here, so these are unit-testable without fakedom.
 
-import { exerciseName } from "../../core/exercises.js";
+import { exerciseName, isWatchExercise, WATCH_EXERCISE_IDS, DEFAULT_ROTATION_GOAL_DEG } from "../../core/exercises.js";
 
 export const DEFAULT_REST_S = 60;
 export const DEFAULT_TEMPO_S = 3;
@@ -61,6 +61,7 @@ export function prescribeModel(patientJson, prescriptionsJson, progressJson, sel
     active: true,
     staged: Boolean(r.staged),
     selected: r.exercise_id === selId,
+    watch: isWatchExercise(r.exercise_id),
   }));
 
   const targets = (selectedRx && selectedRx.targets) || {};
@@ -74,10 +75,13 @@ export function prescribeModel(patientJson, prescriptionsJson, progressJson, sel
     kneeTarget: num(targets.knee_deg),
     tempoS: num(targets.tempo_s) ?? DEFAULT_TEMPO_S,
     lastChanged: fmtDayShort(selectedRx.created_at),
-    todayAvg: todayAvgText(progressJson, selId),
+    todayAvg: isWatchExercise(selId) ? null : todayAvgText(progressJson, selId),
+    // Watch exercises (forearm/shoulder turns, wrist bends): the turn goal is targets.rotation_deg (10-180°).
+    watch: isWatchExercise(selId),
+    rotationGoal: isWatchExercise(selId) ? (num(targets.rotation_deg) ?? DEFAULT_ROTATION_GOAL_DEG) : null,
   } : {
     exerciseId: null, sets: null, reps: null, restS: DEFAULT_REST_S, kneeTarget: null, tempoS: DEFAULT_TEMPO_S,
-    lastChanged: null, todayAvg: null,
+    lastChanged: null, todayAvg: null, watch: false, rotationGoal: null,
   };
 
   const flags = {
@@ -153,6 +157,12 @@ export function diffPrescription(original, edited) {
     const v = bounded === null ? null : roundToStep(bounded, 15);
     if (v !== null && v !== (oTargets.rest_s ?? DEFAULT_REST_S)) { targets.rest_s = v; targetsChanged = true; }
   }
+  if (e.rotationGoal != null && isWatchExercise(o.exercise_id)) {
+    const v = clamp(e.rotationGoal, 10, 180);
+    if (v !== null && v !== (num(oTargets.rotation_deg) ?? DEFAULT_ROTATION_GOAL_DEG)) {
+      targets.rotation_deg = v; targetsChanged = true;
+    }
+  }
   if (targetsChanged) { out.targets = targets; changed = true; }
 
   const ruleOverrides = {};
@@ -194,6 +204,21 @@ export function buildPutBody(original, diff) {
     body.rule_overrides = { ...(o.rule_overrides || {}), ...diff.rule_overrides };
   }
   return body;
+}
+
+// "Add a watch exercise" quick picks: the watch exercises not already in the plan (active or staged), so a
+// therapist can prescribe them even when the server has no GET /exercises library.
+export function watchExerciseChoices(activeIds) {
+  const have = new Set(activeIds || []);
+  return WATCH_EXERCISE_IDS.filter((id) => !have.has(id)).map((id) => ({ id, name: exerciseName(id), watch: true }));
+}
+
+// A `limits_changed` /ws/events message for this patient -> "Sent to Maya's watch" (the server pushes it once the
+// PATCH /patients/{id}/limits write lands). Null when the event is for someone else.
+export function limitsSentText(msg, pid, firstName) {
+  if (!msg || msg.type !== "limits_changed" || msg.patient_id !== pid) return null;
+  const who = String(firstName || "").trim();
+  return `Sent to ${who ? `${who}'s` : "the patient's"} watch`;
 }
 
 // hrLimit changed? (Save flow: PATCH /patients/{id}/limits only when this is true.)

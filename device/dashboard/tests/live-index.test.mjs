@@ -27,6 +27,7 @@ function makeSockets() {
       subs.get(channel).add(fn);
       return () => subs.get(channel)?.delete(fn);
     },
+    emit(channel, msg) { for (const fn of subs.get(channel) || []) fn(msg); },
     activeCount(channel) { return subs.get(channel)?.size || 0; },
   };
 }
@@ -150,5 +151,36 @@ test("with caps.has('/live/say'), the Send-a-cue panel renders the textarea and 
   await flush();
   assert.match(root.textContent, /Say it through Mira/);
   assert.match(root.textContent, /Knees over your toes/);
+  unmount();
+});
+
+test("Apple Watch: breather banner on start, cleared on end; HR recovery and the turn angle vs goal", async () => {
+  const { ctx, sockets } = makeCtx({ caseload: CASELOAD_WITH_LIVE });
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, ctx, { name: "live", params: { pid: "maya" }, query: {} });
+  await flush();
+  const banner = root.querySelector(".live__breather-banner");
+  assert.equal(banner.hidden, true);
+  assert.match(root.textContent, /Nothing from the watch yet/);
+
+  sockets.emit("events", sample("ws_events_breather.json"));
+  assert.equal(banner.hidden, false);
+  assert.equal(banner.textContent, "Breather — 128 bpm over limit 120");
+  sockets.emit("events", { ...sample("ws_events_breather.json"), state: "end", resolution: "hr_recovered" });
+  assert.equal(banner.hidden, true);
+
+  sockets.emit("events", sample("ws_events_hr_recovery.json"));
+  assert.match(root.textContent, /dropped 22 bpm in 1 min/);
+
+  sockets.emit("live", { first_name: "Maya", exercise_id: "forearm_rotation", rep: 4, t: Date.now() / 1000 });
+  sockets.emit("events", sample("ws_events_rotation_rep.json"));
+  const rotation = root.querySelector(".live__watch-rotation");
+  assert.equal(rotation.hidden, false);
+  assert.match(rotation.textContent, /68° of 80° goal/);
+  assert.match(rotation.textContent, /12° short/);
+
+  // A camera exercise is running: the watch turn row hides.
+  sockets.emit("live", { first_name: "Maya", exercise_id: "squat", rep: 1, t: Date.now() / 1000 });
+  assert.equal(rotation.hidden, true);
   unmount();
 });

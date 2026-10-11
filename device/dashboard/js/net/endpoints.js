@@ -6,6 +6,16 @@ export const ASSISTANT_TIMEOUT_MS = 30000;
 // POST /patients/{id}/messages takes {body (1-1000 chars), kind} (server/api/care.py TherapistMessageIn).
 export const MESSAGE_MAX_CHARS = 1000;
 
+// Apple Watch routes (server/api/watch_admin.py). Screens only call these when caps.has(...) says the running
+// server has them, so the dashboard still works against a server without the watch feature.
+export const WATCH_CAP = "/patients/{patient_id}/watch";
+export const WATCH_FEATURES_CAP = "/patients/{patient_id}/watch-features";
+
+// PATCH /patients/{id}/watch-features body: {tremor_monitoring: bool} (WatchFeaturesIn) — always a real boolean.
+export function watchFeaturesBody({ tremorMonitoring } = {}) {
+  return { tremor_monitoring: tremorMonitoring === true };
+}
+
 export function createEndpoints(api, therapistId) {
   return {
     caseload: () => api.get("/caseload", { therapist_id: therapistId }),
@@ -68,6 +78,11 @@ export function createEndpoints(api, therapistId) {
     markRead: (id) => api.post(`/notifications/${enc(id)}/read`),
     markAllRead: () => api.post("/notifications/read-all", { therapist_id: therapistId }),
     ack: (id) => api.post(`/notifications/${enc(id)}/ack`, { therapist_id: therapistId }),
+
+    // Apple Watch (gated on WATCH_CAP / WATCH_FEATURES_CAP): last 20 HR recoveries, last 20 rotation sets and
+    // 14 days of tremor; and the tremor-monitoring switch (the server pushes watch_features_changed).
+    patientWatch: (pid) => api.get(`/patients/${enc(pid)}/watch`),
+    setWatchFeatures: (pid, features) => api.patch(`/patients/${enc(pid)}/watch-features`, watchFeaturesBody(features)),
 
     stats: () => api.get("/stats"),
     pairingCode: (pid) => api.post(`/patients/${enc(pid)}/pairing-code`, { therapist_id: therapistId }),

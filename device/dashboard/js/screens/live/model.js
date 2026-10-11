@@ -77,3 +77,68 @@ export function cueHistoryModel(events) {
     .sort((a, b) => Number(b.t) - Number(a.t))
     .map((e) => ({ time: fmtClockShort(e.t), text: e.text }));
 }
+
+// ---- Apple Watch (server/samples/ws_events_breather.json, _hr_recovery, _rotation_rep, _rotation_set) ----------
+
+const BREATHER_END = {
+  hr_recovered: "Breather over — heart rate back under the limit",
+  escalated: "Breather escalated — check on the patient",
+  stopped: "Breather ended — session stopped",
+};
+
+// A `breather` event -> the banner: {active: true, text: "Breather — 128 bpm over limit 120"} on start; on end
+// {active: false, text: <how it ended> | null} (the banner clears; the line stays as a quiet note).
+export function breatherModel(msg) {
+  if (!msg || msg.type !== "breather") return null;
+  const bpm = typeof msg.bpm === "number" ? Math.round(msg.bpm) : null;
+  const limit = typeof msg.limit === "number" ? Math.round(msg.limit) : null;
+  if (msg.state === "start") {
+    const over = bpm !== null && limit !== null ? `${bpm} bpm over limit ${limit}`
+      : bpm !== null ? `${bpm} bpm` : "heart rate over the limit";
+    return { active: true, text: `Breather — ${over}` };
+  }
+  if (msg.state === "end") return { active: false, text: BREATHER_END[msg.resolution] || "Breather over" };
+  return null;
+}
+
+// The latest `hr_recovery` -> "Set 2 recovery: 126 → 104 bpm, dropped 22 bpm in 1 min".
+export function hrRecoveryLine(msg) {
+  if (!msg || msg.type !== "hr_recovery" || typeof msg.drop_bpm !== "number") return null;
+  const set = msg.set_index != null ? `Set ${msg.set_index} recovery` : "Recovery";
+  const span = typeof msg.peak_bpm === "number" && typeof msg.bpm_60s === "number"
+    ? `${Math.round(msg.peak_bpm)} → ${Math.round(msg.bpm_60s)} bpm, ` : "";
+  return `${set}: ${span}dropped ${Math.round(msg.drop_bpm)} bpm in 1 min`;
+}
+
+// `rotation_rep` -> the turn just made vs the goal; `rotation_set` -> the set's best/avg. `reached` drives an
+// icon + text (never colour alone).
+export function rotationLiveModel(msg) {
+  if (!msg) return null;
+  const deg = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
+  if (msg.type === "rotation_rep") {
+    const angle = deg(msg.angle_deg);
+    const goal = deg(msg.goal_deg);
+    const reached = msg.reached === true || (angle !== null && goal !== null && angle >= goal);
+    const rep = msg.rep != null ? `Rep ${msg.rep}${msg.reps_target != null ? ` of ${msg.reps_target}` : ""}` : "Turn";
+    return {
+      exerciseId: msg.exercise_id || null,
+      text: `${rep} · ${angle !== null ? `${angle}°` : "—"}${goal !== null ? ` of ${goal}° goal` : ""}`,
+      reached,
+      status: reached ? "Goal reached" : goal !== null && angle !== null ? `${goal - angle}° short` : "Below goal",
+    };
+  }
+  if (msg.type === "rotation_set") {
+    const best = deg(msg.best_deg);
+    const goal = deg(msg.goal_deg);
+    const reached = best !== null && goal !== null && best >= goal;
+    const avgDeg = deg(msg.avg_deg);
+    return {
+      exerciseId: msg.exercise_id || null,
+      text: `Set ${msg.set_index ?? "—"} done · best ${best !== null ? `${best}°` : "—"}, `
+        + `avg ${avgDeg !== null ? `${avgDeg}°` : "—"}${goal !== null ? ` (goal ${goal}°)` : ""}`,
+      reached,
+      status: reached ? "Goal reached" : "Below goal",
+    };
+  }
+  return null;
+}
