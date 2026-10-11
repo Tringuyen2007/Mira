@@ -150,6 +150,8 @@ Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" b
 | `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
 | `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
 | `DEMO_TOOLS_ENABLED=1` | 0 | enables `POST /demo/trigger_fall` (rehearsals only) |
+| `MOCK_LOOP=1` | 0 | the mock squat program repeats forever instead of finishing after 3 sets (pre-Plan-2 behaviour) |
+| `AUTO_STOP_AFTER_LAST_SET=0` | 1 | don't auto-end the session once `set == sets_target` (needed for engines that already send their own `stopped`) |
 
 ## Run
 
@@ -419,6 +421,82 @@ takes effect the next time a session starts).
 - `GEMINI_MODE=fake` ships a default coach fake (`register_fake("coach", ...)`) that reads the set's
   stats and history and nudges the next set / picks a focus cue when a form flag was seen, so the agent
   is exercised in a plain `make run` with no live Gemini calls.
+
+## Session end and analysis
+
+Every session ends through **one** code path, whichever gets there first: `POST /sessions/{id}/stop` (REST),
+the engine emitting `stopped` (its own program finished), or the last set's `set_done`
+(`set == sets_target`, for engines that don't send `stopped`; disable with `AUTO_STOP_AFTER_LAST_SET=0`).
+All three land on `SessionRegistry.stop()`, which is idempotent (a second stop for the same session is a
+no-op, tracked in `self.ended`) and fires `on_stop` hooks once per session — sync hooks run inline, a hook
+that returns a coroutine is scheduled as a task so `stop()` never waits on it, and a failing hook is logged,
+never raised. `server/session_end.py`'s `SessionEnder` is the `EngineBridge` event subscriber that implements
+the `stopped` / last-set rules above.
+
+The **mock** engine (`MIRA_SOURCE=mock`) now finishes its 3-set program and emits `stopped {reason:
+"program_complete"}` instead of looping forever, so the demo goes through a real session end every time.
+Three env flags control it:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MOCK_LOOP=1` | 0 | the mock program repeats forever (pre-Plan-2 behaviour); see Kill switches above |
+| `MOCK_AUTO_RESTART_S` | `30.0` | mock mode only: `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one; `0` disables the auto-restart so the LCD stays on "Session complete" |
+| `AUTO_STOP_AFTER_LAST_SET=0` | 1 | see Kill switches above |
+| `ANALYST_DELAY_S` | `2.0` | how long `SessionAnalyst` waits after a session ends before reading it, so the last reps/form_events writes have landed |
+
+**`SessionAnalyst`** (`server/agents/session_analyst.py`) is registered as a `SessionRegistry.on_stop` hook
+and runs once per ended session, after `ANALYST_DELAY_S`:
+
+- Reads the finished session's `reps`, `form_events`, pain/effort and the last 5 same-patient-and-exercise
+  sessions (`queries.previous_sessions_stats`) from the database.
+- Computes the **form score deterministically** — `round(100 * mean(reps.quality))` (never from the LLM;
+  `quality` is 0..1 per `persist.QUALITY_SCORES`) — along with `good_reps` (`quality >= 1.0`) and `sets_done`
+  (distinct set numbers). An empty session (0 reps) under 20 s is skipped entirely (no analysis, no event:
+  a false start); 0 reps at 20 s or more still gets a template analysis ("No reps were counted…").
+- Asks Gemini (`analyst` agent, `models.smart()`, `json_mode=True`, 12 s timeout) for
+  `{spoken, note, highlights, next_focus}` with the same `validate_text`/`validate_json` number guard and
+  one retry as `SessionVoice`'s per-set summary; any validation failure (banned content, a number not in
+  DATA, bad JSON) falls back to a **template** analysis and `source` becomes `"template"` instead of `"ai"`.
+  Flagged moments come from `form_events` joined to the reps, labelled via `cue_library.pick(rule_id)` (falling
+  back to `session_voice.FLAG_REMINDERS`, then the humanised rule id), capped at 12, most severe/earliest
+  first.
+- Stores one row in **`session_analyses`** (`server/db/migrations/002_session_analysis.sql`; `session_id`
+  PK → `sessions(id) ON DELETE CASCADE`, `form_score`, `reps_total`, `good_reps`, `sets_done`, `spoken`,
+  `note` (stored **without** the `AI_DRAFT_LABEL`, added back on read/emit), `highlights`, `next_focus`,
+  `flagged_moments`, `comparison`, `audio_url`, `source`, `model`). A second analysis for the same session
+  upserts the row (latest values win).
+- Emits a `session_summary` event on `/ws/events` and `/device/`:
+  `{session_id, t, exercise_id, exercise_name, form_score, reps_total, good_reps, sets_done, spoken, note
+  (labeled "AI draft — review before use: …"), highlights: [{kind, text}], next_focus, flagged_moments:
+  [{set, rep, rule_id, label, severity, t}], comparison: {prev_sessions, good_rep_rate_delta, rom_delta_deg,
+  asym_delta_pct, form_score_delta}, audio_url, source: ai|template, model}`. Sample:
+  `server/samples/ws_events_session_summary.json`.
+- Raises a therapist notification (`kind="session_summary"`, `severity="info"`, title `"<first name> finished
+  <exercise>"`, body `"Form <score>/100 · <good>/<total> good reps"`, `link="/sessions/{id}"`, deduped per
+  session) through `server.notify.notifications.create`, same as the other agents.
+- Never raises into its caller: every DB read is individually guarded and an unexpected error is logged and
+  swallowed, so a broken analysis can never break the live stream or `stop()`.
+
+**New/changed REST:**
+
+- `GET /sessions/{id}` gains `"exercise_name"` (display name for `exercise_id`) and `"analysis"`
+  — the `session_analyses` row (with `note` labeled) or `null` if the analyst hasn't finished yet. Poll this
+  until `analysis` is non-null, or just listen for `session_summary` on `/ws/events`.
+- `POST /sessions/{id}/checkin` (owner or full scope) — `{pain_post?: 0..10, effort?: 1..10, note?: ≤1000
+  chars}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` also injects
+  `{"type": "command", "name": "pain", "payload": {"level": pain_post, "when": "post"}, "session_id": id}`
+  into the engine reverse channel, opening a Safety Guardian incident exactly as a live pain report would.
+- `GET /patients/{id}/sessions?limit=30&before=` (owner or full scope) → `{patient_id, sessions: [...]}`,
+  newest first, ended and non-simulated sessions only, each row carrying `form_score`/`good_reps`/
+  `reps_total`/`spoken_preview` (first 140 chars of `spoken`) alongside the usual session fields.
+
+Samples for all of the above: `server/samples/ws_events_session_summary.json`,
+`server/samples/rest_get_patient_sessions.json`, `server/samples/rest_post_session_checkin.json`, and the
+regenerated `server/samples/rest_get_session.json` (now carries `exercise_name`/`analysis`).
+
+**LCD:** the kiosk's "Session complete" screen (`device/kiosk/README.md`) shows while a `session_summary`
+event is ≤ 60 s old and the phase is `idle`, `rest` or `done` — the form score out of 100, "N of M good
+reps", and the AI `spoken` line (captioned and voiced the same way as every other kiosk line).
 
 ## Care Copilot (therapist Q&A, plan proposals)
 

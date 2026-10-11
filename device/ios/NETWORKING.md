@@ -144,7 +144,7 @@ channel (also live and pose) receives `{"type":"ping"}`, which the app ignores.
 |---|---|
 | `/ws/pose` ~25 Hz | `{t, joints[33][3], confidence[33], load_l_pct, flags}` (`ws_pose.json`) |
 | `/ws/live` ~10 Hz | `{t, phase, exercise_id, rep, reps_target, set, sets_target, countdown, main_angle, load_l_pct, load_conf, hr, flags, cue_id, paused}`; most are null while idle (`ws_live.json`) |
-| `/ws/events` server → app | `arrived`, `greeting{text,audio_url}`, `awaiting_gesture`, `gesture`, `countdown{n,…}`, `cue{id,text,audio_url}`, `rep{index,quality,flags,…}`, `set_done`, `paused{reason}`, `resumed`, `fatigue`, `fall{stage,…}`, `fall_status{posture,moving,…}`, `alert{alert_id,kind,step,patient_id,message,show_call_911}`, `haptic{pattern}`, `summary_ready{spoken,therapist_note,audio_url}`, `coach_adapt{action,detail}`, `proposal_created`, `proposal_decided`, `device_health`, `hr` (`ws_events_*.json`) |
+| `/ws/events` server → app | `arrived`, `greeting{text,audio_url}`, `awaiting_gesture`, `gesture`, `countdown{n,…}`, `cue{id,text,audio_url}`, `rep{index,quality,flags,…}`, `set_done`, `paused{reason}`, `resumed`, `fatigue`, `fall{stage,…}`, `fall_status{posture,moving,…}`, `alert{alert_id,kind,step,patient_id,message,show_call_911}`, `haptic{pattern}`, `summary_ready{spoken,therapist_note,audio_url}`, `session_summary{…}` (see "Session end and the Summary screen" below), `coach_adapt{action,detail}`, `proposal_created`, `proposal_decided`, `device_status`, `device_health`, `hr` (`ws_events_*.json`) |
 | `/ws/events` app → server | only `command{name: start\|pause\|skip\|stop\|pain\|im_ok, payload}`, `hr{t,bpm}`, `wrist{t,quat,accel}`, `watch_button{name}`, `device_health{t,battery_pct,app}` (`ws_events_client_*.json`); anything else is dropped. At most 20 messages/s per socket (excess silently dropped). Accepted messages are echoed to every `/ws/events` client. `pain` takes `payload.level` (0–10); ≥ 7 opens a safety incident. |
 
 `audio_url` values are server paths (`/audio/<file>.mp3`), resolved against the
@@ -154,12 +154,37 @@ server address. Joint angles (`main_angle`) are knee flexion in degrees (0 = str
 free-form data: prescription targets/limits, proposal evidence/changes, Copilot
 charts, `coach_adapt.detail`, command payloads, unknown future events):
 `GET /health`, `GET /calibration/status`, `POST /sessions {patient_id?, exercise_id?}`,
-`POST /sessions/{id}/stop`, `POST /sessions/{id}/share`, `GET /sessions/{id}`,
-`GET /sessions/{id}/frames?downsample=`, `GET /patients/{id}/progress`,
-`GET /prescriptions/{id}`, `GET /proposals`, `POST /proposals/{id}/approve|edit|dismiss
-{therapist_id, change?, reason?}`, `GET /alerts`, `POST /alerts/{id}/resolve`,
-`GET /notifications/count`, `POST /copilot/ask {question, patient_id?}`.
+`POST /sessions/{id}/stop`, `POST /sessions/{id}/checkin {pain_post?, effort?, note?}`,
+`POST /sessions/{id}/share`, `GET /sessions/{id}` (now also carries `exercise_name` and
+`analysis`), `GET /sessions/{id}/frames?downsample=`, `GET /patients/{id}/progress`,
+`GET /patients/{id}/sessions?limit=&before=`, `GET /prescriptions/{id}`, `GET /proposals`,
+`POST /proposals/{id}/approve|edit|dismiss {therapist_id, change?, reason?}`, `GET /alerts`,
+`POST /alerts/{id}/resolve`, `GET /notifications/count`, `POST /copilot/ask {question, patient_id?}`.
 History routes need the database and return 503 with `DB_DISABLED=1`.
+
+## Session end and the Summary screen
+
+Every session the app runs follows one flow, start to finish:
+
+1. **Start** — `POST /sessions {patient_id?, exercise_id?}` → `{session_id, patient_id, exercise_id,
+   started_at, first_name}`. The app opens `/ws/live` and `/ws/events` (or they're already open) and drives
+   the Live screen from those streams.
+2. **Stop** — the patient taps "End session": `POST /sessions/{id}/stop` → `{session_id, stopped: true}`.
+   (A session can also end on its own — the engine's `stopped` event or the last set — in which case the
+   app sees `phase: "done"` on `/ws/live` without having called `stop` itself.)
+3. **Wait for the analysis** — open `SummaryView(sessionID:)` and poll `GET /sessions/{id}` every few
+   seconds until its `analysis` field is non-null (up to ~60 s: `SessionAnalyst` runs `ANALYST_DELAY_S`
+   after the stop, plus however long the Gemini call takes), **and** listen for a `session_summary` event on
+   `/ws/events` with a matching `session_id` — whichever arrives first fills the screen immediately instead
+   of waiting out the next poll. `GET /sessions/{id}`'s `analysis` and the `session_summary` event carry the
+   same shape: `form_score`, `reps_total`, `good_reps`, `sets_done`, `spoken` (voiced via `audio_url` or
+   on-device TTS), `note`, `highlights`, `next_focus`, `flagged_moments`, `comparison`, `source`, `model`.
+4. **Check in** — the patient rates pain/effort and adds a note: `POST /sessions/{id}/checkin {pain_post?,
+   effort?, note?}` → `{session_id, pain_post, effort, note_saved}`. A `pain_post >= 7` opens a Safety
+   Guardian incident on the server side (same as a live pain report), so the app should treat it the same
+   way it treats any other incident `alert`.
+5. **Share** — if the patient opts in, `POST /sessions/{id}/share` marks the session shared with their
+   therapist.
 
 ## Mira LCD
 
