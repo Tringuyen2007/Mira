@@ -30,3 +30,11 @@ read (so `read_at` is set). `rest_post_me_messages` is the response to the patie
 `POST /me/messages`. `rest_get_patient_milestones` is `GET /patients/maya/milestones` with one
 `memory_events` row of `kind='milestone'` inserted directly. `ws_events_message` is the `message` event a
 therapist's `POST /patients/{id}/messages` emits on the patient's `/ws/events` socket.
+
+Apple Watch (tri-watch, contract `docs/superpowers/plans/2026-10-11-watch-contract.md`): `rest_get_me_watch` is
+`GET /me/watch` (the iPhone's `setup` push to the watch); `rest_post_me_tremor_request` / `rest_post_me_tremor` are
+`POST /me/tremor` (403 `{"detail":"tremor monitoring off"}` while the therapist hasn't enabled it);
+`rest_patch_patient_limits_request` / `rest_patch_patient_limits` are the therapist-page `PATCH /patients/{id}/limits`
+contract (the response file is byte-identical to therapist-page's); `rest_patch_patient_watch_features_request` /
+`rest_patch_patient_watch_features` and `rest_get_patient_watch` are the therapist's watch routes. Files ending in
+`_request` are request bodies; the others are responses.

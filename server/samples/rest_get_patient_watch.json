@@ -1,0 +1,6 @@
+{
+  "patient_id": "maya",
+  "hr_recovery": [{"session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f", "set_index": 2, "peak_bpm": 126, "bpm_60s": 104, "drop_bpm": 22, "time": "2026-10-11T09:01:00Z"}],
+  "rotation_sets": [{"session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f", "exercise_id": "forearm_rotation", "set_index": 1, "angles": [62.0, 82.0], "best_deg": 82.0, "avg_deg": 72.0, "goal_deg": 80.0, "time": "2026-10-11T09:05:00Z"}],
+  "tremor": [{"day": "2026-10-11", "none_min": 420, "slight_min": 190, "mild_min": 25, "strong_min": 0, "unknown_min": 60, "dyskinesia": "few", "source": "simulated"}]
+}

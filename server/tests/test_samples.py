@@ -21,6 +21,15 @@ REST_SAMPLES_REQUIRED_KEYS = {
     "rest_get_me_messages.json": {"messages"},
     "rest_post_me_messages.json": {"message"},
     "rest_get_patient_milestones.json": {"patient_id", "milestones"},
+    "rest_get_me_watch.json": {"first_name", "hr_limit", "hr_limit_set_by_name", "therapist_name",
+                               "tremor_monitoring", "prefs", "plan"},
+    "rest_post_me_tremor_request.json": {"days"},
+    "rest_post_me_tremor.json": {"stored"},
+    "rest_patch_patient_limits_request.json": {"therapist_id", "hr_limit"},
+    "rest_patch_patient_limits.json": {"patient_id", "hr_limit"},
+    "rest_patch_patient_watch_features_request.json": {"tremor_monitoring"},
+    "rest_patch_patient_watch_features.json": {"patient_id", "tremor_monitoring"},
+    "rest_get_patient_watch.json": {"patient_id", "hr_recovery", "rotation_sets", "tremor"},
 }
 
 
