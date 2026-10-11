@@ -454,3 +454,78 @@ struct CopilotResponse: Codable, Sendable {
     let proposals: [Int]?
     let fallback: String?
 }
+
+// MARK: - Pairing and /me (Plan 1; server/samples/rest_post_pair.json, rest_get_me.json)
+
+struct PairProfile: Codable, Sendable {
+    let name: String
+    let heightCm: Double
+    let massKg: Double
+    var affectedSide: String?   // "left" | "right" | "none"
+    var condition: String?
+}
+struct PairContact: Codable, Sendable, Equatable {
+    let name: String
+    let phone: String
+    var relationship: String?
+}
+struct PairRequest: Codable, Sendable {
+    let code: String
+    var deviceName: String?
+    let profile: PairProfile
+    var emergencyContact: PairContact?
+    var alertTherapist: Bool = true
+}
+struct PairResponse: Codable, Sendable {
+    let patientId: String
+    let token: String
+    let me: MeResponse
+}
+
+struct MePatient: Codable, Sendable {
+    let id: String
+    let name: String
+    let firstName: String
+    let age: Int?
+    let heightCm: Double?, massKg: Double?
+    let affectedSide: String?, condition: String?
+    let hrLimit: Int?
+    let emergencyContact: PairContact?
+    let alertTherapist: Bool
+    let shareByDefault: Bool
+    let devicePrefs: JSONValue?
+    let nextVisitAt: String?
+}
+struct MeTherapist: Codable, Sendable { let id: String; let name: String; let clinic: String?; let phone: String? }
+struct MePrescription: Codable, Sendable, Identifiable {
+    var id: String { exerciseId }
+    let exerciseId: String
+    let exerciseName: String
+    let sets: Int?
+    let reps: Int?
+    let targets: JSONValue?
+    let limits: JSONValue?
+    let version: Int?
+    let metricLabel: String?, unit: String?, targetKey: String?
+}
+struct LcdStatus: Codable, Sendable { let online: Bool; let lastSeen: Double? }
+struct MeResponse: Codable, Sendable {
+    let patient: MePatient
+    let therapist: MeTherapist?
+    let prescriptions: [MePrescription]
+    let lcd: LcdStatus?
+    let calibration: CalibrationStatus?
+}
+
+struct MeProfilePatch: Codable, Sendable {
+    var name: String?
+    var heightCm: Double?, massKg: Double?
+    var affectedSide: String?, condition: String?
+}
+struct MeUpdate: Codable, Sendable {
+    var profile: MeProfilePatch?
+    var emergencyContact: PairContact?
+    var alertTherapist: Bool?
+    var shareByDefault: Bool?
+    var devicePrefs: JSONValue?
+}

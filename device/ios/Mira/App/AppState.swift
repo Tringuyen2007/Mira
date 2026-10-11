@@ -132,11 +132,20 @@ final class AppState {
     @ObservationIgnored private var token: String?
     private(set) var tokenHint: String?
 
-    var isPaired: Bool { token != nil }
+    /// The server's patient id for this phone, set by a successful /pair. UserDefaults `patientID.v1`.
+    private(set) var patientID: String? { didSet { defaults.set(patientID, forKey: "patientID.v1") } }
+    private(set) var me: MeResponse?
+    private(set) var pairingError: String?
+    private(set) var isPairing = false
+    @ObservationIgnored private let urlSession: URLSession
 
-    init(defaults: UserDefaults = .standard, tokenStore: TokenStore = KeychainTokenStore()) {
+    var isPaired: Bool { token != nil }
+    var isLinked: Bool { patientID != nil && isPaired }
+
+    init(defaults: UserDefaults = .standard, tokenStore: TokenStore = KeychainTokenStore(), urlSession: URLSession = .shared) {
         self.defaults = defaults
         self.tokenStore = tokenStore
+        self.urlSession = urlSession
         preferences = defaults.data(forKey: "miraPreferences.v1")
             .flatMap { try? JSONDecoder().decode(MiraPreferences.self, from: $0) } ?? MiraPreferences()
         let draft = defaults.data(forKey: "onboardingDraft.v1")
@@ -148,6 +157,8 @@ final class AppState {
         connectionEnabled = defaults.bool(forKey: "connectionEnabled")
         token = tokenStore.load()
         tokenHint = token.map(PairingToken.masked)
+        // Note: patientID's didSet isn't called from init, which is what we want.
+        patientID = defaults.string(forKey: "patientID.v1")
     }
 
     func advanceOnboarding() {
@@ -171,7 +182,7 @@ final class AppState {
 
     var apiClient: APIClient? {
         guard let address = try? ServerAddress(serverAddress) else { return nil }
-        return APIClient(address: address, token: token)
+        return APIClient(address: address, token: token, session: urlSession)
     }
 
     /// Saves the address and, when one is entered, a new token (an empty token field
@@ -207,11 +218,74 @@ final class AppState {
         tokenStore.delete()
         token = nil
         tokenHint = nil
+        patientID = nil
+        me = nil
+        pairingError = nil
         configurationVersion = UUID()
         restStatus = nil
         if connectionEnabled, let address = try? ServerAddress(serverAddress) {
             liveSession.connect(to: address, token: nil, reset: true)
         }
+    }
+
+    /// Builds the /pair request from the onboarding draft and preferences.
+    func pairRequest(deviceName: String) -> PairRequest? {
+        let d = onboarding
+        guard d.therapistCode.count == 6, let height = d.height, let mass = d.bodyMass,
+              let name = d.patientName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        let side: String? = switch d.affectedSide {
+        case .left: "left"
+        case .right: "right"
+        case .notApplicable: "none"
+        case .both, .notSelected: nil
+        }
+        let relationship = preferences.contactRelationship.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = d.contactIsValid ? PairContact(name: d.emergencyContactName, phone: d.emergencyContactPhone,
+                                                     relationship: relationship.isEmpty ? nil : relationship) : nil
+        return PairRequest(code: d.therapistCode, deviceName: deviceName,
+                           profile: PairProfile(name: name, heightCm: height, massKg: mass, affectedSide: side,
+                                                condition: d.condition.isEmpty ? nil : d.condition),
+                           emergencyContact: contact, alertTherapist: preferences.alertTherapist)
+    }
+
+    /// POST /pair with the draft; on success the patient token replaces any saved token and sockets reconnect.
+    @discardableResult
+    func pair(deviceName: String = "iPhone") async -> Bool {
+        guard !isPairing, let body = pairRequest(deviceName: deviceName) else {
+            pairingError = "Enter your name, height, weight and the 6-character code first."
+            return false
+        }
+        guard let address = try? ServerAddress(serverAddress) else {
+            pairingError = APIError.invalidAddress.localizedDescription
+            return false
+        }
+        isPairing = true
+        pairingError = nil
+        defer { isPairing = false }
+        do {
+            let response = try await APIClient(address: address, token: nil, session: urlSession).pair(body)
+            try tokenStore.save(response.token)
+            token = response.token
+            tokenHint = PairingToken.masked(response.token)
+            patientID = response.patientId
+            me = response.me
+            configurationVersion = UUID()
+            configurationError = nil
+            connectionEnabled = true
+            defaults.set(true, forKey: "connectionEnabled")
+            if foreground { liveSession.connect(to: address, token: token, reset: true) }
+            return true
+        } catch {
+            pairingError = PairingError.message(for: error)
+            return false
+        }
+    }
+
+    func refreshMe() async {
+        guard patientID != nil, let apiClient else { return }
+        do { me = try await apiClient.me() } catch APIError.unauthorized {
+            configurationError = APIError.unauthorized.localizedDescription
+        } catch { /* keep the cached `me`; Home shows the offline banner from the socket state */ }
     }
 
     func disconnect() {
@@ -228,6 +302,7 @@ final class AppState {
         } else if !active {
             liveSession.disconnect()
         }
+        if active, patientID != nil { Task { await refreshMe() } }
     }
 
     func testREST() async {
@@ -272,4 +347,18 @@ struct MiraPreferences: Codable, Equatable {
     var phoneReminder = true
     var deviceReminder = false
     var watchReminder = false
+}
+
+enum PairingError {
+    static func message(for error: Error) -> String {
+        switch error {
+        case APIError.http(404, _): return "That code isn't recognised. Check it with your therapist."
+        case APIError.http(410, _): return "That code has expired or was already used. Ask your therapist for a new one."
+        case APIError.http(429, _): return "Too many attempts. Wait a minute and try again."
+        case APIError.http(422, _): return "Mira couldn't read your details. Check your name, height and weight."
+        case APIError.http(503, _), APIError.notConnected: return "Mira's server is offline right now. You can save your code and try again later."
+        case let api as APIError: return api.localizedDescription
+        default: return "Mira's server is offline right now. You can save your code and try again later."
+        }
+    }
 }

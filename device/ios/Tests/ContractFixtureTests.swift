@@ -128,5 +128,12 @@ final class ContractFixtureTests: XCTestCase {
         let answer = try decode(CopilotResponse.self, "rest_post_copilot_ask")
         XCTAssertFalse(answer.sql.isEmpty)
         XCTAssertFalse(answer.charts.isEmpty)
+        let paired = try decode(PairResponse.self, "rest_post_pair")
+        XCTAssertEqual(paired.patientId, "maya")
+        XCTAssertTrue(paired.token.hasPrefix("pt_"))
+        let me = try decode(MeResponse.self, "rest_get_me")
+        XCTAssertEqual(me.therapist?.name, "Dr. Okafor")
+        XCTAssertEqual(me.prescriptions.first?.exerciseName.isEmpty, false)
+        XCTAssertNotNil(me.lcd)
     }
 }

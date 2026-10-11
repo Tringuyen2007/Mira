@@ -1,7 +1,7 @@
 import Foundation
 
 enum APIError: LocalizedError, Equatable {
-    case invalidAddress, invalidResponse, http(Int, String), notConnected, notPaired, unauthorized
+    case invalidAddress, invalidResponse, http(Int, String), notConnected, notPaired, unauthorized, forbidden
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +11,7 @@ enum APIError: LocalizedError, Equatable {
         case .notConnected: return "Mira server offline. Reconnect before sending a command."
         case .notPaired: return "Not paired. Enter the Mira server token in Settings."
         case .unauthorized: return "Token rejected by the Mira server. Check the token in Settings."
+        case .forbidden: return "This isn't your data to see."
         }
     }
 }
@@ -87,6 +88,7 @@ struct APIClient {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         if response.statusCode == 401 { throw APIError.unauthorized }
+        if response.statusCode == 403 { throw APIError.forbidden }
         guard (200..<300).contains(response.statusCode) else {
             throw APIError.http(response.statusCode, String(decoding: data.prefix(512), as: UTF8.self))
         }
@@ -138,4 +140,16 @@ struct APIClient {
         try await request("POST", path: ["alerts", id, "resolve"], body: json(body))
     }
     func notificationCount() async throws -> NotificationCount { try await request(path: ["notifications", "count"]) }
+
+    // MARK: Pairing and /me (Plan 1)
+
+    /// Public: a therapist code plus the onboarding profile → a patient token. Never retried.
+    func pair(_ body: PairRequest) async throws -> PairResponse {
+        let data = try await perform("POST", path: ["pair"], body: json(body), authenticated: false)
+        return try WireJSON.decoder().decode(PairResponse.self, from: data)
+    }
+    func me() async throws -> MeResponse { try await request(path: ["me"]) }
+    func updateMe(_ body: MeUpdate) async throws -> MeResponse { try await request("PUT", path: ["me"], body: json(body)) }
+    func exportMe() async throws -> Data { try await perform("GET", path: ["me", "export"]) }
+    func deleteMe() async throws { _ = try await perform("DELETE", path: ["me"]) }
 }
