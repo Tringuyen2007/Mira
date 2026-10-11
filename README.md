@@ -107,6 +107,27 @@ command and the publish URL template and it starts/stops that process with each 
 `--whip-url https://45.76.255.253/media/mira/{session_id}/whip --whip-cmd "<publisher> {whip_url}"`.
 Without both flags the dashboard shows the 3D avatar only.
 
+### Camera video next to the avatar (MediaMTX, WHIP in / WHEP out)
+
+The pose stream above never carries video. For the therapist dashboard's camera panel, the box runs MediaMTX and the
+camera laptop publishes over WHIP from Chrome; nothing is recorded.
+
+1. **Box, once:** `tools/mediamtx/install_mediamtx.sh` (from your laptop, same env as `deploy_vultr.sh`) installs
+   MediaMTX with `tools/mediamtx/mediamtx.yml`, a systemd unit, opens 8889/tcp and 8189/udp+tcp, sets
+   `MIRA_WHEP_URL=http://<host>:8889/mira/{session_id}/whep` in the box's `.env` and restarts `mira`.
+   MediaMTX authorises every publish and read through `POST /media/auth` on the Mira server: publishing needs
+   `MIRA_VISION_TOKEN`, playback needs the dashboard token (the dashboard already sends it, `device/dashboard/js/media/whep.js`).
+2. **Camera laptop, per session:** open `tools/whip_publish.html` in Chrome (serve the folder, e.g.
+   `python -m http.server 8077` in `tools/`, Chrome blocks camera access on `file://`), paste the vision token once
+   (kept in that browser's localStorage), pick camera B and press **Publish** with the session's URL
+   `http://<host>:8889/mira/<session_id>/whip`. The vision agent can open it for you:
+   ```bash
+   python -m vision.agent ... --whip-url "http://<host>:8889/mira/{session_id}/whip" \
+     --whip-cmd "open -a 'Google Chrome' http://127.0.0.1:8077/whip_publish.html?autostart=1&url={whip_url}"
+   ```
+   `&fake=1` publishes a moving test card instead of the webcam (keep that tab in front; a hidden tab stops painting it).
+3. The dashboard's Live screen asks `GET /live/media` and attaches the WHEP stream beside the pose view.
+
 For the therapist's side-by-side camera footage and Eric's 3D body mesh, use the companion WebRTC media contract in
 [`docs/vision-media-contract.md`](docs/vision-media-contract.md). Video uses WHIP/WHEP; `/ws/vision` remains pose and
 mesh-control data only. `MIRA_WHEP_URL` is intentionally unset by default, so no raw camera video is exposed until

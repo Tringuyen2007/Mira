@@ -18,7 +18,7 @@ from server.tests.conftest import AUTH, TOKEN
 
 TUNNEL = "mira-test.trycloudflare.com"
 RETELL_KEY = "retell-test-key-abcdef123456"
-PUBLIC_ROUTES = {"/health", "/retell/webhook", "/pair"}
+PUBLIC_ROUTES = {"/health", "/retell/webhook", "/pair", "/media/auth"}
 
 
 @pytest.fixture

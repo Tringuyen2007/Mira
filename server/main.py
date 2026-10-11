@@ -36,6 +36,7 @@ from server.api import alerts, calibration, demo, health, lcd_link, patients, pr
 from server.api import care as care_api
 from server.api import me as me_api
 from server.api import me_watch
+from server.api import media as media_api
 from server.api import watch_admin
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
@@ -576,6 +577,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token
     app.include_router(pair_api.router)  # /pair is public; its two admin routes carry their own require_token
+    app.include_router(media_api.router)  # /media/auth: MediaMTX's auth hook; credentials travel in its body
     app.include_router(me_api.router)  # routes carry their own require_principal
     app.include_router(care_api.router)  # routes carry their own require_principal
     app.include_router(me_watch.router)  # routes carry their own require_principal
