@@ -21,6 +21,8 @@ EYE_HEIGHT_RATIO = 0.936  # eye height / stature
 UPRIGHT_KNEE_DEG = 150.0  # roughly standing (MediaPipe's world-shape knees median ~155°)
 UPRIGHT_MIN_FRAMES = 15  # at least this many standing frames before correcting the lean
 UPRIGHT_MAX_DEG = 20.0  # never tilt the body more than this
+UPRIGHT_HIP_DEG = 160.0  # trunk in line with the legs (shoulders, hips, knees): not bent over
+UPRIGHT_SPREAD_DEG = 6.0  # standing frames whose lean differs by more than this (median) don't agree on one
 
 
 def world_shape(pose: PoseResult, cam: CameraConfig) -> np.ndarray | None:
@@ -62,20 +64,27 @@ def _side_mean(body: np.ndarray, used: list[int]) -> np.ndarray:
     return np.mean([np.median(body[side][:, [0, 2]], axis=0) for side in sides if side], axis=0)
 
 
-def _knee_deg(J: np.ndarray, hip: int, knee: int, ankle: int) -> float:
-    u, v = J[hip] - J[knee], J[ankle] - J[knee]
+def _angle_deg(a: np.ndarray, at: np.ndarray, b: np.ndarray) -> float:
+    """Angle (degrees) at point `at` between the directions to a and to b."""
+    u, v = a - at, b - at
     with np.errstate(invalid="ignore"):
         c = u @ v / (np.linalg.norm(u) * np.linalg.norm(v))
     return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
+
+
+def _knee_deg(J: np.ndarray, hip: int, knee: int, ankle: int) -> float:
+    return _angle_deg(J[hip], J[knee], J[ankle])
 
 
 def upright_rotation(shapes, min_frames: int = UPRIGHT_MIN_FRAMES, max_deg: float = UPRIGHT_MAX_DEG
                      ) -> np.ndarray | None:
     """Rotation (tilt only, about a horizontal axis) that makes the median ankles-to-shoulders line of
     `shapes` (bodies in the mat frame) vertical, from frames where the person is roughly standing (both
-    knees above UPRIGHT_KNEE_DEG; MediaPipe's own knees rarely look fully straight). MediaPipe's world shape
-    leans (mostly toward the camera); this takes the lean out. None with fewer than `min_frames` such frames;
-    the tilt is capped at `max_deg` so one odd session can't tip the body over."""
+    knees above UPRIGHT_KNEE_DEG, MediaPipe's own knees rarely look fully straight; and not bent at the
+    waist: shoulders, hips and knees in line within UPRIGHT_HIP_DEG). MediaPipe's world shape leans (mostly
+    toward the camera); this takes the lean out. None with fewer than `min_frames` such frames, or when they
+    disagree (median angle to their median up-direction above UPRIGHT_SPREAD_DEG); the tilt is capped at
+    `max_deg` so one odd session can't tip the body over."""
     ups = []
     for J in shapes:
         J = np.asarray(J, float)
@@ -83,6 +92,9 @@ def upright_rotation(shapes, min_frames: int = UPRIGHT_MIN_FRAMES, max_deg: floa
             continue
         if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= UPRIGHT_KNEE_DEG:
             continue
+        hip_mid = (J[23] + J[24]) / 2
+        if _angle_deg((J[11] + J[12]) / 2, hip_mid, (J[25] + J[26]) / 2) <= UPRIGHT_HIP_DEG:
+            continue  # bent over: the trunk isn't over the legs
         v = (J[11] + J[12]) / 2 - (J[27] + J[28]) / 2
         n = float(np.linalg.norm(v))
         if n > 1e-6:
@@ -91,6 +103,8 @@ def upright_rotation(shapes, min_frames: int = UPRIGHT_MIN_FRAMES, max_deg: floa
         return None
     u = np.median(ups, axis=0)
     u = u / np.linalg.norm(u)
+    if np.median(np.degrees(np.arccos(np.clip(np.asarray(ups) @ u, -1, 1)))) > UPRIGHT_SPREAD_DEG:
+        return None  # the standing frames don't agree on one lean
     axis = np.cross(u, [0.0, 1.0, 0.0])  # horizontal: no yaw
     s, c = float(np.linalg.norm(axis)), float(u[1])
     if s < 1e-9:

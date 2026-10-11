@@ -272,3 +272,36 @@ def test_one_camera_catches_up_quickly_when_the_person_comes_back():
         t += 1 / 30
         errs.append(np.linalg.norm((out.frame.joints[23] + out.frame.joints[24]) / 2 - (X[23] + X[24]) / 2))
     assert errs[-1] < 0.05, errs  # within 5 frames
+
+
+def _rot_x(deg):
+    a = np.radians(deg)
+    return np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+
+
+def _tilt_deg(v):
+    return np.degrees(np.arctan2(np.hypot(v[0], v[2]), v[1]))
+
+
+def test_upright_rotation_ignores_frames_bent_at_the_waist():
+    from vision.mono import upright_rotation
+
+    stand = standing_skeleton()  # knees straight, shoulders over the ankles
+    bent = stand.copy()
+    hip = (stand[23] + stand[24]) / 2
+    upper = list(range(23))  # face, shoulders, arms, hands
+    bent[upper] = (stand[upper] - hip) @ _rot_x(40.0).T + hip  # bent 40° forward at the waist, knees straight
+    lean = _rot_x(8.0)
+    shapes = [stand @ lean.T] * 20 + [bent @ lean.T] * 20
+    U = upright_rotation(shapes)
+    assert U is not None
+    line = (stand[11] + stand[12]) / 2 - (stand[27] + stand[28]) / 2
+    assert _tilt_deg(lean @ line) > 7.5
+    assert _tilt_deg(U @ lean @ line) < 1.5  # the 8° lean taken out; the bent frames ignored
+
+
+def test_upright_rotation_gives_up_when_the_standing_lean_is_scattered():
+    from vision.mono import upright_rotation
+
+    shapes = [_bent_lean(lean_deg=d) for d in np.linspace(-15.0, 15.0, 31)]
+    assert upright_rotation(shapes) is None
