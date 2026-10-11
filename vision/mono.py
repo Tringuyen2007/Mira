@@ -18,7 +18,9 @@ from vision.types import LEFT_HIP, RIGHT_HIP, PoseResult
 FEET = [27, 28, 29, 30, 31, 32]
 EYES = (2, 5)
 EYE_HEIGHT_RATIO = 0.936  # eye height / stature
-STRAIGHT_KNEE_DEG = 165.0
+UPRIGHT_KNEE_DEG = 150.0  # roughly standing (MediaPipe's world-shape knees median ~155°)
+UPRIGHT_MIN_FRAMES = 15  # at least this many standing frames before correcting the lean
+UPRIGHT_MAX_DEG = 20.0  # never tilt the body more than this
 
 
 def world_shape(pose: PoseResult, cam: CameraConfig) -> np.ndarray | None:
@@ -67,23 +69,25 @@ def _knee_deg(J: np.ndarray, hip: int, knee: int, ankle: int) -> float:
     return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
 
 
-def upright_rotation(shapes) -> np.ndarray | None:
+def upright_rotation(shapes, min_frames: int = UPRIGHT_MIN_FRAMES, max_deg: float = UPRIGHT_MAX_DEG
+                     ) -> np.ndarray | None:
     """Rotation (tilt only, about a horizontal axis) that makes the median ankles-to-shoulders line of
-    `shapes` (bodies in the mat frame) vertical, from the frames with both knees straight (> 165 degrees).
-    MediaPipe's world shape leans (mostly toward the camera); this takes the lean out. None if no frame
-    qualifies."""
+    `shapes` (bodies in the mat frame) vertical, from frames where the person is roughly standing (both
+    knees above UPRIGHT_KNEE_DEG; MediaPipe's own knees rarely look fully straight). MediaPipe's world shape
+    leans (mostly toward the camera); this takes the lean out. None with fewer than `min_frames` such frames;
+    the tilt is capped at `max_deg` so one odd session can't tip the body over."""
     ups = []
     for J in shapes:
         J = np.asarray(J, float)
         if not np.isfinite(J[[11, 12, 23, 24, 25, 26, 27, 28]]).all():
             continue
-        if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= STRAIGHT_KNEE_DEG:
+        if min(_knee_deg(J, 23, 25, 27), _knee_deg(J, 24, 26, 28)) <= UPRIGHT_KNEE_DEG:
             continue
         v = (J[11] + J[12]) / 2 - (J[27] + J[28]) / 2
         n = float(np.linalg.norm(v))
         if n > 1e-6:
             ups.append(v / n)
-    if not ups:
+    if len(ups) < min_frames:
         return None
     u = np.median(ups, axis=0)
     u = u / np.linalg.norm(u)
@@ -91,9 +95,10 @@ def upright_rotation(shapes) -> np.ndarray | None:
     s, c = float(np.linalg.norm(axis)), float(u[1])
     if s < 1e-9:
         return np.eye(3)
+    angle = min(float(np.arctan2(s, c)), np.radians(max_deg))
     k = axis / s
     K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
-    return np.eye(3) + s * K + (1 - c) * (K @ K)
+    return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
 
 
 def stature(shape_rel: np.ndarray) -> float:

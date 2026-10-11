@@ -184,3 +184,71 @@ def test_one_camera_body_is_upright_when_mediapipe_leans_toward_the_camera():
     assert pipe._model.upright is not None
     pipe._model.reset()
     assert pipe._model.upright is None
+
+
+def _bent_lean(deg_knee_off=25.0, lean_deg=8.0):
+    """A standing body with slightly bent knees (as MediaPipe's world shape looks), tipped lean_deg toward +z."""
+    X = standing_skeleton()
+    for knee, ankle in ((25, 27), (26, 28)):
+        X[[ankle, ankle + 2, ankle + 4]] += [0.0, 0.0, -0.18 * np.sin(np.radians(deg_knee_off))]
+    a = np.radians(lean_deg)
+    R = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+    return X @ R.T
+
+
+def test_upright_rotation_needs_enough_standing_frames_and_is_capped():
+    from vision.mono import UPRIGHT_MAX_DEG, UPRIGHT_MIN_FRAMES, upright_rotation
+
+    lean = _bent_lean()  # knees ~155°, like MediaPipe: still counts as standing
+    assert upright_rotation([lean] * (UPRIGHT_MIN_FRAMES - 1)) is None  # too few frames: no correction
+    U = upright_rotation([lean] * UPRIGHT_MIN_FRAMES)
+    assert U is not None
+    v = U @ ((lean[11] + lean[12]) / 2 - (lean[27] + lean[28]) / 2)
+    assert np.degrees(np.arctan2(np.hypot(v[0], v[2]), v[1])) < 1.0  # straightened
+    big = _bent_lean(lean_deg=40.0)
+
+    def tilt(v):
+        return np.degrees(np.arctan2(np.hypot(v[0], v[2]), v[1]))
+
+    line = (big[11] + big[12]) / 2 - (big[27] + big[28]) / 2
+    left = tilt(upright_rotation([big] * 20) @ line)
+    assert abs(left - (tilt(line) - UPRIGHT_MAX_DEG)) < 0.5  # only UPRIGHT_MAX_DEG taken out
+
+
+def test_one_camera_depth_shake_is_held_when_the_person_is_still_in_the_picture():
+    import vision.tracker as T
+
+    cam, X = _cam_b(), standing_skeleton()
+    h = stature(X - (X[23] + X[24]) / 2)
+    rng = np.random.default_rng(3)
+
+    def run():
+        pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=h)
+        outs = []
+        for k in range(150):
+            v = pose_from_points(cam, X, t=k / 30, noise_px=0.3, rng=rng)
+            v.world = v.world + rng.normal(0, 0.03, v.world.shape)  # MediaPipe's depth wobble
+            outs.append(pipe.process(k / 30, None, v).frame.joints)
+        J = np.array(outs[80:])
+        return np.nanmedian(np.linalg.norm(np.diff(J, axis=0), axis=2))
+
+    gated = run()
+    full, T.GATE_MIN_GAIN = T.GATE_MIN_GAIN, 1.0  # gate off
+    try:
+        ungated = run()
+    finally:
+        T.GATE_MIN_GAIN = full
+    assert gated < 0.6 * ungated
+
+
+def test_one_camera_real_movement_still_comes_through():
+    cam, X0 = _cam_b(), standing_skeleton()
+    h = stature(X0 - (X0[23] + X0[24]) / 2)
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=h)
+    errs = []
+    for k in range(150):
+        X = X0 + [0.01 * max(k - 80, 0), 0.0, 0.0]  # walks sideways 30 cm/s after measuring
+        out = pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30))
+        if k > 100:
+            errs.append(np.linalg.norm((out.frame.joints[23] + out.frame.joints[24]) / 2 - (X[23] + X[24]) / 2))
+    assert np.median(errs) < 0.05

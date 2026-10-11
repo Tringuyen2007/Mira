@@ -255,6 +255,9 @@ RECOVER_PX = 20.0  # a fit whose median 2D residual is above this also tries a f
 SMOOTH_MIN_CUTOFF = 0.7  # Hz: One Euro on the pose numbers (0 = off)
 SMOOTH_BETA = 6.0  # two cameras: how much faster it follows when the pose changes quickly
 ROOT_MIN_CUTOFF = 3.0  # Hz: two cameras pin the body's position well, so it is smoothed less
+SINGLE_SMOOTH_TOO = True  # one camera: One Euro on the pose numbers before the 2D-motion gate
+GATE_FULL_PX = 8.0  # one camera: a landmark moving this many px per frame passes its change through fully
+GATE_MIN_GAIN = 0.08  # ... a landmark still in 2D lets only this fraction of a depth change through per frame
 SINGLE_BETA = 2.0  # one camera: noisier depth, so follow speed-ups more cautiously
 SINGLE_ROOT_MIN_CUTOFF = 1.0  # one camera: the floor position wobbles ~2 cm, smooth it more
 
@@ -302,6 +305,7 @@ class ModelTracker:
         root, beta = (SINGLE_ROOT_MIN_CUTOFF, SINGLE_BETA) if self.single else (ROOT_MIN_CUTOFF, SMOOTH_BETA)
         cutoff = np.r_[[root] * 3, [SMOOTH_MIN_CUTOFF] * (N_PARAMS - 3)]
         self._smooth = OneEuroFilter(cutoff, beta) if SMOOTH_MIN_CUTOFF else None
+        self._gate_uv = self._gate_w = self._gate_out = None
 
     @property
     def progress(self) -> float:
@@ -470,6 +474,7 @@ class ModelTracker:
                 if self._median_residual(x2, obs) < self._median_residual(x, obs):
                     x = x2
                     self._smooth.reset() if self._smooth is not None else None
+                    self._gate_out = None  # a recovered pose snaps into place instead of being gated
                     self.recoveries += 1
         self.last_ms = (time.perf_counter() - t0) * 1000
         if not np.isfinite(x).all():
@@ -477,4 +482,28 @@ class ModelTracker:
         self._p = x
         self.last_cost = float(cost)
         # smooth the pose numbers (not the joints): steady when still, quick when moving, bones exact
+        if self.single:  # adaptive smoothing first, then the 2D-motion gate
+            smoothed = self._smooth(x, t) if (self._smooth is not None and SINGLE_SMOOTH_TOO) else x
+            return forward(self._gate(smoothed, obs[0]), self.shape)
         return forward(self._smooth(x, t) if self._smooth is not None else x, self.shape)
+
+    def _gate(self, x: np.ndarray, ob) -> np.ndarray:
+        """One camera: a pose number may only change as fast as the landmarks it moves are moving in the
+        camera's 2D view. The camera sees side-to-side and up-down motion precisely; only depth is noisy,
+        so joints that are still in 2D are held still in 3D, and real movement (which shows in 2D) passes."""
+        _, uv, w = ob
+        prev_uv, prev_w, prev_out = self._gate_uv, self._gate_w, self._gate_out
+        self._gate_uv, self._gate_w = uv.copy(), w.copy()
+        if prev_out is None or prev_uv is None:
+            self._gate_out = x.copy()
+            return x
+        ok = (w > 0) & (prev_w > 0)
+        motion = np.where(ok, np.linalg.norm(uv - prev_uv, axis=1), np.nan)
+        gain = np.ones(N_PARAMS)
+        for j in range(N_PARAMS):
+            m = motion[DEPENDS[:, j]]
+            m = m[np.isfinite(m)]
+            if m.size:
+                gain[j] = float(np.clip(np.median(m) / GATE_FULL_PX, GATE_MIN_GAIN, 1.0))
+        self._gate_out = prev_out + gain * (x - prev_out)
+        return self._gate_out
