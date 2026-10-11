@@ -1,0 +1,7 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="icon/prev-month">
+<rect x="0.75" y="0.75" width="46.5" height="46.5" rx="23.25" fill="white"/>
+<rect x="0.75" y="0.75" width="46.5" height="46.5" rx="23.25" stroke="#857F8A" stroke-width="1.5"/>
+<path id="Chevron" d="M27 17L20 24L27 31" stroke="#1C1A22" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>

@@ -1,0 +1,113 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/fd755a08-ac19-4ce0-8c89-164cf32c38f4";
+const imgMascotIdleFrame1 = `${assetPathPrefix}/ab132.png`;
+const imgHalosOrbit = `${assetPathPrefix}/22f77.svg`;
+const imgHalo = `${assetPathPrefix}/c7678.svg`;
+const imgInnerRing = `${assetPathPrefix}/fe186.svg`;
+const imgLcdHiFiSparkle = `${assetPathPrefix}/b0b85.svg`;
+const imgLcdHiFiSparkle1 = `${assetPathPrefix}/b6997.svg`;
+const imgLcdHiFiSparkle2 = `${assetPathPrefix}/9e75c.svg`;
+const imgLcdHiFiSparkle3 = `${assetPathPrefix}/6fcae.svg`;
+const imgLock = `${assetPathPrefix}/75a8f.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function Onboarding1WelcomePrivacy() {
+  return (
+    <div className="relative size-full" data-node-id="82:127" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Onboarding / 1 Welcome & Privacy">
+      <div className="absolute h-[932px] left-0 top-0 w-[430px]" data-node-id="82:136" data-name="Halos & orbit">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHalosOrbit} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <div className="absolute h-[288px] left-[85.4px] top-[86px] w-[259.2px]" data-node-id="82:155" data-name="Mira · Idle">
+        <div className="absolute left-[-7.2px] size-[273.6px] top-0" data-node-id="I82:155;29:126" data-name="Halo">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHalo} />
+        </div>
+        <div className="absolute left-[10.8px] size-[237.6px] top-[18px]" data-node-id="I82:155;29:127" data-name="Inner ring">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgInnerRing} />
+        </div>
+        <div className="absolute h-[258.48px] left-[15.12px] top-[15.84px] w-[228.96px]" data-node-id="I82:155;29:128" data-name="Mascot · idle frame 1">
+          <img alt="" className="absolute inset-0 max-w-none object-contain pointer-events-none size-full" src={imgMascotIdleFrame1} />
+        </div>
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_7px_rgba(143,186,204,0.7)] left-[300px] size-[28px] top-[92px]" data-node-id="82:159" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_4px_rgba(143,186,204,0.7)] left-[320px] size-[16px] top-[130px]" data-node-id="82:162" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle1} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_3px_rgba(143,186,204,0.7)] left-[104px] size-[12px] top-[300px]" data-node-id="82:165" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle2} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_2.5px_rgba(143,186,204,0.7)] left-[92px] size-[10px] top-[120px]" data-node-id="82:168" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle3} />
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[12px] items-center left-[55px] not-italic overflow-clip text-center top-[404px]" data-node-id="82:171" data-name="Intro">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px] whitespace-nowrap" data-node-id="82:172">
+          WELCOME
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[54px] relative shrink-0 text-[46px] text-[transparent] to-[#391323] whitespace-nowrap" data-node-id="82:173">{`Hi, I'm Mira.`}</p>
+        <div className="font-['Inter:Regular'] font-normal leading-[0] relative shrink-0 text-[22px] text-[color:var(--color\/ink-soft,#5e5a63)] w-[320px]" data-node-id="82:174">
+          <p className="leading-[30px] mb-0">Your physical therapy</p>
+          <p className="leading-[30px]">coach at home.</p>
+        </div>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white content-stretch flex gap-[14px] items-center left-[32px] overflow-clip px-[18px] py-[20px] rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[608px] w-[366px]" data-node-id="82:175" data-name="Privacy Promise">
+        <div className="relative shrink-0 size-[52px]" data-node-id="82:176" data-name="Lock">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLock} />
+        </div>
+        <div className="[word-break:break-word] content-stretch flex flex-[1_0_0] flex-col gap-[6px] items-start min-w-px not-italic overflow-clip relative" data-node-id="82:180" data-name="Copy">
+          <p className="font-['Inter:Semi_Bold'] font-semibold leading-[26px] relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] w-full" data-node-id="82:181">
+            No video leaves your home
+          </p>
+          <p className="font-['Inter:Regular'] font-normal leading-[24px] relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] w-full" data-node-id="82:182">
+            Mira shares your progress with your therapist, never your video.
+          </p>
+        </div>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[800px] w-[366px]" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

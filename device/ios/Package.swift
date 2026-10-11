@@ -8,7 +8,7 @@ let package = Package(
     products: [.library(name: "MiraNetworking", targets: ["MiraNetworking"])],
     targets: [
         .target(name: "MiraNetworking", path: "Mira", exclude: [
-            "App/MiraApp.swift", "Design", "Features", "Watch", "Info.plist"
+            "App/MiraApp.swift", "Design", "Features", "Watch", "Info.plist", "Assets.xcassets"
         ], sources: ["Net", "App/AppState.swift"]),
         .testTarget(name: "MiraNetworkingTests", dependencies: ["MiraNetworking"], path: "Tests")
     ]

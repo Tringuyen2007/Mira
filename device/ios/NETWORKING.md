@@ -6,7 +6,9 @@ The current Live screen is a small integration surface; the full planned Live
 experience (avatar, safety sheet, haptics, pain entry) is separate work.
 
 Server entry, connection checks, stream status, message counts, and decoding
-diagnostics are compiled into **Debug builds only** under Settings. They are
+diagnostics are compiled into **Debug builds only** and require the explicit
+launch argument `--network-debug`. With that argument, open Settings → Developer
+connection tools. Without it, the app shows the user design. Diagnostics are
 absent from Release builds. Home and Live show only a plain-language availability
 message when needed, without server addresses or protocol details. A final
 customer-facing pairing/provisioning flow is still needed to configure a server
@@ -23,15 +25,17 @@ python3 tools/mira_network_mock.py
 No Python packages are needed. Leave this Terminal running.
 
 1. Open `device/ios/Mira.xcodeproj` in Xcode, select an iPhone simulator, and Run
-   with the **Debug** build configuration.
-2. Complete the welcome screen. Open **Settings**.
+   with the **Debug** build configuration. In Product → Scheme → Edit Scheme →
+   Run → Arguments, add `--network-debug`. Remove design-preview arguments.
+2. Complete onboarding. Open **Settings → Developer connection tools**.
 3. Enter `http://localhost:8000`, then tap **Save & connect**.
 4. Expect **Mira server online**, all three streams online, and an increasing
    **Messages received** count.
 5. Tap **Test REST connection**. Expect **REST OK · calibration status received**.
 6. Open **Home → Live session**. Expect changing angle/rep values.
 7. Tap **Pause**. Expect **Paused**, the rep count to stop, and the cue
-   **Mock received: pause**. Tap **Start** to resume.
+   **Mock received: pause**. The current paused UI leaves Resume disabled until the real server defines
+   resume behavior; restart the mock and reopen Live for another run.
 8. Press Ctrl-C in the mock Terminal. Expect **Mira is unavailable right now.**
    and **Live updates are paused.**, with the last rep count still visible.
    Debug Settings additionally shows **Mira server offline · reconnecting…**.

@@ -1,0 +1,115 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/ae6dd174-da9f-40c9-a1c5-5458a035a8f5";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgOrbitRing = `${assetPathPrefix}/7103f.svg`;
+const imgIconUp = `${assetPathPrefix}/7579c.svg`;
+const imgIconWarn = `${assetPathPrefix}/6dad7.svg`;
+const imgIconCheck = `${assetPathPrefix}/9fcd5.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function Care2ForYourNextVisit() {
+  return (
+    <div className="relative size-full" data-node-id="153:854" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Care / 2 For Your Next Visit">
+      <div className="absolute left-[230px] size-[420px] top-[-190px]" data-node-id="153:940" data-name="Orbit ring">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgOrbitRing} />
+      </div>
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute block cursor-pointer h-[64px] left-0 top-[54px] w-[430px]" step="Care" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+      <p className="[word-break:break-word] absolute bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[1.2] left-[24px] not-italic text-[34px] text-[transparent] to-[#391323] top-[126px] whitespace-nowrap" data-node-id="153:942">
+        For your next visit
+      </p>
+      <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[24px] not-italic text-[19px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[172px] w-[382px]" data-node-id="153:943">
+        Tue, Oct 20 with Dr. Lee. Mira will share these with them.
+      </p>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[91px] left-[24px] rounded-[28px] top-[240px] w-[382px]" data-node-id="153:944" data-name="Highlight / Knee bend up 22°">
+        <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] left-[17px] rounded-[22px] size-[44px] top-[17px]" data-node-id="153:945" data-name="Icon disc" />
+        <div className="absolute left-[27px] size-[24px] top-[27px]" data-node-id="153:946" data-name="icon/up">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconUp} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[75px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[19px] w-[286px]" data-node-id="153:948">
+          Knee bend up 22°
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[75px] not-italic text-[18px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[47px] w-[286px]" data-node-id="153:949">
+          From 62° on Sep 22 to 84° today.
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border-[1.5px] border-[var(--color\/alert,#d92d20)] border-solid drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[114px] left-[24px] rounded-[28px] top-[343px] w-[382px]" data-node-id="153:950" data-name="Highlight / Leaning onto your left leg">
+        <div className="absolute bg-[var(--color\/surface,white)] left-[16.5px] rounded-[22px] size-[44px] top-[16.5px]" data-node-id="153:951" data-name="Icon disc" />
+        <div className="absolute left-[26.5px] size-[24px] top-[26.5px]" data-node-id="153:952" data-name="icon/warn">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconWarn} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[74.5px] not-italic text-[20px] text-[color:var(--color\/alert-text,#b42318)] top-[18.5px] w-[286px]" data-node-id="153:955">
+          Leaning onto your left leg
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[74.5px] not-italic text-[18px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[46.5px] w-[286px]" data-node-id="153:956">
+          Mostly in the last set of squats. Ask Dr. Lee how to fix it.
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white drop-shadow-[0px_12px_20px_rgba(143,186,204,0.18)] h-[114px] left-[24px] rounded-[28px] top-[469px] w-[382px]" data-node-id="153:957" data-name="Highlight / Pain stayed low">
+        <div className="absolute bg-[var(--aurora\/mist,#e2ecf6)] left-[17px] rounded-[22px] size-[44px] top-[17px]" data-node-id="153:958" data-name="Icon disc" />
+        <div className="absolute left-[27px] size-[24px] top-[27px]" data-node-id="153:959" data-name="icon/check">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconCheck} />
+        </div>
+        <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[1.28] left-[75px] not-italic text-[20px] text-[color:var(--color\/ink,#1c1a22)] top-[19px] w-[286px]" data-node-id="153:961">
+          Pain stayed low
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Regular'] font-normal leading-[1.28] left-[75px] not-italic text-[18px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[47px] w-[286px]" data-node-id="153:962">
+          3 out of 10 or less after every session.
+        </p>
+      </div>
+    </div>
+  );
+}

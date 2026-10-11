@@ -1,0 +1,154 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/340dd4d5-1597-4e88-82c6-e3dbeeab9d7e";
+const imgColor = `${assetPathPrefix}/935b6.png`;
+const imgColor1 = `${assetPathPrefix}/8f08b.png`;
+const imgGlow = `${assetPathPrefix}/f8e24.svg`;
+const imgRing170 = `${assetPathPrefix}/2307c.svg`;
+const imgRing240 = `${assetPathPrefix}/c57b7.svg`;
+const imgRing340 = `${assetPathPrefix}/c7d05.svg`;
+const imgHalo = `${assetPathPrefix}/f7b8c.svg`;
+const imgInnerRing = `${assetPathPrefix}/9bc66.svg`;
+const imgLcdHiFiSparkle = `${assetPathPrefix}/bb90c.svg`;
+const imgLcdHiFiSparkle1 = `${assetPathPrefix}/9e75c.svg`;
+const imgLcdHiFiSparkle2 = `${assetPathPrefix}/6fcae.svg`;
+const imgRingTrack = `${assetPathPrefix}/42199.svg`;
+const imgArc82 = `${assetPathPrefix}/ab057.svg`;
+const imgPlay = `${assetPathPrefix}/1bb77.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function SessionSummary1Results() {
+  return (
+    <div className="relative size-full" data-node-id="129:470" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Session Summary / 1 Results">
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <div className="absolute left-[95px] size-[240px] top-[48px]" data-node-id="129:482" data-name="Glow">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgGlow} />
+      </div>
+      <div className="absolute left-[130px] size-[170px] top-[83px]" data-node-id="129:483" data-name="Ring 170">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing170} />
+      </div>
+      <div className="absolute left-[95px] size-[240px] top-[48px]" data-node-id="129:484" data-name="Ring 240">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing240} />
+      </div>
+      <div className="absolute left-[45px] size-[340px] top-[-2px]" data-node-id="129:485" data-name="Ring 340">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRing340} />
+      </div>
+      <div className="absolute h-[168px] left-[139.4px] top-[84px] w-[151.2px]" data-node-id="129:486" data-name="Mira · Celebrating">
+        <div className="absolute left-[-4.2px] size-[159.6px] top-0" data-node-id="I129:486;38:295" data-name="Halo">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHalo} />
+        </div>
+        <div className="absolute left-[6.3px] size-[138.6px] top-[10.5px]" data-node-id="I129:486;38:296" data-name="Inner ring">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgInnerRing} />
+        </div>
+        <div className="absolute contents left-[8.82px] top-[9.24px]" data-node-id="I129:486;78:383" data-name="Mascot · celebrating">
+          <div className="absolute h-[150.78px] left-[3.7px] mask-alpha mask-intersect mask-no-clip mask-no-repeat mask-size-[318px_359px] top-[3.88px] w-[133.56px]" data-node-id="I129:486;78:381" style={{ maskImage: `url("${imgColor}")` }} data-name="Color">
+            <img alt="" className="absolute inset-0 max-w-none object-contain pointer-events-none size-full" src={imgColor1} />
+          </div>
+        </div>
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_5px_rgba(143,186,204,0.7)] left-[300px] size-[20px] top-[90px]" data-node-id="129:492" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_3px_rgba(143,186,204,0.7)] left-[316px] size-[12px] top-[122px]" data-node-id="129:495" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle1} />
+      </div>
+      <div className="absolute drop-shadow-[0px_0px_2.5px_rgba(143,186,204,0.7)] left-[112px] size-[10px] top-[210px]" data-node-id="129:498" data-name="LCD Hi-Fi / Sparkle">
+        <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgLcdHiFiSparkle2} />
+      </div>
+      <div className="[word-break:break-word] absolute content-stretch flex flex-col gap-[8px] items-center left-[45.5px] not-italic overflow-clip top-[250px] whitespace-nowrap" data-node-id="129:501" data-name="Header">
+        <p className="font-['Inter:Medium'] font-medium leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/accent-text-small,#0b5a47)] tracking-[3.74px]" data-node-id="129:502">
+          SESSION DONE
+        </p>
+        <p className="bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[46px] relative shrink-0 text-[38px] text-[transparent] to-[#391323]" data-node-id="129:503">
+          Well done, Maya!
+        </p>
+        <p className="font-['Inter:Regular'] font-normal leading-[normal] relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)]" data-node-id="129:504">
+          Mini squats, heel slides, leg raises · 16 min
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white h-[176px] left-[24px] overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[388px] w-[185px]" data-node-id="129:505" data-name="Score / Form score">
+        <div className="absolute left-[39.5px] size-[104px] top-[15px]" data-node-id="129:506" data-name="Ring track">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgRingTrack} />
+        </div>
+        <div className="absolute left-[39.5px] size-[104px] top-[15px]" data-node-id="129:507" data-name="Arc 82%">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgArc82} />
+        </div>
+        <p className="-translate-x-1/2 [word-break:break-word] absolute font-['Inter:Light'] font-light leading-[normal] left-[91.5px] not-italic text-[38px] text-[color:var(--color\/ink,#1c1a22)] text-center top-[44px] whitespace-nowrap" data-node-id="129:508">
+          82
+        </p>
+        <p className="[word-break:break-word] absolute font-['Inter:Medium'] font-medium leading-[normal] left-[46px] not-italic text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[135px] whitespace-nowrap" data-node-id="129:509">
+          Form score
+        </p>
+      </div>
+      <div className="[word-break:break-word] absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white h-[176px] left-[221px] not-italic overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[388px] w-[185px] whitespace-nowrap" data-node-id="129:510" data-name="Score / Good reps">
+        <div className="absolute content-stretch flex gap-[8px] items-baseline left-[29px] overflow-clip top-[35px]" data-node-id="129:511" data-name="Count">
+          <p className="font-['Inter:Light'] font-light leading-[64px] relative shrink-0 text-[56px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="129:512">
+            26
+          </p>
+          <p className="font-['Inter:Regular'] font-normal leading-[normal] relative shrink-0 text-[19px] text-[color:var(--color\/ink-soft,#5e5a63)]" data-node-id="129:513">
+            of 30
+          </p>
+        </div>
+        <p className="absolute font-['Inter:Medium'] font-medium leading-[normal] left-[49px] text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] top-[135px]" data-node-id="129:514">
+          Good reps
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] border border-solid border-white content-stretch flex flex-col gap-[14px] items-start left-[24px] overflow-clip px-[20px] py-[18px] rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[584px] w-[382px]" data-node-id="129:515" data-name="Mira's Spoken Summary">
+        <div className="content-stretch flex gap-[14px] items-center overflow-clip relative shrink-0" data-node-id="129:516" data-name="Play row">
+          <div className="relative shrink-0 size-[52px]" data-node-id="129:517" data-name="Play">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgPlay} />
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="129:519">
+            Hear Mira’s summary
+          </p>
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Regular'] font-normal leading-[25px] min-w-full not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] w-[min-content]" data-node-id="129:520">
+          “Your squats were deeper today. On the last set you leaned onto your left leg, so let’s even that out tomorrow.”
+        </p>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[800px] w-[366px]" label="See 2 moments to review" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}

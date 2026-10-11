@@ -1,0 +1,271 @@
+const assetPathPrefix = "https://www.figma.com/api/mcp/asset/1f41a08b-3993-4cbf-83c1-82e1de18f8ee";
+const imgIconChevronLeft = `${assetPathPrefix}/700f1.svg`;
+const imgEllipse = `${assetPathPrefix}/8a327.svg`;
+const imgEllipse1 = `${assetPathPrefix}/958c7.svg`;
+const imgFloorShadow = `${assetPathPrefix}/ad17a.svg`;
+const imgBoneNeckPel = `${assetPathPrefix}/6cc52.svg`;
+const imgBoneLsRs = `${assetPathPrefix}/cb5c4.svg`;
+const imgBoneLsLe = `${assetPathPrefix}/dbf4c.svg`;
+const imgBoneLeLw = `${assetPathPrefix}/f1161.svg`;
+const imgBoneRsRe = `${assetPathPrefix}/1f8d9.svg`;
+const imgBoneReRw = `${assetPathPrefix}/3e6ba.svg`;
+const imgBoneLhRh = `${assetPathPrefix}/8d3d4.svg`;
+const imgBoneLhLk = `${assetPathPrefix}/57cb6.svg`;
+const imgBoneLkLa = `${assetPathPrefix}/effe7.svg`;
+const imgBoneRhRk = `${assetPathPrefix}/861ce.svg`;
+const imgBoneRkRa = `${assetPathPrefix}/160bc.svg`;
+const imgHead = `${assetPathPrefix}/d6144.svg`;
+const imgEllipse2 = `${assetPathPrefix}/0d1a4.svg`;
+const imgEllipse3 = `${assetPathPrefix}/1c4c7.svg`;
+const imgFlaggedKnee = `${assetPathPrefix}/401e0.svg`;
+const imgIconRotate = `${assetPathPrefix}/8d6a8.svg`;
+const imgIcon = `${assetPathPrefix}/7eca7.svg`;
+const imgIcon1 = `${assetPathPrefix}/092ed.svg`;
+const imgIconWarning = `${assetPathPrefix}/6e0be.svg`;
+const imgIconChevron = `${assetPathPrefix}/284d5.svg`;
+
+function IPhoneHiFiHomeIndicator({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[34px] relative w-[430px]"} data-node-id="82:123" data-name="iPhone Hi-Fi / Home Indicator">
+      <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[5px] left-[143px] rounded-[3px] top-[21px] w-[144px]" data-node-id="82:124" data-name="Rectangle" />
+    </div>
+  );
+}
+
+type IPhoneHiFiButtonPrimaryProps = {
+  className?: string;
+  label?: string;
+};
+
+function IPhoneHiFiButtonPrimary({ className, label = "Get started" }: IPhoneHiFiButtonPrimaryProps) {
+  return (
+    <div className={className || "bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center relative rounded-[999px] w-[366px]"} data-node-id="82:121" data-name="iPhone Hi-Fi / Button Primary">
+      <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="82:122">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+type IPhoneHiFiStepHeaderProps = {
+  className?: string;
+  step?: string;
+};
+
+function IPhoneHiFiStepHeader({ className, step = "Step 2 of 4" }: IPhoneHiFiStepHeaderProps) {
+  return (
+    <div className={className || "h-[64px] relative w-[430px]"} data-node-id="98:132" data-name="iPhone Hi-Fi / Step Header">
+      <div className="absolute content-stretch flex gap-[8px] h-[48px] items-center left-[20px] overflow-clip pl-[8px] pr-[16px] rounded-[999px] top-[8px]" data-node-id="98:133" data-name="Back">
+        <div className="relative shrink-0 size-[24px]" data-node-id="98:134" data-name="icon/chevron-left">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevronLeft} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="98:136">
+          Back
+        </p>
+      </div>
+      <div className="absolute backdrop-blur-[12px] bg-[var(--color\/surface,white)] content-stretch flex items-start overflow-clip px-[16px] py-[10px] right-[32px] rounded-[999px] top-[12px]" data-node-id="98:137" data-name="Step pill">
+        <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)] whitespace-nowrap" data-node-id="98:138">
+          {step}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IPhoneHiFiStatusBar({ className }: { className?: string }) {
+  return (
+    <div className={className || "h-[54px] relative w-[430px]"} data-node-id="82:110" data-name="iPhone Hi-Fi / Status Bar">
+      <p className="[word-break:break-word] absolute font-['Inter:Semi_Bold'] font-semibold leading-[normal] left-[44px] not-italic text-[17px] text-[color:var(--color\/ink,#1c1a22)] top-[17px] whitespace-nowrap" data-node-id="82:111">
+        9:41
+      </p>
+      <div className="absolute h-[12px] left-[318px] overflow-clip top-[22px] w-[18px]" data-node-id="82:112" data-name="Signal">
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-0 rounded-[1px] top-[8px] w-[3px]" data-node-id="82:113" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[6.5px] left-[5px] rounded-[1px] top-[5.5px] w-[3px]" data-node-id="82:114" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[10px] rounded-[1px] top-[3px] w-[3px]" data-node-id="82:115" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[12px] left-[15px] rounded-[1px] top-0 w-[3px]" data-node-id="82:116" data-name="Rectangle" />
+      </div>
+      <div className="absolute h-[13px] left-[356px] overflow-clip top-[21px] w-[27px]" data-node-id="82:117" data-name="Battery">
+        <div className="absolute border border-[var(--color\/ink,#1c1a22)] border-solid h-[13px] left-0 rounded-[4px] top-0 w-[24px]" data-node-id="82:118" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[9px] left-[2px] rounded-[2px] top-[2px] w-[20px]" data-node-id="82:119" data-name="Rectangle" />
+        <div className="absolute bg-[var(--color\/ink,#1c1a22)] h-[4px] left-[25px] rounded-[1px] top-[4.5px] w-[2px]" data-node-id="82:120" data-name="Rectangle" />
+      </div>
+    </div>
+  );
+}
+
+export default function SessionSummary2FlaggedMoments() {
+  return (
+    <div className="relative size-full" data-node-id="129:525" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 430 932' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(21.5 0 0 46.6 215 466)'><stop stop-color='rgba(245,250,248,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.5'/><stop stop-color='rgba(229,238,237,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="Session Summary / 2 Flagged Moments">
+      <IPhoneHiFiStatusBar className="absolute h-[54px] left-0 top-0 w-[430px]" />
+      <IPhoneHiFiStepHeader className="absolute h-[64px] left-0 top-[54px] w-[430px]" step="Moment 1 of 2" />
+      <p className="[word-break:break-word] absolute bg-clip-text bg-gradient-to-r font-['Inter:Light'] font-light from-[#9f3462] leading-[42px] left-[24px] not-italic text-[34px] text-[transparent] to-[#391323] top-[126px] whitespace-nowrap" data-node-id="129:544">
+        Moments to review
+      </p>
+      <div className="absolute border border-solid border-white h-[280px] left-[24px] overflow-clip rounded-[28px] shadow-[0px_12px_40px_0px_rgba(143,186,204,0.18)] top-[184px] w-[382px]" data-node-id="129:545" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg viewBox='0 0 382 280' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'><rect x='0' y='0' height='100%' width='100%' fill='url(%23grad)' opacity='1'/><defs><radialGradient id='grad' gradientUnits='userSpaceOnUse' cx='0' cy='0' r='10' gradientTransform='matrix(19.1 0 0 14 191 140)'><stop stop-color='rgba(255,255,255,1)' offset='0'/><stop stop-color='rgba(251,242,235,1)' offset='0.6'/><stop stop-color='rgba(226,236,246,1)' offset='1'/></radialGradient></defs></svg>\")" }} data-name="3D Replay (skeleton only)">
+        <div className="absolute left-[50px] size-[280px] top-[9px]" data-node-id="129:546" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse} />
+        </div>
+        <div className="absolute left-[-10px] size-[400px] top-[-51px]" data-node-id="129:547" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse1} />
+        </div>
+        <div className="absolute h-[22px] left-[110px] top-[243px] w-[160px]" data-node-id="129:548" data-name="Floor shadow">
+          <div className="absolute inset-[-27.27%_-3.75%]">
+            <img alt="" className="block max-w-none size-full" src={imgFloorShadow} />
+          </div>
+        </div>
+        <div className="absolute h-[74px] left-[189px] top-[81px] w-[4px]" data-node-id="129:549" data-name="Bone neck-pel">
+          <div className="absolute inset-[-3.38%_-62.5%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneNeckPel} />
+          </div>
+        </div>
+        <div className="absolute h-[2px] left-[169px] top-[91px] w-[44px]" data-node-id="129:550" data-name="Bone ls-rs">
+          <div className="absolute inset-[-125%_-5.68%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLsRs} />
+          </div>
+        </div>
+        <div className="absolute h-[38px] left-[159px] top-[93px] w-[10px]" data-node-id="129:551" data-name="Bone ls-le">
+          <div className="absolute inset-[-6.58%_-25.01%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLsLe} />
+          </div>
+        </div>
+        <div className="absolute h-[24px] left-[159px] top-[131px] w-[16px]" data-node-id="129:552" data-name="Bone le-lw">
+          <div className="absolute inset-[-10.42%_-15.63%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLeLw} />
+          </div>
+        </div>
+        <div className="absolute h-[36px] left-[213px] top-[91px] w-[16px]" data-node-id="129:553" data-name="Bone rs-re">
+          <div className="absolute inset-[-6.95%_-15.63%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneRsRe} />
+          </div>
+        </div>
+        <div className="absolute h-[24px] left-[229px] top-[127px] w-[8px]" data-node-id="129:554" data-name="Bone re-rw">
+          <div className="absolute inset-[-10.42%_-31.26%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneReRw} />
+          </div>
+        </div>
+        <div className="absolute h-[2px] left-[175px] top-[157px] w-[28px]" data-node-id="129:555" data-name="Bone lh-rh">
+          <div className="absolute inset-[-125.01%_-8.93%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLhRh} />
+          </div>
+        </div>
+        <div className="absolute h-[40px] left-[147px] top-[159px] w-[28px]" data-node-id="129:556" data-name="Bone lh-lk">
+          <div className="absolute inset-[-7.5%_-10.72%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLhLk} />
+          </div>
+        </div>
+        <div className="absolute h-[48px] left-[147px] top-[199px] w-[20px]" data-node-id="129:557" data-name="Bone lk-la">
+          <div className="absolute inset-[-6.25%_-15%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneLkLa} />
+          </div>
+        </div>
+        <div className="absolute h-[42px] left-[203px] top-[157px] w-[22px]" data-node-id="129:558" data-name="Bone rh-rk">
+          <div className="absolute inset-[-5.95%_-11.37%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneRhRk} />
+          </div>
+        </div>
+        <div className="absolute h-[48px] left-[219px] top-[199px] w-[6px]" data-node-id="129:559" data-name="Bone rk-ra">
+          <div className="absolute inset-[-5.21%_-41.67%]">
+            <img alt="" className="block max-w-none size-full" src={imgBoneRkRa} />
+          </div>
+        </div>
+        <div className="absolute left-[177px] size-[36px] top-[43px]" data-node-id="129:560" data-name="Head">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgHead} />
+        </div>
+        <div className="absolute left-[163px] size-[12px] top-[87px]" data-node-id="129:561" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[207px] size-[12px] top-[85px]" data-node-id="129:562" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[153px] size-[12px] top-[125px]" data-node-id="129:563" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[223px] size-[12px] top-[121px]" data-node-id="129:564" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[169px] size-[12px] top-[149px]" data-node-id="129:565" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[231px] size-[12px] top-[145px]" data-node-id="129:566" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[169px] size-[12px] top-[153px]" data-node-id="129:567" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse3} />
+        </div>
+        <div className="absolute left-[197px] size-[12px] top-[151px]" data-node-id="129:568" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[219px] size-[12px] top-[193px]" data-node-id="129:569" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[161px] size-[12px] top-[241px]" data-node-id="129:570" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse3} />
+        </div>
+        <div className="absolute left-[213px] size-[12px] top-[241px]" data-node-id="129:571" data-name="Ellipse">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgEllipse2} />
+        </div>
+        <div className="absolute left-[136px] size-[22px] top-[188px]" data-node-id="129:572" data-name="Flagged knee">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgFlaggedKnee} />
+        </div>
+        <div className="absolute bg-[var(--color\/surface,white)] content-stretch flex gap-[8px] items-center left-[13px] overflow-clip pl-[12px] pr-[14px] py-[8px] rounded-[999px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[13px]" data-node-id="129:573" data-name="Drag to turn">
+          <div className="relative shrink-0 size-[20px]" data-node-id="129:574" data-name="icon/rotate">
+            <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconRotate} />
+          </div>
+          <p className="[word-break:break-word] font-['Inter:Medium'] font-medium leading-[normal] not-italic relative shrink-0 text-[17px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="129:577">
+            Drag to turn
+          </p>
+        </div>
+      </div>
+      <div className="absolute bg-[#1e1e1e] content-stretch flex gap-[10px] h-[60px] items-center justify-center left-[24px] overflow-clip rounded-[999px] top-[480px] w-[185px]" data-node-id="129:578" data-name="Button / Replay">
+        <div className="relative shrink-0 size-[22px]" data-node-id="129:579" data-name="icon">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIcon} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[19px] text-[color:var(--color\/surface,white)] whitespace-nowrap" data-node-id="129:582">
+          Replay
+        </p>
+      </div>
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex gap-[10px] h-[60px] items-center justify-center left-[221px] overflow-clip rounded-[999px] top-[480px] w-[185px]" data-node-id="129:583" data-name="Button / Slow">
+        <div className="relative shrink-0 size-[22px]" data-node-id="129:584" data-name="icon">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIcon1} />
+        </div>
+        <p className="[word-break:break-word] font-['Inter:Semi_Bold'] font-semibold leading-[normal] not-italic relative shrink-0 text-[19px] text-[color:var(--color\/ink,#1c1a22)] whitespace-nowrap" data-node-id="129:586">
+          Slow
+        </p>
+      </div>
+      <div className="absolute bg-[var(--color\/surface,white)] border-2 border-[#1e1e1e] border-solid content-stretch flex gap-[14px] h-[76px] items-center left-[24px] overflow-clip pl-[18px] pr-[16px] rounded-[22px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[560px] w-[382px]" data-node-id="129:587" data-name="Moment / Leaned onto left leg">
+        <div className="relative shrink-0 size-[28px]" data-node-id="129:588" data-name="icon/warning">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconWarning} />
+        </div>
+        <div className="[word-break:break-word] content-stretch flex flex-[1_0_0] flex-col gap-[2px] items-start leading-[normal] min-w-px not-italic overflow-clip relative whitespace-nowrap" data-node-id="129:592" data-name="Text">
+          <p className="font-['Inter:Semi_Bold'] font-semibold relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="129:593">
+            Leaned onto left leg
+          </p>
+          <p className="font-['Inter:Regular'] font-normal relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)]" data-node-id="129:594">
+            Mini squats · set 3, rep 7
+          </p>
+        </div>
+        <div className="relative shrink-0 size-[24px]" data-node-id="129:595" data-name="icon/chevron">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevron} />
+        </div>
+      </div>
+      <div className="absolute bg-[var(--color\/surface,white)] border-[#857f8a] border-[1.5px] border-solid content-stretch flex gap-[14px] h-[76px] items-center left-[24px] overflow-clip pl-[18px] pr-[16px] rounded-[22px] shadow-[0px_8px_24px_0px_rgba(143,186,204,0.14)] top-[648px] w-[382px]" data-node-id="129:597" data-name="Moment / Knee went inward">
+        <div className="relative shrink-0 size-[28px]" data-node-id="129:598" data-name="icon/warning">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconWarning} />
+        </div>
+        <div className="[word-break:break-word] content-stretch flex flex-[1_0_0] flex-col gap-[2px] items-start leading-[normal] min-w-px not-italic overflow-clip relative whitespace-nowrap" data-node-id="129:602" data-name="Text">
+          <p className="font-['Inter:Semi_Bold'] font-semibold relative shrink-0 text-[20px] text-[color:var(--color\/ink,#1c1a22)]" data-node-id="129:603">
+            Knee went inward
+          </p>
+          <p className="font-['Inter:Regular'] font-normal relative shrink-0 text-[17px] text-[color:var(--color\/ink-soft,#5e5a63)]" data-node-id="129:604">
+            Mini squats · set 3, rep 9
+          </p>
+        </div>
+        <div className="relative shrink-0 size-[24px]" data-node-id="129:605" data-name="icon/chevron">
+          <img alt="" className="absolute block inset-0 max-w-none size-full" src={imgIconChevron} />
+        </div>
+      </div>
+      <IPhoneHiFiButtonPrimary className="absolute bg-[#1e1e1e] content-stretch drop-shadow-[0px_10px_14px_rgba(31,31,31,0.18)] flex h-[64px] items-center justify-center left-[32px] rounded-[999px] top-[800px] w-[366px]" label="Next" />
+      <IPhoneHiFiHomeIndicator className="absolute h-[34px] left-0 top-[898px] w-[430px]" />
+    </div>
+  );
+}
