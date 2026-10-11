@@ -23,6 +23,7 @@ _FALSE = {"0", "false", "no", "off", ""}
 # Values that must never appear in logs. DSNs are listed whole; their passwords are added separately.
 SECRET_FIELDS = (
     "MIRA_API_TOKEN",
+    "MIRA_DEVICE_TOKEN",
     "TIGER_DSN",
     "COPILOT_DSN",
     "GEMINI_API_KEY",
@@ -40,6 +41,7 @@ MIN_TOKEN_LEN = 24
 @dataclass(frozen=True)
 class Config:
     MIRA_API_TOKEN: str = ""
+    MIRA_DEVICE_TOKEN: str = ""  # optional, least-privilege token for the LCD kiosk (/ws/live + /ws/events only)
     MIRA_SOURCE: str = "mock"
     ENGINE_MODE: str = "thread"
     MOCK_PATIENT_ID: str = "maya"
@@ -143,6 +145,20 @@ class Config:
             return "MIRA_API_TOKEN is still the .env.example placeholder"
         if len(self.MIRA_API_TOKEN) < MIN_TOKEN_LEN:
             return f"MIRA_API_TOKEN is shorter than {MIN_TOKEN_LEN} characters"
+        return None
+
+    def device_token_problem(self) -> str | None:
+        """Why MIRA_DEVICE_TOKEN can't be used (None if unset or fine). Same rules as the API token, and it
+        must not equal it: a kiosk token that is also the API token would hand the whole API to the LCD."""
+        token = self.MIRA_DEVICE_TOKEN
+        if not token:
+            return None
+        if token == PLACEHOLDER_TOKEN:
+            return "MIRA_DEVICE_TOKEN is still the .env.example placeholder"
+        if len(token) < MIN_TOKEN_LEN:
+            return f"MIRA_DEVICE_TOKEN is shorter than {MIN_TOKEN_LEN} characters"
+        if token == self.MIRA_API_TOKEN:
+            return "MIRA_DEVICE_TOKEN must differ from MIRA_API_TOKEN"
         return None
 
 

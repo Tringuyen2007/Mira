@@ -68,7 +68,7 @@ class MultiDirStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    problem = cfg.token_problem()
+    problem = cfg.token_problem() or cfg.device_token_problem()
     if problem:
         raise RuntimeError(f"{problem}; refusing to start. Generate one with: "
                            "python -c \"import secrets;print(secrets.token_urlsafe(32))\"")

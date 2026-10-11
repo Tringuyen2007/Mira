@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from functools import lru_cache
+from typing import Literal
 
 from fastapi import HTTPException, Request, WebSocket
 from retell import Retell
@@ -34,6 +35,21 @@ async def require_token(request: Request) -> None:
 async def ws_token_ok(ws: WebSocket) -> bool:
     """Check `?token=` before `ws.accept()` (browsers can't set headers on WebSockets)."""
     return _token_matches(ws.query_params.get("token", ""), cfg.MIRA_API_TOKEN)
+
+
+Scope = Literal["full", "device"]
+
+
+async def ws_scope(ws: WebSocket) -> Scope | None:
+    """Which token the `?token=` query carries: the API token ("full"), the LCD device token ("device") or
+    neither (None). Device scope is only honoured on the channels that opt in (see server.main)."""
+    given = ws.query_params.get("token", "")
+    if _token_matches(given, cfg.MIRA_API_TOKEN):
+        return "full"
+    device = cfg.MIRA_DEVICE_TOKEN
+    if device and secrets.compare_digest(given.encode("utf-8"), device.encode("utf-8")):
+        return "device"
+    return None
 
 
 @lru_cache(maxsize=1)
