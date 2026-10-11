@@ -14,12 +14,12 @@ from collections.abc import Mapping
 AGENT_NAME = "Mira Safety Caller"
 
 OPENING_MESSAGE = (
-    "Hi {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
+    "Hello {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
     "This is an urgent safety call. {{situation}}"
 )
 
 VOICEMAIL_MESSAGE = (
-    "Hi {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
+    "Hello {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
     "Urgent: {{situation_short}} Please call {{patient_first_name}} at {{patient_phone}}. "
     "If you can't reach her, call 911."
 )
@@ -42,6 +42,28 @@ Rules:
 - Never guess, diagnose or give medical advice.
 - If they cannot reach her or are worried, tell them to call 911. You cannot call 911 yourself.
 - Stay calm, use short sentences, and keep the call under 2 minutes."""
+
+# Backup agent: a different model provider, used when the main (Gemini) call can't be placed or ends with a
+# model/platform error. Short fixed message, same variables.
+BACKUP_AGENT_NAME = "Mira Safety Caller (backup)"
+
+BACKUP_OPENING_MESSAGE = (
+    "Hello {{contact_name}}, this is Mira, the home exercise assistant for {{patient_first_name}}. "
+    "This is an urgent safety call. {{situation_short}} Please check on {{patient_first_name}} right away. "
+    "If you can't reach her, call 911."
+)
+
+BACKUP_AGENT_PROMPT = """\
+You are Mira's backup safety caller. You are calling {{contact_name}}, the emergency contact for {{patient_first_name}}.
+You have already said: {{situation_short}}
+CURRENT STATUS: {{current_status}}
+During the call you may receive messages starting with "UPDATE". They are the newest facts; say them, starting with
+"Update:".
+Rules:
+- Only use the facts above and UPDATE messages. If you don't know something, say Mira can't tell.
+- Never guess, diagnose or give medical advice. If they are worried or can't reach her, tell them to call 911.
+- Ask whether they can check on {{patient_first_name}} right now; give her phone number ({{patient_phone}}) if asked.
+- Once they have said what they will do, say a short goodbye and end the call."""
 
 DEFAULT_CURRENT_STATUS = "No newer information yet."
 
@@ -70,9 +92,11 @@ def assert_rendered(text: str) -> str:
 
 
 def render_opening(variables: Mapping[str, str]) -> dict[str, str]:
-    """Dry render of what the contact would hear: opening, voicemail and whisper. Raises if any {{…}} remains."""
+    """Dry render of what the contact would hear: opening, voicemail, whisper and the backup agent's opening.
+    Raises if any {{…}} remains."""
     return {name: assert_rendered(render(text, variables)) for name, text in
-            (("opening", OPENING_MESSAGE), ("voicemail", VOICEMAIL_MESSAGE), ("whisper", WHISPER_MESSAGE))}
+            (("opening", OPENING_MESSAGE), ("voicemail", VOICEMAIL_MESSAGE), ("whisper", WHISPER_MESSAGE),
+             ("backup_opening", BACKUP_OPENING_MESSAGE))}
 
 
 # ---- Patient-facing check-in (§7.2) -------------------------------------------------------------

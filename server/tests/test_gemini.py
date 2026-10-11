@@ -168,6 +168,28 @@ async def test_daily_quota_429_falls_back_to_next_model(monkeypatch: pytest.Monk
     assert send.models == ["smart-a", "smart-b", "smart-b"]
 
 
+async def test_daily_quota_429_switches_to_the_next_key_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    daily = "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    send = FakeSend(_error(429, quota_id=daily), _text_response("from key 2"),
+                    _error(429, quota_id=daily), _text_response("from fallback"))
+    _live(monkeypatch, send, GEMINI_MODEL_SMART="smart-a", GEMINI_SMART_FALLBACKS="smart-b",
+          GEMINI_API_KEYS="test-gemini-key-2-not-real")
+    assert gemini.api_keys() == ["test-gemini-key-not-real", "test-gemini-key-2-not-real"]
+    assert gemini.daily_limit("gemini-3.8-flash") == 40
+
+    # Key 1 is spent: the same model is asked again on key 2, no model is blocked.
+    reply = await gemini.ask("copilot", gemini.models.smart(), "sys", USER)
+    assert reply.text == "from key 2" and reply.model == "smart-a"
+    assert send.models == ["smart-a", "smart-a"]
+    assert gemini.stats()["key_index"] == 1 and gemini.stats()["keys_spent"] == [0] and not gemini.stats()["blocked"]
+    assert gemini._get_client()._api_client.api_key == "test-gemini-key-2-not-real"
+
+    # Key 2 is spent too: no key left, so the model is blocked and the fallback answers.
+    reply = await gemini.ask("copilot", gemini.models.smart(), "sys", [{"role": "user", "content": "again"}])
+    assert reply.model == "smart-b" and send.models == ["smart-a", "smart-a", "smart-a", "smart-b"]
+    assert "smart-a" in gemini.stats()["blocked"]
+
+
 async def test_long_retry_hint_moves_on_instead_of_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     send = FakeSend(_error(429, retry="30s"), _text_response("b"))
     _live(monkeypatch, send, GEMINI_MODEL_SMART="smart-a", GEMINI_SMART_FALLBACKS="smart-b")

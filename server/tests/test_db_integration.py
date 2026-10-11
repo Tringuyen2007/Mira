@@ -204,7 +204,7 @@ async def test_session_persistence_profile_reps_pain(db: Database) -> None:
     registry = SessionRegistry(store=store)
     store.sessions = registry
     session = await registry.start("maya", "squat")
-    assert session.profile.first_name == "Maya" and session.profile.contact_name == "Linh"
+    assert session.profile.first_name == "Maya" and session.profile.contact_name == "Eric"
     assert session.profile.therapist_name == "Dr. Okafor"
     sid = session.session_id
     await store.on_event({"type": "command", "name": "pain", "payload": {"level": 3}, "session_id": sid})

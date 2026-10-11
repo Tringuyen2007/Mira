@@ -26,6 +26,7 @@ SECRET_FIELDS = (
     "TIGER_DSN",
     "COPILOT_DSN",
     "GEMINI_API_KEY",
+    "GEMINI_API_KEYS",
     "ELEVEN_API_KEY",
     "RETELL_API_KEY",
 )
@@ -51,6 +52,7 @@ class Config:
     DB_DISABLED: bool = False
 
     GEMINI_API_KEY: str | None = None
+    GEMINI_API_KEYS: str = ""  # extra keys, comma-separated: used in turn when one hits its daily quota
     GEMINI_MODE: str = "fake"
     GEMINI_MODEL_FAST: str = "gemini-3.5-flash-lite"
     GEMINI_MODEL_SMART: str = "gemini-3.8-flash"
@@ -69,11 +71,14 @@ class Config:
     RETELL_FROM_NUMBER: str | None = None
     RETELL_AGENT_ID: str | None = None
     RETELL_AGENT_VERSION: int | None = None  # published version bound to the number (printed by retell_setup)
+    RETELL_BACKUP_AGENT_ID: str | None = None  # non-Gemini fallback agent (printed by retell_setup)
+    RETELL_BACKUP_AGENT_VERSION: int | None = None
     CALLS_DISABLED: bool = True
     SIM_CALL_DURATION_S: float = 45.0  # log-only call simulator (CALLS_DISABLED=1): seconds "on the call"
 
     CHECKIN_TIMEOUT_S: float = 30.0
     DEMO_EMERGENCY_PHONE: str | None = None
+    DEMO_CONTACT_NAME: str = "Eric"  # Maya's emergency contact (seeded into the database, spoken in the call)
     DEMO_THERAPIST_PHONE: str | None = None
     DEMO_PATIENT_PHONE: str | None = None  # Maya's phone in the default profile ({{patient_phone}})
 
@@ -112,6 +117,8 @@ class Config:
             if not value:
                 continue
             values.append(value)
+            if name == "GEMINI_API_KEYS":
+                values += [k.strip() for k in value.split(",") if k.strip()]
             if name.endswith("_DSN"):
                 password = _dsn_password(value)
                 if password:

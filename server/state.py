@@ -64,7 +64,7 @@ def default_profile(patient_id: str) -> PatientProfile:
             pronoun_obj="her",
             pronoun_poss="her",
             phone=cfg.DEMO_PATIENT_PHONE,
-            contact_name="Linh",
+            contact_name=cfg.DEMO_CONTACT_NAME,
             contact_phone=cfg.DEMO_EMERGENCY_PHONE,
             therapist_id="okafor",
             therapist_name="Dr. Okafor",

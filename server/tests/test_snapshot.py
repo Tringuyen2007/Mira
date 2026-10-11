@@ -122,9 +122,9 @@ def test_call_variables_are_all_non_empty_strings_even_with_missing_profile_data
 def test_rendered_opening_and_voicemail_contain_no_braces() -> None:
     inc = with_snapshot(incident(), lying_frames(35))
     rendered = render_opening(snap.call_variables(inc, "Linh"))
-    assert rendered["opening"].startswith("Hi Linh, this is Mira, the home exercise assistant for Maya. "
+    assert rendered["opening"].startswith("Hello Linh, this is Mira, the home exercise assistant for Maya. "
                                           "This is an urgent safety call. At 3:42 PM,")
-    assert rendered["voicemail"] == ("Hi Linh, this is Mira, the home exercise assistant for Maya. Urgent: Mira saw "
+    assert rendered["voicemail"] == ("Hello Linh, this is Mira, the home exercise assistant for Maya. Urgent: Mira saw "
                                      "Maya fall at 3:42 PM and she hasn't responded. Please call Maya at the number "
                                      "you have for her. If you can't reach her, call 911.")
     for text in rendered.values():
