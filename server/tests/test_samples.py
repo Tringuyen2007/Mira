@@ -36,4 +36,5 @@ def test_pose_and_frame_samples_match_contract() -> None:
     assert {"type", "seq", "t", "session_id", "exercise_id", "set_no", "joints", "confidence", "angles", "com",
             "load_l_pct", "heel_l_pct", "heel_r_pct", "confidence_avg", "flags"} <= set(frame)
     assert set(_load("ws_live")) >= {"phase", "exercise_id", "rep", "reps_target", "set", "sets_target", "countdown",
-                                     "main_angle", "load_l_pct", "load_conf", "hr", "flags", "cue_id", "paused"}
+                                     "main_angle", "load_l_pct", "load_conf", "hr", "flags", "cue_id", "paused",
+                                     "caption", "first_name", "exercise_name", "incident"}

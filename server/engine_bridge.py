@@ -641,6 +641,12 @@ class LagMonitor:
             log.info("event loop lag", extra={"event_loop_lag_ms": stats})
 
 
+# Display names for the LCD and the app ("REPS · MINI SQUATS"); unknown ids are title-cased.
+EXERCISE_NAMES = {"squat": "Mini squats"}
+CAPTION_SOURCES = {"greeting": "text", "cue": "text", "summary_ready": "spoken"}
+CLOSED_ALERT_STEPS = frozenset({"resolved", "closed", "resolved_by_therapist"})
+
+
 @dataclass
 class LiveState:
     """The /ws/live payload, maintained from frames and events."""
@@ -659,6 +665,30 @@ class LiveState:
     flags: list[str] = field(default_factory=list)
     cue_id: str | None = None
     paused: bool = False
+    caption: dict[str, Any] | None = None  # {text, source, t}: what Mira last said (late joiners repaint it)
+    first_name: str | None = None
+    exercise_name: str | None = None
+    incident: bool = False
+
+    def on_session_start(self, first_name: str, exercise_id: str) -> None:
+        self.first_name = first_name
+        self.exercise_id = exercise_id
+        self.exercise_name = EXERCISE_NAMES.get(exercise_id, exercise_id.replace("_", " ").capitalize())
+        self.caption = None
+        self.incident = False
+
+    def on_agent_event(self, ev: Message) -> None:
+        """Caption and incident only. Agent events (hub.emit) come here directly; they must not move phase,
+        rep or cue_id (a Coach focus cue during the countdown would otherwise end the countdown)."""
+        kind = ev.get("type")
+        text_key = CAPTION_SOURCES.get(str(kind))
+        text = ev.get(text_key) if text_key else None
+        if isinstance(text, str) and text.strip():
+            self.caption = {"text": text.strip(), "source": kind, "t": ev.get("t", round(time.time(), 3))}
+        if kind == "fall" or (kind == "cue" and ev.get("id") == "check_in"):
+            self.incident = True
+        elif kind == "alert":
+            self.incident = ev.get("step") not in CLOSED_ALERT_STEPS
 
     def on_frame(self, frame: Message) -> None:
         angles = frame.get("angles") or {}
@@ -671,6 +701,7 @@ class LiveState:
         self.set = frame.get("set_no", self.set)
 
     def on_event(self, ev: Message) -> None:
+        self.on_agent_event(ev)
         kind = ev.get("type")
         for key in ("reps_target", "sets_target", "exercise_id"):
             if key in ev:
@@ -695,7 +726,7 @@ class LiveState:
         elif kind == "fall":
             self.phase = "incident"
         elif kind == INCIDENT_CLOSED:
-            self.phase = "idle"
+            self.phase, self.incident = "idle", False
         elif kind == "hr" and isinstance(ev.get("bpm"), (int, float)):
             self.hr = int(ev["bpm"])
 
@@ -704,7 +735,8 @@ class LiveState:
                 "reps_target": self.reps_target, "set": self.set, "sets_target": self.sets_target,
                 "countdown": self.countdown, "main_angle": self.main_angle, "load_l_pct": self.load_l_pct,
                 "load_conf": self.load_conf, "hr": self.hr, "flags": self.flags, "cue_id": self.cue_id,
-                "paused": self.paused}
+                "paused": self.paused, "caption": self.caption, "first_name": self.first_name,
+                "exercise_name": self.exercise_name, "incident": self.incident}
 
 
 @dataclass(eq=False)
@@ -736,6 +768,7 @@ class EngineBridge:
         self.session_provider = session_provider
         self.ring_buffer = RingBuffer()
         self.live = LiveState()
+        hub.emit_observers.append(self.live.on_agent_event)
         self.lag = LagMonitor()
 
         self._frame_subs: list[FrameCallback] = []

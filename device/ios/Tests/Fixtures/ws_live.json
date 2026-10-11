@@ -13,5 +13,13 @@
   "hr": 103,
   "flags": [],
   "cue_id": "knees_out",
-  "paused": false
+  "paused": false,
+  "caption": {
+    "text": "Push your knees out over your toes.",
+    "source": "cue",
+    "t": 1791662225.1
+  },
+  "first_name": "Maya",
+  "exercise_name": "Mini squats",
+  "incident": false
 }
