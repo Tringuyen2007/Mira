@@ -36,9 +36,9 @@ ORANGE = (0, 150, 255)
 NAMES = ("A", "B")
 
 
-def _need_both(results: dict[str, tuple]) -> list[str]:
+def _need_both(results: dict[str, tuple], names=NAMES) -> list[str]:
     problems = []
-    for n in NAMES:
+    for n in names:
         if n not in results:
             problems.append(f"camera {n} has no marker solution (it needs to see at least 2 markers)")
             continue
@@ -46,14 +46,14 @@ def _need_both(results: dict[str, tuple]) -> list[str]:
     return problems
 
 
-def lock_problems(results: dict[str, tuple]) -> list[str]:
+def lock_problems(results: dict[str, tuple], names=NAMES) -> list[str]:
     """Why the current spots can't be locked: a missing camera or a nonsense pose (wrong marker IDs)."""
-    return _need_both(results)
+    return _need_both(results, names)
 
 
-def save_problems(results: dict[str, tuple]) -> list[str]:
+def save_problems(results: dict[str, tuple], names=NAMES) -> list[str]:
     """Why calibration can't be saved. A rough or assumed zoom is fine: calib_refine fine-tunes it."""
-    return _need_both(results)
+    return _need_both(results, names)
 
 
 GREY = (150, 150, 150)
@@ -81,6 +81,16 @@ def legend_lines(save_blockers: list[str], lock_blockers: list[str]) -> list[tup
     ]
 
 
+def pad_tiles(tiles: list[np.ndarray]) -> list[np.ndarray]:
+    """Two tiles across, so the layout is the same with one camera (the other slot says why it's empty)."""
+    tiles = list(tiles)
+    while len(tiles) < 2:
+        blank = np.full((TILE[1], TILE[0], 3), 32, np.uint8)
+        draw_text(blank, "one-camera setup", (10, 24), WHITE, 0.6)
+        tiles.append(blank)
+    return tiles
+
+
 def _status_panel(lines: list[tuple[str, tuple]]) -> np.ndarray:
     img = np.full((TILE[1], TILE[0], 3), 32, np.uint8)
     for k, (text, color) in enumerate(lines):
@@ -93,13 +103,13 @@ def main() -> int:
     p.add_argument("--seconds", type=float, default=3.0, help="averaging window")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
-    missing = [n for n in NAMES if n not in cams]
-    if missing:
-        print(f"camera(s) {missing} are not configured: run python -m vision.cams first")
+    names = tuple(n for n in NAMES if n in cams)  # one camera is fine
+    if not names:
+        print("no camera is configured: run python -m vision.cams first")
         return 1
 
     detector = MarkerDetector(mat)
-    cameras = {n: Camera(n, cams[n].index, cams[n].width, cams[n].height) for n in NAMES}
+    cameras = {n: Camera(n, cams[n].index, cams[n].width, cams[n].height) for n in names}
     for c in cameras.values():
         c.start()
     history = {n: deque(maxlen=int(args.seconds * 30)) for n in cameras}
@@ -134,7 +144,7 @@ def main() -> int:
                                               mat.tol_position_m, mat.tol_angle_deg)
                     results[n] = (sol, obs, hint, warns, fit_report(sol.K, sol.R, sol.t, size, mat))
             centers = {n: cam_center(r[0].R, r[0].t) for n, r in results.items() if not r[3]}
-            locked = {n: cams[n].target_eye for n in NAMES if cams[n].target_eye is not None}
+            locked = {n: cams[n].target_eye for n in names if cams[n].target_eye is not None}
             stale = targets_stale(centers, locked)
 
             tiles = []
@@ -178,7 +188,7 @@ def main() -> int:
                 tiles.append(tile)
 
             map_cams = {}
-            for n in NAMES:
+            for n in names:
                 v = {"suggested": None if n in locked else mat.camera_targets.get(n), "target": locked.get(n)}
                 if n in results and not results[n][3]:
                     sol = results[n][0]
@@ -192,7 +202,7 @@ def main() -> int:
                 status.append(("locked spots are from another setup: press t to lock these", ORANGE))
             elif not locked:
                 status.append(("no spots locked: press t to remember these spots", WHITE))
-            status += [("", WHITE)] + legend_lines(save_problems(results), lock_problems(results)) + [note]
+            status += [("", WHITE)] + legend_lines(save_problems(results, names), lock_problems(results, names)) + [note]
             bottom = np.hstack([render_map(mat, map_cams, TILE), _status_panel(status)])
 
             if now - last_print > 1.0:
@@ -202,30 +212,30 @@ def main() -> int:
                     print(f"{n}: markers {sorted(obs)} rms {sol.rms:.2f}px {sol.zoom_msg} at "
                           f"({c[0]:+.2f}, {c[1]:.2f}, {c[2]:+.2f})" + (f" -> {hint['msg']}" if hint else "")
                           + "".join(f" | {m}" for m in warns + fits))
-            cv2.imshow("Mira extrinsics", np.vstack([np.hstack(tiles), bottom]))
+            cv2.imshow("Mira extrinsics", np.vstack([np.hstack(pad_tiles(tiles)), bottom]))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return 0
             if key == ord("t"):
-                problems_ = lock_problems(results)
+                problems_ = lock_problems(results, names)
                 if problems_:
                     note = ("cannot lock: " + problems_[0], RED)
                     print("cannot lock spots: " + "; ".join(problems_))
                     continue
-                for n in NAMES:
+                for n in names:
                     sol = results[n][0]
                     cams[n].target_eye, cams[n].target_aim = lock_in_place(sol.R, sol.t, mat.aim_point)
                 save_cameras(cams)
                 note = ("spots locked", GREEN)
                 print("locked camera spots: " + ", ".join(f"{n} {np.round(cams[n].target_eye, 2).tolist()}"
-                                                          for n in NAMES))
+                                                          for n in names))
             if key == ord("s"):
-                problems_ = save_problems(results)
+                problems_ = save_problems(results, names)
                 if problems_:
                     note = ("cannot save: " + problems_[0], RED)
                     print("cannot save: " + "; ".join(problems_))
                     continue
-                for n in NAMES:
+                for n in names:
                     sol, obs, _, _, _ = results[n]
                     cfg = cams[n]
                     cfg.K, cfg.dist, cfg.zoom_std, cfg.R, cfg.t = sol.K, np.zeros(5), sol.zoom_std, sol.R, sol.t

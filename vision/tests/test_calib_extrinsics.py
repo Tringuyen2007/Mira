@@ -34,3 +34,13 @@ def test_legend_explains_every_key_and_fits_the_panel():
     assert all(len(t) <= 66 for t, _ in ready)
     blocked = "\n".join(t for t, _ in legend_lines(["camera B has no marker solution"], ["camera B has no marker solution"]))
     assert "not yet" in blocked and "camera B" in blocked
+
+
+def test_one_camera_setup_saves_and_pads_the_layout():
+    from vision.calib_extrinsics import pad_tiles
+
+    assert save_problems({"B": _result()}, ("B",)) == []
+    assert lock_problems({"B": _result()}, ("B",)) == []
+    assert save_problems({}, ("B",))
+    tiles = pad_tiles([np.zeros((360, 640, 3), np.uint8)])
+    assert len(tiles) == 2 and np.hstack(tiles).shape == (360, 1280, 3)

@@ -3,7 +3,7 @@
     python -m vision.debug_view                   # live cameras
     python -m vision.debug_view --replay FILE     # a recording (add --retriangulate for current calibration)
     python -m vision.debug_view --poses 1         # live, pose looking for one person per camera
-    python -m vision.debug_view --tracker model   # trial: fit a body model to both cameras
+    python -m vision.debug_view --height-cm 175   # one camera: your height, saved for next time
 
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
 Bottom: top-down view of the mat and a low-poly 3D person (v switches to a flat front view);
@@ -22,7 +22,7 @@ import numpy as np
 
 from vision.avatar import AvatarView, render_avatar
 from vision.capture import mono_to_unix
-from vision.config import CameraConfig, MatConfig, load_cameras, load_mat, mat_raw
+from vision.config import CameraConfig, MatConfig, height_from, load_cameras, load_mat, mat_raw
 from vision.draw import GREEN, MAGENTA, RED, WHITE, YELLOW, draw_points, draw_skeleton, draw_text, fit, pt
 from vision.frames import cam_center, project
 from vision.markers import MarkerDetector
@@ -193,7 +193,9 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
             if msg:
                 draw_text(panel, msg, (8, y), RED, 0.45)
                 y += 18
-        if cam is None:
+        if cam is None and len(cams) == 1:
+            draw_text(panel, "not used (one-camera setup)", (8, y), WHITE, 0.45)
+        elif cam is None:
             draw_text(panel, "not configured: run python -m vision.cams", (8, y), RED, 0.45)
         elif not cam.calibrated:
             draw_text(panel, "not calibrated (2D only)", (8, y), YELLOW, 0.45)
@@ -244,14 +246,14 @@ def _open_window() -> AvatarView:
 
 
 def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_poses: int | None = None,
-             tracker: str = "triangulate") -> None:
+             tracker: str = "auto", height_m: float | None = None) -> None:
     from vision.live import LiveSource  # imports MediaPipe; keep replay usable without it
     from vision.pose import NUM_POSES
 
     num_poses = NUM_POSES if num_poses is None else num_poses
 
     detector, show_markers = MarkerDetector(mat), False
-    pipeline = Pipeline(cams, mat=mat, tracker=tracker)
+    pipeline = Pipeline(cams, mat=mat, tracker=tracker, height_m=height_m)
     monitor = MoveMonitor(cams, detector)
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
@@ -299,14 +301,14 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
 
 
 def run_replay(path: Path, cams: dict[str, CameraConfig], mat: MatConfig, retriangulate: bool, speed: float,
-               tracker: str = "triangulate") -> None:
+               tracker: str = "auto", height_m: float | None = None) -> None:
     if tracker == "model" and not retriangulate:  # re-run the recording with its own calibration
         cams, retriangulate = cams_from_header(read_header(path)), True
     view_cams = cams if retriangulate else cams_from_header(read_header(path))
     view = _open_window()
     try:
         for out in replay_outputs(path, retriangulate=retriangulate, cams=cams, realtime=True, speed=speed,
-                                  tracker=tracker):
+                                  tracker=tracker, height_m=height_m):
             img = compose_view(view_cams, mat, {}, out.raw, out, None, None, f"replay {path.name}", view=view)
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(1) & 0xFF
@@ -323,16 +325,21 @@ def main() -> None:
     p.add_argument("--retriangulate", action="store_true")
     p.add_argument("--speed", type=float, default=1.0)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
-    p.add_argument("--tracker", default="triangulate", choices=["triangulate", "model"],
-                   help="model: fit a body to both cameras (trial); triangulate: today's pipeline")
+    p.add_argument("--tracker", default="auto", choices=["auto", "triangulate", "model"],
+                   help="auto: the body model with one camera, triangulation with two; or force one")
+    p.add_argument("--height-cm", type=float, help="your height (saved in config/person.yaml); one camera needs it")
     p.add_argument("--poses", type=int, default=None,
                    help="people pose looks for per camera, live (default vision.pose.NUM_POSES)")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
+    h = height_from(args.height_cm)
+    height_m = None if h is None else h / 100
+    if len(cams) == 1 and height_m is None:
+        print("one-camera setup: pass --height-cm once (e.g. --height-cm 175) so the body has the right scale")
     if args.replay:
-        run_replay(args.replay, cams, mat, args.retriangulate, args.speed, args.tracker)
+        run_replay(args.replay, cams, mat, args.retriangulate, args.speed, args.tracker, height_m)
     else:
-        run_live(cams, mat, args.model, args.poses, args.tracker)
+        run_live(cams, mat, args.model, args.poses, args.tracker, height_m)
 
 
 if __name__ == "__main__":

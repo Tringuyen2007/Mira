@@ -151,3 +151,11 @@ def test_replay_outputs_can_use_the_model_tracker(tmp_path):
             rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0))
     outs = list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, tracker="model"))
     assert outs[-1].tracker == "model"
+
+
+def test_one_camera_setup_says_the_other_panel_is_unused():
+    cams = {"B": target_cams()["B"]}
+    one = compose_view(cams, MatConfig(), {}, {}, None, None, None, None)
+    two = compose_view(target_cams(), MatConfig(), {}, {}, None, None, None, None)
+    assert one.shape == two.shape == (720, 1280, 3)
+    assert (one[:360, :640] != two[:360, :640]).any()  # "not used (one-camera setup)" instead of camera A

@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 
 from vision.anchor import FootAnchor
-from vision.config import CameraConfig, MatConfig, load_cameras, load_mat
+from vision.config import CameraConfig, MatConfig, height_from, load_cameras, load_mat
+from vision.frames import project
 from vision.pipeline import Pipeline, PipelineOutput
 from vision.triangulate import triangulate_points
 
@@ -122,6 +123,8 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
                pose_ms: dict[str, float] | None = None) -> list[Check]:
     """`moved`: camera name -> (MoveMonitor status, shift px); `pose_ms`: camera name -> pose time per
     frame (ms); both from a live run."""
+    if single_camera(cams):
+        return _single_camera_checks(outputs, cams, fps, height_cm, moved, pose_ms)
     checks = []
     n3d = sum(o.frame.tracking == "3d" for o in outputs)
     frac = 100.0 * n3d / len(outputs) if outputs else None
@@ -177,6 +180,60 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
     return checks
 
 
+def single_camera(cams: dict[str, CameraConfig]) -> str | None:
+    """The camera's name when exactly one camera is calibrated (one-camera setup)."""
+    names = [n for n, c in cams.items() if c is not None and c.calibrated]
+    return names[0] if len(names) == 1 else None
+
+
+def _single_camera_checks(outputs, cams, fps, height_cm, moved, pose_ms) -> list[Check]:
+    """One camera: no triangulation, so check the fitted body against the camera and for steadiness."""
+    name = single_camera(cams)
+    cam = cams[name]
+    checks = []
+    tracked = [o for o in outputs if o.frame.tracking != "lost"]
+    frac = 100.0 * len(tracked) / len(outputs) if outputs else None
+    checks.append(_check("frames tracked", frac, "%", "≥ 90", lambda v: v >= 90))
+    model = [o for o in tracked if o.tracker == "model"]
+    res = []
+    for o in model:
+        v = o.raw.get(name)
+        if v is not None and v.detected:
+            uv = project(o.frame.joints, cam.K, cam.dist, cam.R, cam.t)
+            ok = (v.vis >= 0.5) & np.isfinite(uv).all(axis=1)
+            res.extend(np.linalg.norm(uv[ok] - v.lm2d[ok], axis=1))
+    checks.append(_check("body fit to the camera", float(np.median(res)) if res else None, "px", "≤ 10",
+                         lambda v: v <= 10))
+    seq = np.stack([o.frame.joints for o in model]) if model else None
+    jitter = (float(np.nanmedian(np.linalg.norm(np.diff(seq, axis=0), axis=2))) * 100
+              if seq is not None and len(seq) > 1 else None)
+    checks.append(_check("jitter while still", jitter, "cm", "< 1.0", lambda v: v < 1.0))
+    for side in ("l", "r"):
+        vals = [knee_angle_deg(j, side) for j in seq] if seq is not None else []
+        vals = [v for v in vals if np.isfinite(v)]
+        checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
+                             lambda v: 170 <= v <= 180))
+    foot_h = foot_height_cm(seq) if seq is not None else None
+    checks.append(_check("foot height above mat", foot_h, "cm", "-1 to 5", lambda v: -1 <= v <= 5))
+    tilt = body_tilt_deg(seq) if seq is not None else None
+    checks.append(_check("standing straight", tilt, "°", "≤ 3 (else re-run calib_extrinsics)", lambda v: v <= 3))
+    if height_cm is not None:
+        est = estimate_height_cm(seq) if seq is not None else None
+        checks.append(_check("estimated height", est, "cm", f"{height_cm:.0f} ± 5%",
+                             lambda v: abs(v / height_cm - 1) <= 0.05))
+    fits = [o.fit_ms for o in model if o.fit_ms is not None]
+    checks.append(_check("fit time", float(np.median(fits)) if fits else None, "ms", "≤ 8", lambda v: v <= 8))
+    for n, v in sorted((fps or {}).items()):
+        checks.append(_check(f"capture fps {n}", v, "fps", "≥ 20", lambda x: x >= 20))
+    for n, v in sorted((pose_ms or {}).items()):
+        checks.append(_check(f"pose time {n}", v, "ms", "≤ 45", lambda x: x <= 45))
+    for n, (status, shift) in sorted((moved or {}).items()):
+        value = shift if status in ("ok", "moved") else None
+        checks.append(Check(f"camera {n} not moved", value, "px", "< 3",
+                            None if value is None else status != "moved"))
+    return checks
+
+
 def format_checks(checks: list[Check]) -> str:
     lines = [f"{'check':32s} {'value':>12s}  {'target':14s} result"]
     for c in checks:
@@ -186,16 +243,21 @@ def format_checks(checks: list[Check]) -> str:
     return "\n".join(lines)
 
 
-def outputs_from_recording(path, cams: dict[str, CameraConfig]) -> list[PipelineOutput]:
-    """Re-triangulate a recording with the current calibration, unsmoothed and unanchored so jitter and
-    floor errors stay visible."""
+def outputs_from_recording(path, cams: dict[str, CameraConfig], height_cm: float | None = None
+                           ) -> list[PipelineOutput]:
+    """Re-run a recording with the current calibration: two cameras unsmoothed and unanchored so jitter and
+    floor errors stay visible; one camera as the team gets it (the fitted body)."""
     from vision.replay import replay_outputs
 
+    if single_camera(cams):
+        return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False,
+                                   height_m=None if height_cm is None else height_cm / 100))
     return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False,
                                anchor_feet=False))
 
 
-def _live_outputs(cams, mat, model: str, seconds: float, num_poses: int | None = None):
+def _live_outputs(cams, mat, model: str, seconds: float, num_poses: int | None = None,
+                  height_cm: float | None = None):
     from vision.capture import mono_to_unix
     from vision.live import LiveSource
     from vision.pose import NUM_POSES
@@ -204,8 +266,10 @@ def _live_outputs(cams, mat, model: str, seconds: float, num_poses: int | None =
 
     outputs = []
     monitor = MoveMonitor(cams, MarkerDetector(mat), interval_s=0.25)
-    # smoothing and foot anchoring would hide the jitter and floor errors these checks measure
-    pipeline = Pipeline(cams, smoothing=False, mat=mat, anchor_feet=False)
+    if single_camera(cams):  # one camera: check the fitted body the team gets
+        pipeline = Pipeline(cams, mat=mat, height_m=None if height_cm is None else height_cm / 100)
+    else:  # smoothing and foot anchoring would hide the jitter and floor errors these checks measure
+        pipeline = Pipeline(cams, smoothing=False, mat=mat, anchor_feet=False)
     with LiveSource(cams, model, mat, num_poses=NUM_POSES if num_poses is None else num_poses) as src:
         problems = src.wait_ready()
         if problems:
@@ -237,11 +301,12 @@ def main() -> int:
                    help="people pose looks for per camera, live (default vision.pose.NUM_POSES)")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
+    height_cm = height_from(args.height_cm)  # remembered in config/person.yaml
     if args.from_path:
-        outputs, fps, moved, pose_ms = outputs_from_recording(args.from_path, cams), None, None, None
+        outputs, fps, moved, pose_ms = outputs_from_recording(args.from_path, cams, height_cm), None, None, None
     else:
-        outputs, fps, moved, pose_ms = _live_outputs(cams, mat, args.model, args.seconds, args.poses)
-    checks = run_checks(outputs, cams, mat, fps, args.height_cm, moved, pose_ms)
+        outputs, fps, moved, pose_ms = _live_outputs(cams, mat, args.model, args.seconds, args.poses, height_cm)
+    checks = run_checks(outputs, cams, mat, fps, height_cm, moved, pose_ms)
     print(format_checks(checks))
     return 0 if all(c.passed is not False for c in checks) else 1
 

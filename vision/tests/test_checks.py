@@ -129,3 +129,20 @@ def test_standing_straight_check_catches_a_tilted_calibration():
     outs = [pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0) for k in range(20)]
     c = {c.name: c for c in run_checks(outs, cams, MAT)}["standing straight"]
     assert c.passed is True and c.unit == "°"
+
+
+def test_one_camera_checks_skip_two_camera_ones():
+    from vision.tests.test_mono import _cam_b
+    from vision.mono import stature
+
+    cam, X = _cam_b(), standing_skeleton()
+    h = stature(X - (X[23] + X[24]) / 2)
+    pipe = Pipeline({"B": cam}, mat=MAT, height_m=h)
+    rng = np.random.default_rng(0)
+    outs = [pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30, noise_px=0.5, rng=rng)) for k in range(90)]
+    checks = {c.name: c for c in run_checks(outs, {"B": cam}, MAT, height_cm=h * 100)}
+    assert {"frames tracked", "body fit to the camera", "jitter while still", "standing straight",
+            "estimated height", "fit time"} <= set(checks)
+    assert not {"median triangulation angle", "pair skew p95", "thigh_l length std"} & set(checks)
+    for name in ("frames tracked", "body fit to the camera", "jitter while still", "estimated height"):
+        assert checks[name].passed is True, (name, checks[name].value)
