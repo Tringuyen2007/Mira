@@ -53,7 +53,7 @@ def test_default_library_covers_builtin_ids_and_passes_validation() -> None:
     for cue_id in [*cue_library.CUE_IDS, *cue_library.FIXED_CUES]:
         assert lib.entries.get(cue_id), cue_id
     for cue_id, lines in lib.entries.items():
-        if cue_id in cue_library.FIXED_CUES:  # hand-written safety lines, exempt from the AI cue limits
+        if cue_id in cue_library.HAND_WRITTEN:  # hand-written safety/trainer lines, exempt from the AI cue limits
             continue
         for line in lines:
             assert validate_text(line["text"], "cue", []) == line["text"], (cue_id, line)
@@ -108,10 +108,13 @@ async def test_generate_audio_only_missing(monkeypatch: pytest.MonkeyPatch) -> N
     (cue_library.mp3_dir()).mkdir(parents=True)
     (cue_library.mp3_dir() / "c_1.mp3").write_bytes(b"old")
     result = await cue_library.generate_audio()
-    # c_1 already exists; the fixed safety lines are added to every library.
-    assert calls == ["Yo.", "Are you okay? Give me a thumbs up or raise your hand.",
-                     "Thanks for letting me know you're okay."]
-    assert result == {"generated": 3, "failed": 0, "chars": sum(map(len, calls))}
+    # c_1 already exists; the hand-written safety and trainer lines are added to every library
+    # (and voiced with force=True even though ELEVEN_RUNTIME_TTS is off).
+    hand_written = [t for lines in cue_library.HAND_WRITTEN.values() for t in lines]
+    assert calls == ["Yo.", *hand_written]
+    assert calls[1:3] == ["Are you okay? Give me a thumbs up or raise your hand.",
+                          "Thanks for letting me know you're okay."]
+    assert result == {"generated": len(calls), "failed": 0, "chars": sum(map(len, calls))}
     assert cue_library.pick("c") is not None and cue_library.pick("c")["audio_url"]  # type: ignore[index]
 
 

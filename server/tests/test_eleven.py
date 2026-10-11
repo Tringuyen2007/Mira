@@ -30,6 +30,7 @@ class Recorder:
 def rec(monkeypatch: pytest.MonkeyPatch) -> Iterator[Recorder]:
     monkeypatch.setenv("ELEVEN_API_KEY", KEY)
     monkeypatch.setenv("ELEVEN_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+    monkeypatch.setenv("ELEVEN_RUNTIME_TTS", "1")  # these tests exercise runtime generation
     reload_config()
     recorder = Recorder()
     monkeypatch.setattr(eleven, "transport", httpx.MockTransport(recorder))
@@ -48,7 +49,9 @@ async def test_tts_generates_once_then_serves_cache(rec: Recorder) -> None:
     req = rec.requests[0]
     assert req.url.path == "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"
     assert req.headers["xi-api-key"] == KEY
-    assert json.loads(req.content) == {"text": "Hi Maya!", "model_id": "eleven_flash_v2_5"}
+    assert json.loads(req.content) == {"text": "Hi Maya!", "model_id": "eleven_flash_v2_5",
+                                       "voice_settings": {"stability": 0.45, "similarity_boost": 0.8,
+                                                          "style": 0.35, "use_speaker_boost": True}}
 
 
 async def test_changed_text_gets_new_file(rec: Recorder) -> None:
