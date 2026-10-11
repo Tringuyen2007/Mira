@@ -317,10 +317,20 @@ HIGHLIGHT_MEMORY_KINDS = ("insight", "depth_gain", "asymmetry_worse", "compensat
 
 async def list_messages(db: Database, patient_id: str, kind: str = "message", since_id: int | None = None,
                         limit: int = 100) -> list[dict[str, Any]]:
-    """Both directions of the thread (patient/therapist/mira), ascending by id."""
+    """Both directions of the thread (patient/therapist/mira), ascending by id.
+
+    With `since_id`, rows after it, ascending, capped at `limit`. Without it, the newest `limit` rows
+    (so a plain page load gets the most recent window, not the oldest), still ordered ascending.
+    """
+    if since_id is None:
+        return await db.fetch(
+            f"SELECT {MESSAGE_COLUMNS} FROM (SELECT {MESSAGE_COLUMNS} FROM messages "
+            "WHERE patient_id = %(pid)s AND kind = %(kind)s ORDER BY id DESC LIMIT %(limit)s) AS newest "
+            "ORDER BY id ASC",
+            {"pid": patient_id, "kind": kind, "limit": limit})
     return await db.fetch(
         f"SELECT {MESSAGE_COLUMNS} FROM messages WHERE patient_id = %(pid)s AND kind = %(kind)s "
-        "AND (%(since)s::bigint IS NULL OR id > %(since)s) ORDER BY id ASC LIMIT %(limit)s",
+        "AND id > %(since)s ORDER BY id ASC LIMIT %(limit)s",
         {"pid": patient_id, "kind": kind, "since": since_id, "limit": limit})
 
 

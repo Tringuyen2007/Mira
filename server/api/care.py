@@ -88,9 +88,11 @@ async def get_care(principal: security.Principal = Depends(security.require_prin
 @router.get("/me/messages")
 async def get_messages(principal: security.Principal = Depends(security.require_principal),
                        patient_id: str | None = Query(default=None), since_id: int | None = Query(default=None),
-                       db: Database = Depends(require_db)) -> dict[str, Any]:
+                       mark_read: bool = Query(default=False), db: Database = Depends(require_db)
+                       ) -> dict[str, Any]:
     pid = patient_for(principal, patient_id)
-    await writes.mark_messages_read(db, pid, sender_not="patient")
+    if mark_read:
+        await writes.mark_messages_read(db, pid, sender_not="patient")
     rows = await queries.list_messages(db, pid, kind="message", since_id=since_id)
     return {"messages": [_message_view(r) for r in rows]}
 
@@ -118,6 +120,8 @@ async def post_therapist_message(patient_id: str, body: TherapistMessageIn,
     security.full_only(principal)
     if body.kind not in MESSAGE_KINDS:
         raise HTTPException(status_code=422, detail=f"kind must be one of {MESSAGE_KINDS}")
+    if await queries.get_patient(db, patient_id) is None:
+        raise HTTPException(status_code=404, detail="patient not found")
     row = await writes.insert_message(db, patient_id, sender="therapist", kind=body.kind, body=body.body)
     if row is None:
         raise HTTPException(status_code=503, detail="database unavailable: could not save")

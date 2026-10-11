@@ -9,6 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server import security
+from server.db import queries, writes
+from server.db.pool import Database
 from server.tests.conftest import AUTH
 from server.tests.dbutil import fresh_database, prepare, ro_dsn
 from server.tests.test_pairing import CONTACT, PROFILE
@@ -90,6 +92,11 @@ def test_admin_note_and_message_show_up_and_unread_clears_on_read(client: TestCl
     assert r.status_code == 200
     msgs = r.json()["messages"]
     assert any(m["id"] == mid and m["sender"] == "therapist" for m in msgs)
+    assert client.get("/me/care", headers=phone).json()["unread_messages"] == 1
+
+    r = client.get("/me/messages?mark_read=true", headers=phone)
+    assert r.status_code == 200
+    assert any(m["id"] == mid for m in r.json()["messages"])
     assert client.get("/me/care", headers=phone).json()["unread_messages"] == 0
 
     r = client.get(f"/me/messages?since_id={mid}", headers=phone)
@@ -98,6 +105,7 @@ def test_admin_note_and_message_show_up_and_unread_clears_on_read(client: TestCl
     assert client.post("/patients/maya/messages", json={"body": "x", "kind": "bogus"},
                        headers=AUTH).status_code == 422
     assert client.post("/patients/maya/messages", json={"body": "x"}).status_code == 401
+    assert client.post("/patients/nope/messages", json={"body": "x"}, headers=AUTH).status_code == 404
 
 
 def test_patient_message_notifies_therapist_and_emits_live(client: TestClient, phone: dict[str, str]) -> None:
@@ -133,3 +141,22 @@ def test_test_alert_logs_without_calling_when_calls_are_disabled(client: TestCli
                         "note": "Test alert logged. Calls are disabled on this server."}
     notifs = client.get("/notifications?therapist_id=okafor", headers=AUTH).json()["notifications"]
     assert any(n["kind"] == "test" for n in notifs)
+
+
+async def test_list_messages_without_since_id_returns_newest_window_ascending(dsn: str) -> None:
+    db = Database(dsn, ro_dsn(dsn))
+    await db.open()
+    try:
+        ids = []
+        for i in range(5):
+            row = await writes.insert_message(db, "maya", sender="patient", kind="message", body=f"msg {i}")
+            assert row is not None
+            ids.append(row["id"])
+
+        rows = await queries.list_messages(db, "maya", kind="message", since_id=None, limit=3)
+        assert [r["id"] for r in rows] == ids[-3:]
+
+        rows = await queries.list_messages(db, "maya", kind="message", since_id=ids[1], limit=3)
+        assert [r["id"] for r in rows] == ids[2:5]
+    finally:
+        await db.close()
