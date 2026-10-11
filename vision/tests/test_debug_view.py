@@ -121,3 +121,33 @@ def test_3d_view_passes_confidence_and_anchoring_and_says_when_rules_are_off():
     view.handle_key(ord("c"))
     off = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
     assert (on[360:, 640:] != off[360:, 640:]).any()  # "body rules off" shown
+
+
+def test_model_tracker_output_is_drawn_directly_and_labelled():
+    from vision.avatar import AvatarView
+
+    cams, X = target_cams(), standing_skeleton()
+    pipe = Pipeline(cams, tracker="model")
+    out = None
+    for k in range(45):
+        out = pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
+    assert out.tracker == "model"
+    view = AvatarView()
+    called = []
+    view.rig.update = lambda *a, **k: called.append(1)  # the rig must not re-pose model output
+    img = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
+    assert not called and img.shape == (720, 1280, 3)
+
+
+def test_replay_outputs_can_use_the_model_tracker(tmp_path):
+    from vision.record import Recorder
+    from vision.replay import replay_outputs
+
+    cams, X = target_cams(), standing_skeleton()
+    path = tmp_path / "r.jsonl"
+    pipe = Pipeline(cams)
+    with Recorder(path, cams, {}) as rec:
+        for k in range(50):
+            rec.write(pipe.process(1000 + k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0))
+    outs = list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, tracker="model"))
+    assert outs[-1].tracker == "model"

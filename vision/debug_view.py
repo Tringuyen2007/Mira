@@ -3,6 +3,7 @@
     python -m vision.debug_view                   # live cameras
     python -m vision.debug_view --replay FILE     # a recording (add --retriangulate for current calibration)
     python -m vision.debug_view --poses 1         # live, pose looking for one person per camera
+    python -m vision.debug_view --tracker model   # trial: fit a body model to both cameras
 
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
 Bottom: top-down view of the mat and a low-poly 3D person (v switches to a flat front view);
@@ -217,12 +218,16 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
     hud.append("keys: r record   m markers   q quit")
     feet = out.feet_locked if out is not None else None
     if view is not None and view.show_3d:
-        body = (view.rig.update(frame.t, frame.joints, frame.tracking, frame.conf, feet)
-                if frame is not None else None)
-        if view.rig.progress < 1:
-            hud = hud + [f"measuring body... {view.rig.progress * 100:.0f}% (stand on the mat)"]
-        if not view.rig.constraints:
-            hud = hud + ["body rules off (c to turn on)"]
+        if out is not None and out.tracker == "model":  # already a fitted body: draw it as it is
+            body = frame.joints
+            hud = hud + [f"tracker: model (fit {out.fit_ms or 0:.1f} ms)"]
+        else:
+            body = (view.rig.update(frame.t, frame.joints, frame.tracking, frame.conf, feet)
+                    if frame is not None else None)
+            if view.rig.progress < 1:
+                hud = hud + [f"measuring body... {view.rig.progress * 100:.0f}% (stand on the mat)"]
+            if not view.rig.constraints:
+                hud = hud + ["body rules off (c to turn on)"]
         right = render_avatar(body, mat, view, feet_locked=feet, hud=hud)
     else:
         right = render_front(frame, hud)
@@ -238,14 +243,15 @@ def _open_window() -> AvatarView:
     return view
 
 
-def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_poses: int | None = None) -> None:
+def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_poses: int | None = None,
+             tracker: str = "triangulate") -> None:
     from vision.live import LiveSource  # imports MediaPipe; keep replay usable without it
     from vision.pose import NUM_POSES
 
     num_poses = NUM_POSES if num_poses is None else num_poses
 
     detector, show_markers = MarkerDetector(mat), False
-    pipeline = Pipeline(cams, mat=mat)
+    pipeline = Pipeline(cams, mat=mat, tracker=tracker)
     monitor = MoveMonitor(cams, detector)
     recorder: Recorder | None = None
     last: PipelineOutput | None = None
@@ -292,11 +298,15 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
             cv2.destroyAllWindows()
 
 
-def run_replay(path: Path, cams: dict[str, CameraConfig], mat: MatConfig, retriangulate: bool, speed: float) -> None:
+def run_replay(path: Path, cams: dict[str, CameraConfig], mat: MatConfig, retriangulate: bool, speed: float,
+               tracker: str = "triangulate") -> None:
+    if tracker == "model" and not retriangulate:  # re-run the recording with its own calibration
+        cams, retriangulate = cams_from_header(read_header(path)), True
     view_cams = cams if retriangulate else cams_from_header(read_header(path))
     view = _open_window()
     try:
-        for out in replay_outputs(path, retriangulate=retriangulate, cams=cams, realtime=True, speed=speed):
+        for out in replay_outputs(path, retriangulate=retriangulate, cams=cams, realtime=True, speed=speed,
+                                  tracker=tracker):
             img = compose_view(view_cams, mat, {}, out.raw, out, None, None, f"replay {path.name}", view=view)
             cv2.imshow(WINDOW, img)
             key = cv2.waitKey(1) & 0xFF
@@ -313,14 +323,16 @@ def main() -> None:
     p.add_argument("--retriangulate", action="store_true")
     p.add_argument("--speed", type=float, default=1.0)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
+    p.add_argument("--tracker", default="triangulate", choices=["triangulate", "model"],
+                   help="model: fit a body to both cameras (trial); triangulate: today's pipeline")
     p.add_argument("--poses", type=int, default=None,
                    help="people pose looks for per camera, live (default vision.pose.NUM_POSES)")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
     if args.replay:
-        run_replay(args.replay, cams, mat, args.retriangulate, args.speed)
+        run_replay(args.replay, cams, mat, args.retriangulate, args.speed, args.tracker)
     else:
-        run_live(cams, mat, args.model, args.poses)
+        run_live(cams, mat, args.model, args.poses, args.tracker)
 
 
 if __name__ == "__main__":

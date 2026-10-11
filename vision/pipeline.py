@@ -12,6 +12,7 @@ from vision.filters import OneEuroFilter
 from vision.frames import world_to_mat
 from vision.triangulate import Triangulation, triangulate_pair
 from vision.select import PersonSelector
+from vision.tracker import ModelTracker
 from vision.types import LEFT_HIP, RIGHT_HIP, CameraPeople, FrameResult, PoseResult, swap_left_right
 
 MIN_3D_JOINTS = 8  # below this the calibration or detections disagree; use one camera instead
@@ -30,6 +31,8 @@ class PipelineOutput:
     ignored: dict[str, list[PoseResult]] | None = None  # people not tracked, per camera
     dropped: str | None = None  # camera ignored this frame because it disagreed with the other
     feet_locked: dict[str, bool] | None = None  # "l"/"r" -> foot held by the FootAnchor this frame
+    tracker: str = "triangulate"  # which tracker produced frame.joints ("model" or "triangulate")
+    fit_ms: float | None = None  # model fit time this frame
 
 
 def _flipped(p: PoseResult) -> PoseResult:
@@ -79,11 +82,20 @@ def _as_people(x) -> list[PoseResult] | None:
     return None
 
 
+def _evidence(views: dict[str, PoseResult | None]) -> np.ndarray:
+    """Per-joint confidence for model output: the best MediaPipe visibility across the cameras."""
+    vis = [v.vis for v in views.values() if v is not None and v.detected]
+    return np.max(vis, axis=0) if vis else np.zeros(33)
+
+
 class Pipeline:
     def __init__(self, cams: dict[str, CameraConfig], smoothing: bool = True,
                  min_vis: float = 0.5, max_reproj_px: float = 15.0, mat: MatConfig | None = None,
-                 anchor_feet: bool = True):
+                 anchor_feet: bool = True, tracker: str = "triangulate"):
+        """tracker: "model" fits a body to both cameras (falls back to triangulation while the body is
+        being measured or when a fit fails); "triangulate" is the triangulate-and-clean pipeline."""
         self.cams = cams
+        self._model = ModelTracker(cams) if tracker == "model" else None
         self._anchor = FootAnchor() if anchor_feet else None
         self._selector = PersonSelector(cams, mat or MatConfig())
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
@@ -127,8 +139,18 @@ class Pipeline:
                 self._anchor.reset()
             else:
                 joints, feet_locked = self._anchor.update(t, joints)
-        if self._filter is not None:
+        used, fit_ms = "triangulate", None
+        fitted = None
+        if self._model is not None:
+            anchors = {s: joints[a] for s, a in (("l", 27), ("r", 28)) if (feet_locked or {}).get(s)}
+            fitted = self._model.update(t, joints, tracking, {"A": a, "B": b}, anchors)
+            fit_ms = self._model.last_ms if fitted is not None else None
+        if fitted is not None:
+            joints, used = fitted, "model"
+            conf = np.maximum(conf, _evidence({"A": a, "B": b}))
+        if used != "model" and self._filter is not None:  # the model smooths its own pose numbers
             joints = self._filter(joints, t)
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking)
         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
-                              people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked)
+                              people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked,
+                              tracker=used, fit_ms=fit_ms)
