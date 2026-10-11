@@ -319,6 +319,18 @@ final class AppState {
         }
     }
 
+    /// PUT /me (profile/emergency-contact/alert-therapist patch), then refreshes
+    /// `me` and `store.me` so the Care/Settings screens show the saved values.
+    func updateMe(_ body: MeUpdate) async throws {
+        _ = try await requireClient().updateMe(body)
+        await refreshMe()
+    }
+
+    /// POST /me/test-alert.
+    func sendTestAlert() async throws -> TestAlertResponse {
+        try await requireClient().testAlert()
+    }
+
     // MARK: Sessions (Plan 2)
 
     /// The session this phone started over REST; covers the gap before /ws/events

@@ -15,6 +15,9 @@
     <dict>
         <key>NSAllowsLocalNetworking</key>
         <true/>
+        <!-- Demo server is plain HTTP on a public IP (no TLS chosen for the hackathon). Remove when the server gets HTTPS. -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
     </dict>
 </dict>
 </plist>
