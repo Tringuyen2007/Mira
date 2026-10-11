@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+DEVICE_PREF_STR_MAX = 64
+
 
 class ContactIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
@@ -39,6 +41,14 @@ class MeUpdate(BaseModel):
     @field_validator("device_prefs")
     @classmethod
     def _small(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        if v is not None and (len(v) > 20 or any(not isinstance(k, str) or len(k) > 40 for k in v)):
+        if v is None:
+            return v
+        if len(v) > 20 or any(not isinstance(k, str) or len(k) > 40 for k in v):
             raise ValueError("device_prefs: at most 20 short keys")
+        for value in v.values():  # flat scalars only: no nested objects/lists, no long strings
+            if isinstance(value, str):
+                if len(value) > DEVICE_PREF_STR_MAX:
+                    raise ValueError(f"device_prefs: strings are at most {DEVICE_PREF_STR_MAX} characters")
+            elif not isinstance(value, (bool, int, float)):
+                raise ValueError("device_prefs: values must be true/false, numbers or short strings")
         return v

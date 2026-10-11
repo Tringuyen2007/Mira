@@ -70,6 +70,18 @@ def test_put_me_partial_update(client: TestClient, phone: dict[str, str], dsn: s
     assert client.put("/me", headers=phone, json={"device_prefs": {str(i): i for i in range(30)}}).status_code == 422
 
 
+@pytest.mark.parametrize("prefs", [{"a": {"nested": 1}}, {"a": [1, 2]}, {"a": "x" * 65}, {"a": None}])
+def test_put_me_rejects_non_scalar_or_long_device_prefs(client: TestClient, phone: dict[str, str],
+                                                        prefs: dict[str, object]) -> None:
+    assert client.put("/me", headers=phone, json={"device_prefs": prefs}).status_code == 422
+
+
+def test_put_me_accepts_scalar_device_prefs(client: TestClient, phone: dict[str, str]) -> None:
+    prefs = {"captions": True, "volume": 0.5, "size": 2, "voice": "x" * 64}
+    r = client.put("/me", headers=phone, json={"device_prefs": prefs})
+    assert r.status_code == 200 and r.json()["patient"]["device_prefs"] == prefs
+
+
 def test_export_and_delete(client: TestClient, phone: dict[str, str], dsn: str) -> None:
     from server.state import get_state
 

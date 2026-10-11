@@ -128,3 +128,29 @@ def test_patient_cannot_start_a_session_while_an_incident_is_open(client: TestCl
         assert r.status_code == 200  # admin unchanged
     finally:
         state.guardian.incidents.clear()
+
+
+def test_rest_stop_tells_the_engine_before_ending_the_session(client: TestClient, phone: dict[str, str],
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    from server.state import get_state
+
+    state = get_state()
+    sid = client.post("/sessions", json={"exercise_id": "squat"}, headers=phone).json()["session_id"]
+    sent: list[tuple[dict, bool]] = []
+    monkeypatch.setattr(state.bridge, "send_to_engine",
+                        lambda msg: sent.append((msg, state.sessions.is_ended(sid))))
+    assert client.post(f"/sessions/{sid}/stop", headers=phone).json()["stopped"] is True
+    assert sent == [({"type": "command", "name": "stop", "payload": {"source": "rest"}, "session_id": sid}, False)]
+    sent.clear()
+    client.post(f"/sessions/{sid}/stop", headers=phone)  # already ended: nothing more to tell the engine
+    assert sent == []
+
+
+def test_patient_session_starts_are_rate_limited(client: TestClient, phone: dict[str, str]) -> None:
+    from server.api import ratelimit
+
+    for _ in range(ratelimit.PATIENT_ACTIONS_PER_MIN):
+        assert client.post("/sessions", json={"exercise_id": "squat"}, headers=phone).status_code == 200
+    assert client.post("/sessions", json={"exercise_id": "squat"}, headers=phone).status_code == 429
+    r = client.post("/sessions", json={"patient_id": "maya", "exercise_id": "squat"}, headers=AUTH)
+    assert r.status_code == 200  # admin is never limited

@@ -249,6 +249,10 @@ class AppState:
         self.notifications: Any | None = None
         self.analyst: Any | None = None  # server.agents.session_analyst.SessionAnalyst
         self.devices: Any = None
+        # Per-patient limits on patient-scope actions (server.api.ratelimit): one per app, so tests start fresh.
+        from server.api.ratelimit import PATIENT_ACTIONS_PER_MIN, PerKeyLimiter  # local: api imports state
+
+        self.patient_limiter = PerKeyLimiter(PATIENT_ACTIONS_PER_MIN)
 
 
 _state: AppState | None = None

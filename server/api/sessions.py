@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from server import security
 from server.ai.validators import AI_DRAFT_LABEL, label_note
+from server.api import ratelimit
 from server.api.db_dep import require_db
 from server.config import cfg
 from server.db import queries, writes
@@ -66,6 +67,7 @@ async def start_session(body: SessionIn | None = None,
     state = get_state()
     if principal.scope == "patient":
         assert principal.patient_id is not None
+        ratelimit.check_patient(state.patient_limiter, principal.scope, "sessions", principal.patient_id)
         body.patient_id = principal.patient_id
         if state.db is not None:  # a phone may only start exercises on its plan
             active = {rx["exercise_id"] for rx in await queries.prescriptions(state.db, body.patient_id)}
@@ -93,6 +95,9 @@ async def stop_session(session_id: uuid.UUID,
     live = state.sessions.get(sid)
     if live is not None:
         principal.require(live.patient_id)
+        if not state.sessions.is_ended(sid):  # tell the engine too, so the LCD/mock program stops counting
+            state.bridge.send_to_engine({"type": "command", "name": "stop", "payload": {"source": "rest"},
+                                         "session_id": sid})
         await state.sessions.stop(sid)
         return {"session_id": sid, "stopped": True}
     db = require_db()

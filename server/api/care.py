@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from server import security
+from server.api import ratelimit
 from server.api.db_dep import require_db
 from server.api.me import _first_name
 from server.api.scope import patient_for
@@ -102,6 +103,7 @@ async def post_message(body: MessageIn, principal: security.Principal = Depends(
                        patient_id: str | None = Query(default=None), db: Database = Depends(require_db)
                        ) -> dict[str, Any]:
     pid = patient_for(principal, patient_id)
+    ratelimit.check_patient(get_state().patient_limiter, principal.scope, "messages", pid)
     me_row = await queries.patient_me_row(db, pid)
     if me_row is None:
         raise HTTPException(status_code=404, detail="patient not found")
@@ -142,6 +144,7 @@ async def test_alert(principal: security.Principal = Depends(security.require_pr
                      patient_id: str | None = Query(default=None), db: Database = Depends(require_db)
                      ) -> dict[str, Any]:
     pid = patient_for(principal, patient_id)
+    ratelimit.check_patient(get_state().patient_limiter, principal.scope, "test_alert", pid)
     me_row = await queries.patient_me_row(db, pid)
     if me_row is None:
         raise HTTPException(status_code=404, detail="patient not found")

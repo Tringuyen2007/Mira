@@ -246,3 +246,24 @@ async def test_hook_never_raises_into_stop() -> None:
     await registry.stop(session.session_id)  # must not raise
     await analyst.drain()
     assert await analyst.analyze(session.session_id, "maya", "squat") is None
+
+
+@pytest.mark.parametrize(("origin", "smart"), [("rest", True), ("auto", False), ("boot", False)])
+async def test_model_follows_session_origin_and_runs_in_the_background(
+        dsn: str, db: Database, monkeypatch: pytest.MonkeyPatch, origin: str, smart: bool) -> None:
+    """Phone/dashboard sessions get the smart model; auto-restarted and boot demo loops get the fast one. Every
+    analyst call is a background call (its own budget lane)."""
+    calls: list[tuple[str, bool]] = []
+    real_ask = gemini.ask
+
+    async def spy(agent: str, model: str, *args: Any, **kwargs: Any) -> gemini.Reply:
+        calls.append((model, kwargs.get("background", False)))
+        return await real_ask(agent, model, *args, **kwargs)
+
+    monkeypatch.setattr(gemini, "ask", spy)
+    registry, session = await _full_session(dsn, exercise_id="squat")
+    session.origin = origin
+    analyst, _ = _analyst(registry, db)
+    assert await analyst.analyze(session.session_id, "maya", "squat") is not None
+    expected = gemini.models.smart() if smart else gemini.models.fast()
+    assert calls and all(model == expected and background for model, background in calls)

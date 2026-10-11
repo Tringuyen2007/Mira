@@ -160,3 +160,30 @@ async def test_list_messages_without_since_id_returns_newest_window_ascending(ds
         assert [r["id"] for r in rows] == ids[2:5]
     finally:
         await db.close()
+
+
+def test_patient_messages_and_test_alerts_are_rate_limited(client: TestClient, phone: dict[str, str]) -> None:
+    from server.api import ratelimit
+
+    for i in range(ratelimit.PATIENT_ACTIONS_PER_MIN):
+        assert client.post("/me/messages", json={"body": f"m{i}"}, headers=phone).status_code == 200
+    assert client.post("/me/messages", json={"body": "one too many"}, headers=phone).status_code == 429
+    for _ in range(ratelimit.PATIENT_ACTIONS_PER_MIN):
+        assert client.post("/me/test-alert", headers=phone).status_code == 200
+    assert client.post("/me/test-alert", headers=phone).status_code == 429
+    # the admin acting for the patient is never limited
+    assert client.post("/me/messages?patient_id=maya", json={"body": "admin"}, headers=AUTH).status_code == 200
+    assert client.post("/me/test-alert?patient_id=maya", headers=AUTH).status_code == 200
+
+
+def test_per_key_limiter_prunes_and_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    from server.api import ratelimit
+
+    now = [1000.0]
+    monkeypatch.setattr(ratelimit.time, "monotonic", lambda: now[0])
+    limiter = ratelimit.PerKeyLimiter(2)
+    assert limiter.allow("a") and limiter.allow("a") and not limiter.allow("a")
+    assert limiter.allow("b")
+    now[0] += 61
+    assert limiter.allow("a")
+    assert "b" not in limiter._hits  # stale keys are pruned

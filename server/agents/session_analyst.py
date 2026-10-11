@@ -417,12 +417,19 @@ class SessionAnalyst:
         model = replies[-1].model if replies else None
         return {"spoken": spoken, "note": note, "highlights": highlights, "next_focus": focus}, "ai", model
 
+    def _model_for(self, sid: str) -> str:
+        """The smart model only for sessions a person started (phone/dashboard, origin "rest"); the mock demo's
+        auto-restarted and boot sessions loop all day, so they get the fast (cheap) model."""
+        live = self.registry.get(sid)
+        return gemini.models.smart() if live is not None and live.origin == "rest" else gemini.models.fast()
+
     async def _ask(self, sid: str, data: dict[str, Any]) -> tuple[AnalysisOut | None, list[gemini.Reply]]:
         messages = [_data_message(data)]
         system = load_prompt("analysis")
+        model = self._model_for(sid)
         try:
-            reply = await gemini.ask("analyst", gemini.models.smart(), system, messages, timeout_s=ANALYST_TIMEOUT_S,
-                                     json_mode=True)
+            reply = await gemini.ask("analyst", model, system, messages, timeout_s=ANALYST_TIMEOUT_S,
+                                     json_mode=True, background=True)
         except gemini.AIUnavailable as exc:
             log.info("analysis fallback", extra={"session_id": sid, "reason": str(exc)})
             return None, []
@@ -433,9 +440,9 @@ class SessionAnalyst:
                                               "with string fields spoken and note, highlights (a list of 1 to 3 "
                                               "strings) and next_focus (a string or null)."}
             try:
-                again = await gemini.ask("analyst", gemini.models.smart(), system,
+                again = await gemini.ask("analyst", model, system,
                                          [*messages, reply.as_message(), fix], timeout_s=ANALYST_TIMEOUT_S,
-                                         json_mode=True)
+                                         json_mode=True, background=True)
             except gemini.AIUnavailable:
                 return None
             replies.append(again)

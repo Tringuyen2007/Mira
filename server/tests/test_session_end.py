@@ -233,3 +233,11 @@ def test_mock_program_emits_stopped_after_last_set(monkeypatch: pytest.MonkeyPat
     assert kinds.count("set_done") == 3
     assert kinds.count("stopped") == 1 and kinds.index("stopped") > kinds.index("set_done")
     assert emitted[[e["type"] for e in emitted].index("stopped")]["reason"] == "program_complete"
+
+
+def test_mock_auto_restart_defaults_to_sixty_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    from server.config import cfg, reload_config
+
+    monkeypatch.delenv("MOCK_AUTO_RESTART_S", raising=False)
+    reload_config()
+    assert cfg.MOCK_AUTO_RESTART_S == 60.0

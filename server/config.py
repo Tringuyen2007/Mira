@@ -51,7 +51,7 @@ class Config:
     MOCK_FALL_RESPONDS_AT: float | None = None
     DEMO_TOOLS_ENABLED: bool = False
     MOCK_LOOP: bool = False  # True: the mock squat program repeats forever (pre-Plan-2 behaviour)
-    MOCK_AUTO_RESTART_S: float = 30.0  # mock mode: start the next demo session this long after one ends (0 = off)
+    MOCK_AUTO_RESTART_S: float = 60.0  # mock mode: start the next demo session this long after one ends (0 = off)
     AUTO_STOP_AFTER_LAST_SET: bool = True  # end the session when set == sets_target (engines without `stopped`)
     ANALYST_DELAY_S: float = 2.0  # SessionAnalyst waits this long after a session ends for rep writes to land
     PAIRING_DEMO_CODE: str = "K7P4M2"  # therapist code the seed binds to Maya (the iOS design preview uses it)
