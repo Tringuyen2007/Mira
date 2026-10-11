@@ -77,6 +77,36 @@ dashboard receive the live skeleton without a camera, raw video, or an open inbo
 laptop awake and connected to the camera during a session. The endpoint deliberately accepts no phone commands;
 session controls remain on the existing authenticated `/ws/events` channel.
 
+### Starting the vision agent (camera laptop)
+
+`vision/agent.py` is the entry point that runs Eric's one-camera `vision.Engine` (camera B, see `vision/README.md`)
+and dials the deployed server. Install the vision requirements once (`pip install -r vision/requirements.txt`,
+plus the pose model via `python -m vision.models.download`) and calibrate with `python -m vision.calib_extrinsics`.
+
+```bash
+# on the camera laptop, repo root, venv active; the token is the box's MIRA_VISION_TOKEN
+MIRA_VISION_TOKEN=<token> python -m vision.agent --host wss://45.76.255.253 --exercise squat --reps 3 --sets 1 --height-cm 170
+```
+
+The agent opens the camera only after the server forwards `command start` (the patient tapped **Start today's
+session** in the iOS app) and closes it on `command stop`, when the socket drops, or on Ctrl-C. It translates the
+engine's `FrameResult`/event stream into `server/samples/engine_frame.json`'s shape: knee/hip angles become flexion
+(`knee_l` = 180 − the engine's interior `left_knee`), reps carry `quality: "good" | "fix_form"` (plus the numeric
+`quality_score`), `countdown`/`arrived` carry the plan (`reps_target`, `sets_target`, `exercise_id`), the last
+`set_done` is followed by `stopped {reason: "program_complete"}`, a confirmed fall is followed by `fall_status`
+every 2 s, and while the one-camera body is still being measured (`body: "measuring"`) every frame is flagged
+`measuring` and a `stand_straight` cue captions "Stand straight and still so I can measure you" on the LCD every
+5 s. The engine itself never counts reps or judges form until `body == "ready"`.
+
+Camera-free rehearsal: `--synthetic` loops a scripted guided squat (arrive, raise a hand, countdown, squats every
+2.5 s) through the same path; `--replay data/recordings/<f>.jsonl` replays a saved session. Both still wait for
+`command start`.
+
+Camera video (optional, WHIP): the agent never sends video over `/ws/vision`. Give it an external publisher
+command and the publish URL template and it starts/stops that process with each session, e.g.
+`--whip-url https://45.76.255.253/media/mira/{session_id}/whip --whip-cmd "<publisher> {whip_url}"`.
+Without both flags the dashboard shows the 3D avatar only.
+
 For the therapist's side-by-side camera footage and Eric's 3D body mesh, use the companion WebRTC media contract in
 [`docs/vision-media-contract.md`](docs/vision-media-contract.md). Video uses WHIP/WHEP; `/ws/vision` remains pose and
 mesh-control data only. `MIRA_WHEP_URL` is intentionally unset by default, so no raw camera video is exposed until
