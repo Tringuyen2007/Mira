@@ -56,3 +56,43 @@ def test_one_camera_without_feet_keeps_the_last_position():
     assert mono_joints(p, cam) is None
     J2 = mono_joints(p, cam, last_xz=J1[[23, 24]].mean(axis=0)[[0, 2]])
     assert J2 is not None
+
+
+FEET_JOINTS = [27, 28, 29, 30, 31, 32]
+
+
+def _feet_hidden_run(bystander_x=None, good=30, hidden=20, lean=0.0):
+    """One camera (B), list input: someone on the mat for `good` frames, then their feet hidden for
+    `hidden` frames; optionally a bystander with visible feet beside the mat throughout."""
+    cam = _cam_b()
+    X = standing_skeleton()
+    X[:, 2] += lean * np.clip(X[:, 1] - 0.09, 0, None)  # top leaning forward (hips not over the ankles)
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=1.75)
+    outs = []
+    for k in range(good + hidden):
+        p = pose_from_points(cam, X, t=k / 30)
+        if k >= good:
+            p.vis[FEET_JOINTS] = 0.0
+        people = [p]
+        if bystander_x is not None:
+            people.append(pose_from_points(cam, standing_skeleton() + [bystander_x, 0.0, 0.0], t=k / 30))
+        outs.append(pipe.process(k / 30, None, people))
+    return outs
+
+
+def _hip_xz(out):
+    return ((out.frame.joints[23] + out.frame.joints[24]) / 2)[[0, 2]]
+
+
+def test_one_camera_feet_hidden_stays_tracked_and_does_not_jump_to_a_bystander():
+    outs = _feet_hidden_run(bystander_x=1.0)  # 0.7 m beside the mat: a qualifying candidate
+    before = _hip_xz(outs[29])
+    for o in outs[30:]:
+        assert o.frame.tracking != "lost"
+        assert np.isfinite(o.frame.joints[[23, 24]]).all()
+        assert np.linalg.norm(_hip_xz(o) - before) < 0.3
+
+
+def test_one_camera_feet_hidden_without_bystander_stays_tracked():
+    outs = _feet_hidden_run(bystander_x=2.0)
+    assert all(o.frame.tracking != "lost" for o in outs[30:])

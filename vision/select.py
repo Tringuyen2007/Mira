@@ -8,7 +8,8 @@ no pair agrees (a hand over one lens, the wrong person in one view), each camera
 on the floor through their feet, and the camera that puts someone of human size at the mat is kept;
 the other is dropped for that frame and the pipeline's single-camera fallback takes over. One camera
 can't confirm a newcomer, so in that fallback the tracked person is never swapped for one nearer the
-centre.
+centre. With one camera only, a tracked person whose feet are hidden is kept by their 2D hips (position
+unknown) for up to forget_s instead of being lost or swapped for a placeable bystander.
 """
 from __future__ import annotations
 
@@ -97,6 +98,14 @@ def _midpoints(p: PoseResult) -> dict[int, np.ndarray]:
             if p.vis[i] >= MIN_VIS and p.vis[j] >= MIN_VIS}
 
 
+def _hip2d(p: PoseResult) -> np.ndarray | None:
+    """2D hip midpoint (px) when both hips are visible."""
+    if p.vis[23] < MIN_VIS or p.vis[24] < MIN_VIS:
+        return None
+    h = (p.lm2d[23] + p.lm2d[24]) / 2
+    return h if np.isfinite(h).all() else None
+
+
 def pair_position(pa: PoseResult, pb: PoseResult, ca: CameraConfig, cb: CameraConfig) -> tuple[float, np.ndarray] | None:
     """(median midpoint reprojection error px, hip (x, z)) for one person in A paired with one in B."""
     ma, mb = _midpoints(pa), _midpoints(pb)
@@ -119,6 +128,7 @@ class PersonSelector:
         self._pos: np.ndarray | None = None
         self._last_pick_t: float | None = None
         self._challenge_since: float | None = None
+        self._hip2d: np.ndarray | None = None  # one camera: 2D hip midpoint of the last chosen person
 
     def _choose_single(self, cands: list[tuple[np.ndarray, object]]):
         """One camera only: keep the tracked person (the candidate nearest where they were); with no
@@ -157,21 +167,40 @@ class PersonSelector:
     def _select_one(self, t: float, name: str, people: list[PoseResult]) -> Selection:
         cam = self.cams[name]
         if self._pos is not None and t - self._last_pick_t > self.forget_s:
-            self._pos, self._challenge_since = None, None
+            self._pos, self._challenge_since, self._hip2d = None, None, None
         cands = []
         for k, p in enumerate(people):
             xz = floor_position(p, cam)
             if xz is not None and mat_distance(self.mat, xz) <= self.vicinity_m and plausible_height(p, cam, xz):
                 cands.append((xz, k))
+        # the tracked person this frame by their 2D hips (they may be unplaceable: feet hidden)
+        tracked = None
+        if self._pos is not None and self._hip2d is not None:
+            hips = {k: _hip2d(p) for k, p in enumerate(people)}
+            hips = {k: h for k, h in hips.items() if h is not None}
+            if hips:
+                tracked = min(hips, key=lambda k: float(np.linalg.norm(hips[k] - self._hip2d)))
+        sticky = self._pos is not None and any(np.linalg.norm(xz - self._pos) <= STICK_M for xz, _ in cands)
+        if tracked is not None and not sticky and tracked not in [k for _, k in cands]:
+            # tracked but not placeable: keep them (position unknown) rather than switch or lose the track;
+            # _last_pick_t is not refreshed, so the track is still forgotten after forget_s of this
+            self._challenge_since = None
+            self._hip2d = _hip2d(people[tracked])
+            return self._selection(name, people, tracked, None)
         if not cands:
             self._challenge_since = None
             return Selection(None, None, {"A": [], "B": [], name: people})
         xz, k = self._choose(t, cands)
         self._last_pick_t = t
+        self._hip2d = _hip2d(people[k])
+        return self._selection(name, people, k, np.asarray(xz, float))
+
+    @staticmethod
+    def _selection(name: str, people: list[PoseResult], k: int, position) -> Selection:
         chosen = people[k]
         sel = {"A": None, "B": None, name: chosen}
         ignored = {"A": [], "B": [], name: [p for p in people if p is not chosen]}
-        return Selection(sel["A"], sel["B"], ignored, None, np.asarray(xz, float))
+        return Selection(sel["A"], sel["B"], ignored, None, position)
 
     def select(self, t: float, a_people: list[PoseResult], b_people: list[PoseResult]) -> Selection:
         a_people = [p for p in a_people if p is not None and p.detected]
