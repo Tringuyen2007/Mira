@@ -1,0 +1,237 @@
+/* Prescribe screen (Figma 207:282): exercise plan, editor, flag thresholds, heart-rate limit, emergency
+   contact and the Mira Assistant proposals rail. */
+
+.prescribe__head {
+  margin-bottom: var(--space-4);
+}
+
+.prescribe__grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (max-width: 1279px) {
+  .prescribe__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.prescribe__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.prescribe__card + .prescribe__card {
+  margin-top: 0;
+}
+
+/* ---- Exercise plan ---- */
+
+.prescribe__exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.prescribe__exercise-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-card-sunk);
+  cursor: pointer;
+  text-align: left;
+}
+
+.prescribe__exercise-row.is-selected {
+  border-color: var(--color-accent);
+}
+
+.prescribe__exercise-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.prescribe__exercise-dose {
+  color: var(--color-ink-soft);
+}
+
+.prescribe__search-wrap {
+  margin-top: var(--space-4);
+}
+
+.prescribe__search {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  background: var(--color-card);
+  color: var(--color-ink);
+}
+
+.prescribe__search-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* ---- Editor ---- */
+
+.prescribe__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.prescribe__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.prescribe__field-label {
+  font-weight: 500;
+}
+
+.prescribe__reference-rep {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line);
+}
+
+.chip--stretch {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-3);
+  background: var(--color-card-sunk);
+  font-size: var(--text-meta);
+}
+
+/* ---- Stepper (js/ui/stepper.js) ---- */
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.stepper__btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-ink);
+  background: var(--color-card);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stepper__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stepper__value {
+  min-width: 48px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ---- Slider (js/ui/slider.js) ---- */
+
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slider__value {
+  font-weight: 600;
+}
+
+.slider__input {
+  width: 100%;
+}
+
+/* ---- Emergency contact ---- */
+
+.prescribe__emergency {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.prescribe__emergency dt {
+  color: var(--color-ink-soft);
+}
+
+.prescribe__emergency dd {
+  margin: 0;
+}
+
+/* ---- Mira Assistant proposals rail ---- */
+
+.prescribe__rail {
+  min-width: 0;
+}
+
+.prescribe__proposals-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+/* ---- Save bar ---- */
+
+.prescribe__save-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  position: sticky;
+  bottom: 0;
+  padding-top: var(--space-4);
+}
+
+/* ---- Unsaved-changes bar ---- */
+
+.prescribe__unsaved-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1.5px solid var(--color-watch);
+  border-radius: var(--radius-control);
+  background: var(--color-card);
+}
+
+.prescribe__unsaved-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}

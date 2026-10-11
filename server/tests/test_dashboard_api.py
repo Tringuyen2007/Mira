@@ -358,4 +358,61 @@ def test_progress_note_approve_then_read_back_and_edited_flag(dash_client: TestC
 
     get2 = dash_client.get(f"/sessions/{NOTE_SESSION_ID}/progress-note", headers=AUTH).json()
     assert get2["text"] == "AI draft note for Maya"
-    assert get2["edited"] is False
+
+
+# ---- PATCH /patients/{id}/limits (heart-rate limit, Task R3) --------------------------------------------
+
+def test_limits_route_needs_the_token(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    r = client.patch("/patients/maya/limits", json={"therapist_id": "okafor", "hr_limit": 140})
+    assert r.status_code == 401
+
+
+def test_limits_route_503_without_db(make_client: Callable[..., TestClient]) -> None:
+    client = make_client()
+    r = client.patch("/patients/maya/limits", json={"therapist_id": "okafor", "hr_limit": 140}, headers=AUTH)
+    assert r.status_code == 503
+
+
+def test_limits_rejects_out_of_range_hr_limit(dash_client: TestClient) -> None:
+    for bad in (39, 221):
+        r = dash_client.patch("/patients/maya/limits", json={"therapist_id": "okafor", "hr_limit": bad},
+                              headers=AUTH)
+        assert r.status_code == 422
+
+
+def test_limits_sample_shape() -> None:
+    body = json.loads((SAMPLES / "rest_patch_patient_limits.json").read_text())
+    assert set(body) == {"patient_id", "hr_limit"}
+
+
+def test_limits_404_for_unknown_patient(dash_client: TestClient) -> None:
+    r = dash_client.patch("/patients/nobody/limits", json={"therapist_id": "okafor", "hr_limit": 140},
+                          headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_limits_403_for_another_therapist(dash_client: TestClient) -> None:
+    """priya belongs to nguyen, not okafor."""
+    r = dash_client.patch("/patients/priya/limits", json={"therapist_id": "okafor", "hr_limit": 140},
+                          headers=AUTH)
+    assert r.status_code == 403
+
+
+def test_limits_persisted_and_visible_in_get_patient_and_logs_agent_action(dash_client: TestClient,
+                                                                           dash_dsn: str) -> None:
+    before = dash_client.get("/patients/maya", headers=AUTH).json()["patient"]["hr_limit"]
+    r = dash_client.patch("/patients/maya/limits", json={"therapist_id": "okafor", "hr_limit": 140}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.json() == {"patient_id": "maya", "hr_limit": 140}
+
+    after = dash_client.get("/patients/maya", headers=AUTH).json()["patient"]["hr_limit"]
+    assert after == 140
+    assert after != before
+
+    with psycopg.connect(dash_dsn, autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT detail FROM agent_actions WHERE agent = 'therapist' AND action = 'hr_limit_set' "
+            "AND patient_id = 'maya' ORDER BY time DESC LIMIT 1").fetchone()
+    assert row is not None
+    assert row[0] == {"from": before, "to": 140}

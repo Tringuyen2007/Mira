@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from server.api.db_dep import require_db
 from server.dashboard_triage import Signals, triage
-from server.db import dashboard_queries, queries, writes
+from server.db import dashboard_queries, dashboard_writes, queries, writes
 from server.db.pool import Database
 from server.state import get_state
 
@@ -184,3 +184,27 @@ async def get_progress_note(session_id: uuid.UUID, db: Database = Depends(requir
     detail = row["detail"]
     return {"approved": True, "text": detail["text"], "approved_by": detail.get("approved_by"),
             "approved_at": row["time"].isoformat().replace("+00:00", "Z"), "edited": bool(detail.get("edited"))}
+
+
+# ---- heart-rate limit (Task R3, Prescribe screen) --------------------------------------------------------
+
+class LimitsIn(BaseModel):
+    therapist_id: str = Field(pattern=ID_RE, max_length=64)
+    hr_limit: int = Field(ge=40, le=220)
+
+
+@router.patch("/patients/{patient_id}/limits")
+async def set_limits(patient_id: str = Path(pattern=ID_RE, max_length=64), body: LimitsIn = ...,
+                     db: Database = Depends(require_db)) -> dict[str, Any]:
+    patient = await queries.get_patient(db, patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="patient not found")
+    if patient["therapist_id"] not in (None, body.therapist_id):
+        raise HTTPException(status_code=403, detail="this patient belongs to another therapist")
+    before = patient["hr_limit"]
+    new_limit = await dashboard_writes.set_hr_limit(db, patient_id, body.hr_limit)
+    if new_limit is None:
+        raise HTTPException(status_code=503, detail="database unavailable: heart-rate limit not saved")
+    await writes.insert_agent_action(db, "therapist", "hr_limit_set", patient_id,
+                                     detail={"from": before, "to": new_limit})
+    return {"patient_id": patient_id, "hr_limit": new_limit}

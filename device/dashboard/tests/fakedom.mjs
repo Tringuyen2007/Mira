@@ -48,6 +48,14 @@ class FakeElement extends FakeNode {
     return this.attrs.has(name);
   }
 
+  toggleAttribute(name, force) {
+    const has = this.hasAttribute(name);
+    const on = force === undefined ? !has : Boolean(force);
+    if (on) this.setAttribute(name, "");
+    else this.removeAttribute(name);
+    return on;
+  }
+
   get className() { return this.getAttribute("class") || ""; }
   set className(v) { this.setAttribute("class", v); }
 
@@ -150,7 +158,7 @@ class FakeElement extends FakeNode {
 
   // Test-only: fire listeners for `type` as if the event happened.
   dispatch(type, init) {
-    const event = { type, target: this, ...init, preventDefault() {} };
+    const event = { type, target: this, ...init, preventDefault() {}, stopPropagation() {} };
     for (const fn of this.listeners.get(type) || []) fn(event);
     return event;
   }

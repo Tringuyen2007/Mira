@@ -35,6 +35,9 @@ export function createEndpoints(api, therapistId) {
       api.put(`/prescriptions/${enc(pid)}`, { ...body, created_by: therapistId }),
     setLimits: (pid, { hrLimit }) =>
       api.patch(`/patients/${enc(pid)}/limits`, { therapist_id: therapistId, hr_limit: hrLimit }),
+    // Planned route (decisions): the Prescribe screen's "Add from exercise library" search only calls this
+    // (and only renders the box at all) when caps.has("/exercises").
+    exercises: (q) => api.get("/exercises", { q }),
 
     // Mira Assistant (server name: copilot). Agent runs take longer than ordinary reads, hence the 30 s timeout.
     copilotAsk: (question, patientId, context) => {

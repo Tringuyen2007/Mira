@@ -242,6 +242,7 @@ token (prompt, local config) is the dashboard's choice; never commit it.
 | Caseload | `GET /caseload?therapist_id=` — triaged caseload (needs_you/watch/on_track, with a one-line reason and evidence) plus today's session count and the live session, if any (`rest_get_caseload`) |
 | Therapist Memory | `GET /patients/{id}/memory?days=21` — unacknowledged and acknowledged `memory_events`, newest first (`rest_get_patient_memory`) |
 | Prescriptions | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}` (`rest_get_prescriptions`, `rest_put_prescriptions`) |
+| Heart-rate limit | `PATCH /patients/{id}/limits {therapist_id, hr_limit: 40..220}` — Prescribe screen; 404 unknown patient, 403 if the patient belongs to another therapist; records `agent_actions(agent="therapist", action="hr_limit_set", detail={from, to})` (`rest_patch_patient_limits`) |
 | Copilot | `POST /copilot/ask {question, patient_id?}` (`rest_post_copilot_ask`) |
 | Mira Assistant | `POST /copilot/ask {question, patient_id?, context?: [{question, answer}] ≤ 3}` for follow-ups; every answer carries `drafts: [{patient_id, text}]` (never sent); `POST /copilot/review/{patient_id}` — one-click patient review, same answer shape, may leave one pending proposal (404 unknown patient, 503 without the database) (`rest_post_copilot_ask`, `rest_post_copilot_review`) |
 | Notifications | `GET /notifications?unread=&limit=&since_id=&therapist_id=`, `GET /notifications/count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `POST /notifications/{id}/ack {therapist_id}` (see "Dashboard notifications") |
@@ -251,6 +252,23 @@ WebSockets: `/ws/events` (alerts, proposals, session events; `ws_events_*`), `/w
 (replay + live; `ws_notifications_message`), `/ws/live` (`ws_live`), `/ws/pose` (`ws_pose`, 25 Hz). Every channel
 sends `{"type":"ping"}` after 10 s of silence; ignore it. History routes need the database (503 with
 `DB_DISABLED=1`; `rest_error_503`).
+
+### Form-rule thresholds (`rule_overrides`)
+
+Each row of `prescriptions.rule_overrides` (jsonb, set via `PUT /prescriptions/{patient_id}`) can carry
+per-exercise overrides of the thresholds that decide when a rep gets flagged. No server code reads these yet
+(the engine's form rules are still fixed defaults) — this is the contract the vision engine should read
+against once it does, and it's what the Prescribe screen's "When should Mira flag a rep?" card edits today.
+
+| Key | Meaning | Default | Dashboard UI |
+|---|---|---|---|
+| `weight_shift_pct` | How many percentage points below 50% the affected leg's load share can drop before a rep is flagged `weight_shift` (mirrors `device/dashboard/js/screens/patient/model.js`'s `DEFAULT_WEIGHT_SHIFT_THRESHOLD`) | 15 | slider, 0-50%, step 1 |
+| `knee_cave_deg` | How many degrees of inward knee drift (valgus) before a rep is flagged `knee_cave_l`/`knee_cave_r` | 10° | slider, 0-45°, step 1 |
+| `trunk_lean_deg` | How many degrees of trunk lean before a rep is flagged `trunk_lean` | 20° | slider, 0-45°, step 1 |
+
+An absent key means "use the default" everywhere a reader checks it (never `null` meaning "disabled") — see
+`device/dashboard/js/screens/prescribe/model.js`'s `DEFAULT_WEIGHT_SHIFT_PCT`/`DEFAULT_KNEE_CAVE_DEG`/
+`DEFAULT_TRUNK_LEAN_DEG` and `patient/model.js`'s existing read of `weight_shift_pct`.
 
 Desktop pop-ups (browser Notification API) only work in a secure context: open the dashboard at
 `http://localhost:8000/dashboard/` on the server laptop (or over HTTPS). On another machine via
