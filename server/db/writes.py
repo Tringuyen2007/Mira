@@ -176,6 +176,21 @@ async def insert_ai_call(db: Database | None, agent: str, model: str | None, ms:
         sql, (ts(time), agent, model, int(ms), ok, cached, error))), False, agent=agent)
 
 
+async def upsert_training_dataset(db: Database | None, dataset: dict[str, Any]) -> bool:
+    """Register pose-only training-data provenance; raw video is rejected by the database contract."""
+    if dataset.get("raw_media_allowed") is not False:
+        raise InvalidInput("Mira training data must not permit raw media")
+    sql = ("INSERT INTO training_datasets (id, name, source_url, license, approval, raw_media_allowed, pose_format, "
+           "exercises, notes) VALUES (%s, %s, %s, %s, %s, false, %s, %s, %s) "
+           "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, source_url = EXCLUDED.source_url, "
+           "license = EXCLUDED.license, approval = EXCLUDED.approval, pose_format = EXCLUDED.pose_format, "
+           "exercises = EXCLUDED.exercises, notes = EXCLUDED.notes, updated_at = now()")
+    params = (dataset["id"], dataset["name"], dataset["source_url"], dataset["license"], dataset["approval"],
+              dataset.get("pose_format"), _jsonb(dataset["exercises"]), dataset.get("notes"))
+    return await _safe(db, "upsert_training_dataset", lambda d: _ok(d.execute(sql, params)), False,
+                       dataset_id=dataset["id"])
+
+
 async def insert_memory_event(db: Database | None, patient_id: str, kind: str, message: str,
                               evidence: dict[str, Any], dedupe_key: str | None = None, agent: str = "insight",
                               time: Timestamp = None) -> int | None:

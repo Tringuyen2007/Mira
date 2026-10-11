@@ -65,6 +65,24 @@ config), never call Gemini, ElevenLabs or Retell, and never touch Tiger Cloud.
 ## Database (Tiger Data / TimescaleDB)
 
 The server runs without a database; set `TIGER_DSN` to persist frames, sessions, reps and alerts.
+
+### Rep-counting training data
+
+The MVP is pose-first and **never stores video**.  The curated source registry in
+[`data/training/exercise_datasets.json`](data/training/exercise_datasets.json) covers the squat, lunge and
+straight-leg-raise demo.  It records source licensing and pose/rep-label availability only; its current external
+sources need license approval, so the project neither downloads nor trains on them automatically.  Validate it with
+`./.venv/bin/python -m server.agents.training_data --check`; after a source is approved, register its provenance in
+Tiger with `./.venv/bin/python -m server.agents.training_data --dsn "$TIGER_DSN"`.
+
+`server/agents/rep_counter.py` is the deterministic low → peak → low counter that the vision service can call before
+emitting the existing `rep {index, set, quality}` event.  It ships profiles for `squat`, `lunge`, and
+`straight_leg_raise`; it does not alter the Coach or the LCD contract.
+
+`server/agents/rep_pipeline.py` is the ready-to-wire quality gate.  For every pose frame, the vision service calls
+`CorrectRepPipeline.observe(session_id, set_no, exercise_id, angle, timestamp, confidence, form_quality, flags)`.
+It emits the existing LCD-compatible `rep` event only after a full cycle where form is `good`; a poor or
+low-confidence cycle yields `rep_attempt` for feedback/analytics and does **not** increment the displayed count.
 Every setup step is a script, so a database is rebuilt, never restored from a dump.
 
 ### Local (Docker)
