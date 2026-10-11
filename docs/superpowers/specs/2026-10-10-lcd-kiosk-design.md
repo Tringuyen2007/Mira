@@ -147,8 +147,8 @@ ask Victoria for full-colour 2× exports and, for richer animation, layered part
   (`DEVICE_STALE_S`). A 5 s check loop catches staleness.
 - On every online/offline transition it emits on `/ws/events`:
   `{"type":"device_status","device":"lcd","online":true,"t":…,"last_health":{…}|null}`.
-- `/health/data` gains a `lcd` check: `ok` online, `warning` offline while a session is running,
-  `ok` offline otherwise (it is optional hardware), with `last_seen`.
+- `/health/data` gains an `lcd` block `{online, connections, last_seen, last_health}` (also on `/stats` as
+  `devices`). It is informational: the LCD is optional hardware, so it never changes the overall status.
 - Sample `server/samples/ws_events_device_status.json`; `test_samples.py` contract list updated;
   `ws_events_client_device_health.json` gains an LCD variant. iOS fixture copies updated.
   `device/ios/NETWORKING.md` documents `device_status` and the new live fields for Josie.
