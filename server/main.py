@@ -76,8 +76,8 @@ class MultiDirStaticFiles(StaticFiles):
 
 
 class KioskStaticFiles(StaticFiles):
-    """The LCD page, minus what only developers need: the kiosk's dev/ preview, its tests/ and READMEs are
-    never served on the origin that holds the device token. Compared case-insensitively (macOS volumes)."""
+    """Static pages minus what only developers need: dev/, tests/ and READMEs are never served.
+    Compared case-insensitively (macOS volumes)."""
 
     HIDDEN_DIRS = frozenset({"dev", "tests"})
 
@@ -323,7 +323,7 @@ def _mount_static(app: FastAPI) -> None:
     app.mount("/audio", MultiDirStaticFiles(audio_dirs), name="audio")
     for name, directory in STATIC_PAGES.items():
         if directory.is_dir():
-            static_cls = KioskStaticFiles if name == "device" else StaticFiles
+            static_cls = KioskStaticFiles if name in ("device", "dashboard") else StaticFiles
             app.mount(f"/{name}", static_cls(directory=directory, html=True), name=name)
 
 
