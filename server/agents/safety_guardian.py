@@ -40,6 +40,9 @@ NO_CALL_HOLD_S = 240.0  # no call to watch: keep the incident (Call 911 shown) t
 MAX_CLOCK_SKEW_S = 3600.0  # event times further than this from the server clock are not trusted
 RESPONSE_GESTURES = ("thumbs_up", "raised_hand")
 RETELL_STEPS = ("escalated", "call_update", "acknowledged", "therapist_call", "call_retry", "call_failed")
+BREATHER_RESUME_S = 10.0   # HR under (limit - BREATHER_MARGIN_BPM) this long ends a pre-escalation breather
+BREATHER_MARGIN_BPM = 5
+BREATHER_HAPTIC = "breather"
 
 AlertHook = Callable[["Incident", str, "dict[str, Any] | None"], Any]
 
@@ -93,6 +96,19 @@ class Incident:
         return self.profile.first_name
 
 
+@dataclass(eq=False)
+class Breather:
+    """The watch's "Let's take a breather" screen: the HR incident's pause, from the patient's side. It outlives an
+    "I'm OK" (the alert is resolved, the heart rate is still high) and ends on recovery, after an escalated incident
+    closes, or when the session stops."""
+
+    session_id: str | None
+    patient_id: str
+    bpm: int
+    limit: int
+    below_since: float | None = None
+
+
 def _session_key(ev: dict[str, Any]) -> str:
     return str(ev.get("session_id") or "")
 
@@ -125,6 +141,7 @@ class SafetyGuardian:
         self.incidents: dict[str, Incident] = {}  # session key → open incident
         self.hr_over_since: dict[str, float] = {}
         self.last_hr: dict[str, int] = {}
+        self.breathers: dict[str, Breather] = {}
         self._background: set[asyncio.Task[Any]] = set()
         notifier.attach(self)
 
@@ -143,6 +160,8 @@ class SafetyGuardian:
                 await self.on_hr(ev)
             elif (kind == "gesture" and name in RESPONSE_GESTURES) or (kind == "command" and name == "im_ok"):
                 await self.patient_responded(ev)
+            elif kind == "stopped":
+                self.end_breather(_session_key(ev), "stopped")
             elif kind == "fall_status":
                 await self.on_status(ev)
         except Exception:  # noqa: BLE001 - one bad event must never stop the safety path
@@ -166,6 +185,9 @@ class SafetyGuardian:
                 await self.start(ev, "hr", pause=True)
         else:
             self.hr_over_since.pop(key, None)
+        breather = self.breathers.get(key)
+        if breather is not None:
+            await self._breather_hr(key, breather, int(bpm), t)
 
     async def start(self, ev: dict[str, Any], kind: str, pause: bool = False) -> None:
         key = _session_key(ev)
@@ -182,6 +204,8 @@ class SafetyGuardian:
         await self.log(inc, "detected", payload={"trigger": {k: v for k, v in ev.items() if k != "seq"}})
         if pause:
             self.bridge.inject({"type": "paused", "reason": kind, "session_id": inc.session_id})
+        if kind == "hr":
+            self._start_breather(inc)
         self._check_in(inc)
         inc.state = "checking_in"
         await self.log(inc, "checked_in")
@@ -247,6 +271,77 @@ class SafetyGuardian:
             inc.hr_at_update = inc.hr_now
             text = templates.hr_update(inc.profile.pronoun_poss, inc.hr_now)
             self.queue_update(inc, f"hr:{inc.hr_now}", text, status_text(self.live_snapshot(inc)))
+
+    # ---- breather (Apple Watch) ------------------------------------------------------------------------
+
+    def holding(self, session_id: str | None) -> bool:
+        """The Guardian, not the patient, decides when this session resumes (open incident or breather)."""
+        key = str(session_id or "")
+        return key in self.incidents or key in self.breathers
+
+    def _start_breather(self, inc: Incident) -> None:
+        key = str(inc.session_id or "")
+        if key in self.breathers:  # a second HR incident while the first breather still runs
+            return
+        bpm, limit = int(inc.hr_now or 0), int(inc.profile.hr_limit)
+        self.breathers[key] = Breather(inc.session_id, inc.patient_id, bpm, limit)
+        self.bridge.send_to_engine({"type": "command", "name": "pause", "payload": {"source": "guardian"},
+                                    "session_id": inc.session_id})
+        now = round(time.time(), 3)
+        self.hub.emit("breather", {"state": "start", "bpm": bpm, "limit": limit, "session_id": inc.session_id,
+                                   "t": now})
+        self.hub.emit("haptic", {"pattern": BREATHER_HAPTIC, "session_id": inc.session_id, "t": now})
+        self._spawn(self._notify_breather(inc, bpm, limit), name=f"guardian-breather-{inc.alert_id}")
+
+    async def _notify_breather(self, inc: Incident, bpm: int, limit: int) -> None:
+        therapist_id = inc.profile.therapist_id
+        if not therapist_id:
+            return
+        try:
+            from server.notify import notifications
+
+            await notifications.create("heart_rate", "high", therapist_id, inc.patient_id,
+                                       f"{inc.first_name}'s heart rate went over the limit",
+                                       f"{bpm} bpm (limit {limit}). Mira paused the session for a breather.",
+                                       f"/dashboard#/patients/{inc.patient_id}", "alerts", inc.alert_id,
+                                       f"breather:{inc.alert_id}")
+        except Exception as exc:  # noqa: BLE001 - a notification must never break the safety path
+            log.warning("breather notification failed", extra={"alert_id": inc.alert_id, "error": repr(exc)})
+
+    async def _breather_hr(self, key: str, br: Breather, bpm: int, t: float) -> None:
+        br.bpm = bpm
+        br.limit = int(self._profile(key).hr_limit)  # a limit changed mid-breather applies at once
+        if bpm >= br.limit - BREATHER_MARGIN_BPM:
+            br.below_since = None
+            return
+        if br.below_since is None:
+            br.below_since = t
+        if t - br.below_since < BREATHER_RESUME_S:
+            return
+        inc = self.incidents.get(key)
+        if inc is not None and (inc.kind != "hr" or inc.state != "checking_in"):
+            return  # escalated (the call decides; closing ends the breather) or another kind of incident
+        if inc is not None:
+            if inc.timer is not None:
+                inc.timer.cancel()
+            inc.state = "resolved"
+            await self.log(inc, "resolved", payload={"resolution": "hr_recovered", "bpm": bpm})
+            self._end(inc)
+        self.bridge.send_to_engine({"type": "command", "name": "start", "payload": {"source": "guardian"},
+                                    "session_id": br.session_id})
+        self.end_breather(key, "hr_recovered")
+
+    def end_breather(self, key: str, resolution: str) -> None:
+        br = self.breathers.pop(key, None)
+        if br is None:
+            return
+        self.hub.emit("breather", {"state": "end", "bpm": br.bpm, "limit": br.limit, "resolution": resolution,
+                                   "session_id": br.session_id, "t": round(time.time(), 3)})
+
+    def on_session_stop(self, session: Any) -> None:
+        """SessionRegistry.on_stop hook (REST stop, last set, shutdown): the engine's own `stopped` may arrive after
+        the session is no longer current, without its session_id."""
+        self.end_breather(str(getattr(session, "session_id", "") or ""), "stopped")
 
     # ---- escalation ------------------------------------------------------------------------------
 
@@ -340,6 +435,8 @@ class SafetyGuardian:
                 task.cancel()
         await self.log(inc, "closed", payload={"reason": reason} if reason else None)
         self._end(inc)
+        if inc.kind == "hr":
+            self.end_breather(str(inc.session_id or ""), "escalated")
 
     def _end(self, inc: Incident) -> None:
         key = str(inc.session_id or "")

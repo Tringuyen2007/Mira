@@ -182,6 +182,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     guardian = SafetyGuardian(hub, bridge, notifier, sessions, cfg.CHECKIN_TIMEOUT_S, alert_hooks=state.on_alert_step)
     bridge.subscribe_events(guardian.on_event)
     state.guardian, state.notifier = guardian, notifier
+    sessions.on_stop.append(guardian.on_session_stop)  # a stopped session ends its breather
     state.stat_providers["notifier"] = notifier.stats
     notifications = NotificationService(hub, db, notifier=notifier, guardian=guardian)
     state.notifications = notifications
@@ -367,12 +368,12 @@ def _device_accepts(msg: dict[str, Any]) -> bool:
 def _forward_session_command(state: AppState, msg: dict[str, Any]) -> None:
     """start/pause/skip/stop go to the engine over the reverse channel (`EngineBridge.send_to_engine`), same
     as `incident_closed`. A user `start` must never resume a session the Safety Guardian is holding open
-    (a pain/HR incident): the Guardian, not the patient, decides when that ends."""
+    (a pain/HR incident, or a breather): the Guardian, not the patient, decides when that ends."""
     session = state.sessions.current
     session_id = session.session_id if session is not None else None
     name = msg.get("name")
     guardian = state.guardian
-    if name == "start" and guardian is not None and session_id is not None and session_id in guardian.incidents:
+    if name == "start" and guardian is not None and session_id is not None and guardian.holding(session_id):
         log.info("ignoring user start: Guardian holds the session", extra={"session_id": session_id})
         return
     state.bridge.send_to_engine({"type": "command", "name": name, "payload": msg.get("payload") or {},
