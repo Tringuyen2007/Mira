@@ -51,18 +51,6 @@
   font-weight: 600;
 }
 
-/* Icons are <img>s drawn with a fixed dark stroke/fill (CSP img-src 'self' means they can't use currentColor).
-   --color-ink is dark in the light theme, so the active pill is dark and the icon needs inverting to read
-   against it (I4 / browser bug 3); --color-ink flips to light in the projector theme, so the pill is light and
-   the icon's native dark stroke already has the right contrast — inverting it there would make it light-on-light. */
-#sidebar .nav-item[aria-current="page"] img {
-  filter: invert(1) brightness(2);
-}
-
-:root[data-theme="projector"] #sidebar .nav-item[aria-current="page"] img {
-  filter: none;
-}
-
 #content {
   display: flex;
   flex-direction: column;
@@ -222,13 +210,29 @@
 .sidebar__header {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-4) var(--space-6);
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-6) var(--space-4);
+}
+
+/* "Mira" / "Care team" each stay on one line; the bell keeps a fixed size at the far right (browser bug 2). */
+.sidebar__brand-block {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sidebar__brand, .sidebar__subbrand {
+  white-space: nowrap;
+}
+
+.sidebar__mark {
+  flex: none;
 }
 
 .sidebar__bell {
   position: relative;
+  flex: 0 0 36px;
   margin-left: auto;
+  color: var(--color-ink);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -244,7 +248,7 @@
   background: var(--color-card-sunk);
 }
 
-.sidebar__bell img {
+.sidebar__bell .icon {
   width: 20px;
   height: 20px;
 }
@@ -258,7 +262,7 @@
   padding: 0 4px;
   border-radius: var(--radius-pill);
   background: var(--color-alert);
-  color: #ffffff;
+  color: var(--color-on-alert);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;
@@ -325,6 +329,12 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   padding: var(--space-2);
   border-radius: var(--radius-control);
@@ -374,7 +384,7 @@
   gap: var(--space-1);
 }
 
-.nav-item img {
+.nav-item .icon {
   width: 20px;
   height: 20px;
 }
@@ -426,7 +436,7 @@
   color: var(--color-ink-soft);
 }
 
-.sidebar__privacy img {
+.sidebar__privacy .icon {
   width: 16px;
   height: 16px;
   margin-top: 2px;
@@ -542,12 +552,10 @@
   box-shadow: var(--shadow-card);
 }
 
-/* --color-alert and --color-accent don't flip with the theme (alerts stay red, success stays green in both),
-   so these variants keep a fixed white foreground instead of --color-on-ink. Background is --color-alert, not
-   --color-alert-text: the latter is themed for use as foreground text on a card/canvas surface (lighter in the
-   projector theme) and would no longer contrast with white if used as this toast's own background. */
-.toast--error { background: var(--color-alert); color: #ffffff; }
-.toast--success { background: var(--color-accent); color: #ffffff; }
+/* Alert/accent fills carry --color-on-alert / --color-on-accent text: white in the light theme, dark in the
+   projector theme, where both fills are lightened for contrast against the dark surfaces (tokens.css). */
+.toast--error { background: var(--color-alert); color: var(--color-on-alert); }
+.toast--success { background: var(--color-accent); color: var(--color-on-accent); }
 
 .toast__text {
   flex: 1;
@@ -582,7 +590,7 @@
   color: var(--color-ink-soft);
 }
 
-.state img {
+.state .icon {
   width: 28px;
   height: 28px;
 }

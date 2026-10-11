@@ -54,6 +54,10 @@
 }
 :root {
   --color-watch: #b54708;
+  --color-watch-text: #b54708;    /* >= 4.9:1 on card, card-sunk and canvas */
+  /* Text/icon colour on accent- and alert-filled controls (primary button, toasts, bell badge). */
+  --color-on-accent: #ffffff;
+  --color-on-alert: #ffffff;
   --color-line: #e7e3ea;
   --color-line-strong: #1c1a22;
   --color-good: var(--color-accent-bright);
@@ -87,4 +91,18 @@
      --color-card, --color-card-sunk, --canvas and --color-alert-bg in this theme. */
   --color-alert-text: #ff8a80;
   --color-alert-bg: #3a1712;
+  /* Final review B, I6: the light theme's accent (#0f6e56), small accent text (#0b5a47), berry (#9f3462, the
+     "AI draft" chip) and watch (#b54708) are dark colours that drop to 2-2.7:1 on the dark projector surfaces.
+     These lighter values are >= 6.4:1 against --color-card, --color-card-sunk and --canvas here (text), and the
+     fills (--color-alert, --color-good) >= 5.2:1 (non-text >= 3:1). Fills carrying text switch that text to a
+     dark --color-on-accent / --color-on-alert (>= 6.8:1). tests/contrast.test.mjs checks every pair. */
+  --color-accent: #5fd3ae;
+  --color-accent-text-small: #7ee2c0;
+  --color-accent-bright: #3cc495;
+  --color-berry: #f08cb8;
+  --color-watch: #f5b04c;
+  --color-watch-text: #f5b04c;
+  --color-alert: #ff6b5e;
+  --color-on-accent: #0d1f19;
+  --color-on-alert: #1a0b09;
 }

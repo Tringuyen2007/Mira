@@ -39,6 +39,11 @@ ul, ol { padding: 0; list-style: none; }
 button { font: inherit; color: inherit; }
 img { max-width: 100%; display: block; }
 
+/* Inline SVG icons (js/ui/icons.js) are drawn in currentColor, so they follow the text colour in both themes. */
+.icon { display: block; flex: none; width: 20px; height: 20px; overflow: visible; }
+.icon__cutout { fill: var(--color-card); }
+.icon__cutout-stroke { stroke: var(--color-card); }
+
 a {
   color: var(--color-accent);
 }
@@ -88,7 +93,7 @@ a {
 
 .btn--primary {
   background: var(--color-accent);
-  color: #ffffff;
+  color: var(--color-on-accent);
 }
 
 .btn--primary:hover { background: var(--color-accent-text-small); }
@@ -128,6 +133,16 @@ a {
   border: 1.5px dashed var(--color-berry);
   color: var(--color-berry);
   font-size: 12px;
+  white-space: nowrap; /* the label never wraps inside the chip (browser bug 7) */
+}
+
+/* The therapist's own carried-over text (not AI): a plain, solid-outlined chip. */
+.chip--source {
+  background: transparent;
+  border: 1.5px solid var(--color-line-strong);
+  color: var(--color-ink);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .chip--ai::before {
