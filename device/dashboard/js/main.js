@@ -1,5 +1,12 @@
 // Boot: sign-in -> shell. Owns the single ctx object every screen is mounted with, the hash router outlet,
 // the sidebar re-render on route/store changes, and sign-out (which tears every listener/socket down).
+import { applyStoredTheme, getTheme, toggleTheme } from "./ui/theme.js";
+
+// First statement in the module, before any other work: sets <html data-theme> from localStorage (or "light")
+// synchronously so the page never paints the wrong theme and flips to the right one a moment later. No inline
+// script is allowed by the CSP, so this is the earliest point JS can apply it.
+applyStoredTheme();
+
 import { clear, h } from "./core/dom.js";
 import { parseRoute, href, redirectFor } from "./core/router.js";
 import { createStore } from "./core/store.js";
@@ -42,6 +49,14 @@ const toastsEl = document.getElementById("toasts");
 
 const toaster = createToaster(toastsEl);
 
+// The skip link's href="#main" would otherwise be caught by the hash router's own `hashchange` listener (the
+// router has no "main" route, so it would land on "Page not found"); intercept the click and just move focus
+// to #main (tabindex="-1") instead of letting the browser update location.hash.
+document.querySelector(".skip-link")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  mainEl.focus();
+});
+
 function showSignIn() {
   appEl.setAttribute("data-state", "signin");
   sidebarEl.hidden = true;
@@ -81,9 +96,15 @@ async function bootShell({ token, therapistId }) {
     panelEl: notificationsEl, api: endpoints, navigate, toast: toaster.toast, onChange: renderSidebarInto,
   });
   let alertsState = [];
+  let theme = getTheme();
 
   let currentRoute = parseRoute(globalThis.location.hash);
   let unmount = null;
+
+  function onThemeToggle() {
+    theme = toggleTheme();
+    renderSidebarInto();
+  }
 
   function renderSidebarInto() {
     if (!alive) return;
@@ -92,6 +113,7 @@ async function bootShell({ token, therapistId }) {
     sidebarEl.append(renderSidebar({
       route: currentRoute, ...store.get(),
       unreadCount: bellState.unread, bellOpen: bellState.open, onBellToggle: (btn) => bell.toggle(btn),
+      theme, onThemeToggle,
     }));
   }
 

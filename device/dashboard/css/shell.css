@@ -51,10 +51,16 @@
   font-weight: 600;
 }
 
-/* Icons are <img>s drawn with a fixed dark stroke/fill (CSP img-src 'self' means they can't use currentColor);
-   invert them on the ink-filled active pill so they stay visible in both themes (I4 / browser bug 3). */
+/* Icons are <img>s drawn with a fixed dark stroke/fill (CSP img-src 'self' means they can't use currentColor).
+   --color-ink is dark in the light theme, so the active pill is dark and the icon needs inverting to read
+   against it (I4 / browser bug 3); --color-ink flips to light in the projector theme, so the pill is light and
+   the icon's native dark stroke already has the right contrast — inverting it there would make it light-on-light. */
 #sidebar .nav-item[aria-current="page"] img {
   filter: invert(1) brightness(2);
+}
+
+:root[data-theme="projector"] #sidebar .nav-item[aria-current="page"] img {
+  filter: none;
 }
 
 #content {
@@ -64,9 +70,32 @@
 }
 
 #main {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
   padding: 32px 32px 24px;
   min-width: 0;
   flex: 1;
+}
+
+/* A visually-hidden link that becomes visible on focus (keyboard "Tab" from the very top of the page), so a
+   keyboard user can jump past the sidebar nav straight to the screen content (#main, tabindex="-1" below). */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: var(--space-4);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus-visible {
+  top: var(--space-4);
 }
 
 /* ---------- Safety alerts banner (persistent above #main; never re-created on route change) ---------- */
@@ -81,7 +110,7 @@
   gap: var(--space-3);
   margin: var(--space-4) var(--space-4) 0;
   padding: var(--space-4);
-  background: #fef3f2;
+  background: var(--color-alert-bg);
   border: 1.5px solid var(--color-alert);
   border-radius: var(--radius-control);
 }
@@ -251,7 +280,7 @@
   width: 360px;
   max-height: 70vh;
   overflow-y: auto;
-  background: #ffffff;
+  background: var(--color-card);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-card);
   padding: var(--space-4);
@@ -375,10 +404,10 @@
 }
 
 #sidebar .nav-item[aria-current="page"] .nav-item__badge {
-  /* Deliberately not themed: this badge sits on the ink-filled active pill, so it stays white-on-dark-text
-     regardless of theme (unlike --color-on-ink, which flips with --color-ink). */
-  background: #ffffff;
-  color: #1c1a22;
+  /* This badge sits on the ink-filled active pill, which flips (dark-on-light vs light-on-dark) with the theme;
+     --color-card/--color-ink flip the same way, giving the badge the inverse of whatever the pill is now. */
+  background: var(--color-card);
+  color: var(--color-ink);
 }
 
 .sidebar__spacer {
@@ -405,10 +434,73 @@
 
 .sidebar__footer {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-2) 0;
   border-top: 1px solid var(--color-line);
+}
+
+.sidebar__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------- Projector-mode switch ---------- */
+
+.sidebar__theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  color: var(--color-ink);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sidebar__theme-toggle:hover {
+  background: var(--color-card-sunk);
+}
+
+.sidebar__theme-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--color-line);
+  transition: background-color 0.15s ease;
+}
+
+.sidebar__theme-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-card);
+  box-shadow: 0 1px 2px rgba(28, 26, 34, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.sidebar__theme-toggle[aria-checked="true"] .sidebar__theme-toggle-track {
+  background: var(--color-accent);
+}
+
+.sidebar__theme-toggle[aria-checked="true"] .sidebar__theme-toggle-thumb {
+  transform: translateX(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__theme-toggle-track, .sidebar__theme-toggle-thumb { transition: none; }
 }
 
 .sidebar__avatar {
@@ -444,13 +536,18 @@
   max-width: 360px;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-control);
+  /* --color-ink/--color-on-ink flip together between themes, so the default toast stays readable in both. */
   background: var(--color-ink);
-  color: #ffffff;
+  color: var(--color-on-ink);
   box-shadow: var(--shadow-card);
 }
 
-.toast--error { background: var(--color-alert-text); }
-.toast--success { background: var(--color-accent); }
+/* --color-alert and --color-accent don't flip with the theme (alerts stay red, success stays green in both),
+   so these variants keep a fixed white foreground instead of --color-on-ink. Background is --color-alert, not
+   --color-alert-text: the latter is themed for use as foreground text on a card/canvas surface (lighter in the
+   projector theme) and would no longer contrast with white if used as this toast's own background. */
+.toast--error { background: var(--color-alert); color: #ffffff; }
+.toast--success { background: var(--color-accent); color: #ffffff; }
 
 .toast__text {
   flex: 1;

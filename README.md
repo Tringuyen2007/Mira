@@ -223,6 +223,9 @@ Example payloads for every WebSocket message and REST response are in `server/sa
 
 ## For the therapist dashboard
 
+See `device/dashboard/README.md` for how to run, sign in and test the dashboard itself (screen → endpoint
+table, Mira Assistant, capability-gated features, security rules). This section covers the server side.
+
 Victoria's dashboard lives in `device/dashboard/` and is served by this server at `/dashboard/` (static files,
 `index.html` as the entry point; nothing is mounted while the folder is empty). It can also run on its own dev
 server (e.g. Vite on `http://localhost:5173`): CORS allows any origin, and the token is still required.

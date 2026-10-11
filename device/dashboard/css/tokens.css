@@ -32,6 +32,7 @@
   /* Alerts */
   --color-alert: #d92d20;
   --color-alert-text: #b42318;
+  --color-alert-bg: #fef3f2;
 
   /* Halo rings */
   --color-ring-cool: #90bbcc;
@@ -81,4 +82,9 @@
      and the focus ring needs a light colour to stay visible against the dark canvas/cards (M18/I6). */
   --color-on-ink: #15121a;
   --color-ring-focus: var(--color-ink);
+  /* --color-alert-text is normally #b42318, a dark red meant for light surfaces (card/canvas); that drops to
+     ~2.4:1 against the dark projector card/canvas, so it's lightened here. Checked >= 4.5:1 against
+     --color-card, --color-card-sunk, --canvas and --color-alert-bg in this theme. */
+  --color-alert-text: #ff8a80;
+  --color-alert-bg: #3a1712;
 }

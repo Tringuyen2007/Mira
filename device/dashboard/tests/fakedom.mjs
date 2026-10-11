@@ -221,6 +221,7 @@ function parseSelector(selector) {
 class FakeDocument {
   constructor() {
     this.listeners = new Map();
+    this.documentElement = new FakeElement("html");
     this.body = new FakeElement("body");
     this.activeElement = null;
   }

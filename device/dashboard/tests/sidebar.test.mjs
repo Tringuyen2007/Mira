@@ -152,6 +152,29 @@ test("the bell has no badge and aria-expanded=true when open with zero unread", 
   assert.equal(bell.querySelector(".sidebar__bell-badge"), null);
 });
 
+test("the projector-mode switch reflects the current theme and calls onThemeToggle when clicked", () => {
+  let toggled = 0;
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+    theme: "light", onThemeToggle: () => { toggled += 1; },
+  });
+  const toggle = root.querySelector(".sidebar__theme-toggle");
+  assert.equal(toggle.getAttribute("role"), "switch");
+  assert.equal(toggle.getAttribute("aria-checked"), "false");
+  assert.match(toggle.textContent, /Projector mode/);
+  toggle.dispatch("click");
+  assert.equal(toggled, 1);
+});
+
+test("the projector-mode switch is aria-checked=true when the projector theme is active", () => {
+  const root = renderSidebar({
+    route: { name: "caseload" }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null,
+    theme: "projector", onThemeToggle: () => {},
+  });
+  const toggle = root.querySelector(".sidebar__theme-toggle");
+  assert.equal(toggle.getAttribute("aria-checked"), "true");
+});
+
 test("Mira Assistant links to #/assistant and is active on assistant, copilot and proposal routes", () => {
   for (const name of ["assistant", "copilot", "proposal"]) {
     const root = renderSidebar({ route: { name }, proposalsWaiting: 0, selectedPatientId: null, therapist, live: null });

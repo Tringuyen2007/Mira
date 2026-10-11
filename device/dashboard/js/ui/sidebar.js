@@ -41,6 +41,17 @@ function navItem({ id, label, iconName, active, href: linkHref, disabled, badge 
       : null);
 }
 
+function themeToggle({ theme, onThemeToggle }) {
+  const checked = theme === "projector";
+  return h("button", {
+    class: "sidebar__theme-toggle", type: "button", role: "switch",
+    "aria-checked": checked ? "true" : "false",
+    onclick: onThemeToggle ? () => onThemeToggle() : null,
+  },
+    h("span", { class: "sidebar__theme-toggle-label" }, "Projector mode"),
+    h("span", { class: "sidebar__theme-toggle-track" }, h("span", { class: "sidebar__theme-toggle-thumb" })));
+}
+
 function bellButton({ unread, bellOpen, onBellToggle }) {
   const count = typeof unread === "number" && unread > 0 ? (unread > 99 ? "99+" : String(unread)) : null;
   return h("button", {
@@ -56,8 +67,8 @@ function bellButton({ unread, bellOpen, onBellToggle }) {
 }
 
 export function renderSidebar(state) {
-  const { route, proposalsWaiting, selectedPatientId, therapist, live, unreadCount, bellOpen, onBellToggle } =
-    state || {};
+  const { route, proposalsWaiting, selectedPatientId, therapist, live, unreadCount, bellOpen, onBellToggle,
+    theme, onThemeToggle } = state || {};
   const activeKey = ACTIVE_FOR[route && route.name] || null;
   const patientHref = selectedPatientId ? href("patient", { pid: selectedPatientId }) : href("caseload");
   const prescribeHref = selectedPatientId ? href("prescribe", { pid: selectedPatientId }) : href("caseload");
@@ -93,8 +104,10 @@ export function renderSidebar(state) {
       icon("lock", { label: "" }),
       h("p", {}, "No video. Mira shares skeleton data only.")),
     h("div", { class: "sidebar__footer" },
-      h("span", { class: "sidebar__avatar" }, initials(name)),
-      h("div", {},
-        h("p", { class: "sidebar__name" }, name || "—"),
-        clinic ? h("p", { class: "sidebar__clinic" }, clinic) : null)));
+      themeToggle({ theme, onThemeToggle }),
+      h("div", { class: "sidebar__identity" },
+        h("span", { class: "sidebar__avatar" }, initials(name)),
+        h("div", {},
+          h("p", { class: "sidebar__name" }, name || "—"),
+          clinic ? h("p", { class: "sidebar__clinic" }, clinic) : null))));
 }
