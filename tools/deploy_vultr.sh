@@ -39,6 +39,12 @@ if ! grep -q '^MIRA_DEVICE_TOKEN=.\+' $APP/.env; then
   echo "MIRA_DEVICE_TOKEN=\$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> $APP/.env
   echo "generated MIRA_DEVICE_TOKEN in $APP/.env"
 fi
+# The camera laptop gets a separate credential; it never receives the dashboard/API token.
+if ! grep -q '^MIRA_VISION_TOKEN=.\+' $APP/.env; then
+  sed -i '/^MIRA_VISION_TOKEN=/d' $APP/.env
+  echo "MIRA_VISION_TOKEN=\$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> $APP/.env
+  echo "generated MIRA_VISION_TOKEN in $APP/.env"
+fi
 # Idempotent schema migrations (server/db/migrations) against the box's TIGER_DSN (read from its .env).
 (cd $APP && sudo -u mira $APP/.venv/bin/python -m server.db.migrate) || echo "WARNING: migrations failed; the server will retry at start"
 systemctl restart mira

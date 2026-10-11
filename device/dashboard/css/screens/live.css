@@ -66,6 +66,18 @@
   position: relative;
 }
 
+.live__views {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 760px) { .live__views { grid-template-columns: 1fr; } }
+
+.live__media-host, .live__avatar-host { min-width: 0; }
+.live__camera { width: 100%; min-height: 260px; object-fit: cover; border-radius: var(--radius-card); background: var(--color-ink); display: block; }
+.live__video-status { margin-top: var(--space-2); }
+
 .live__rep-card {
   position: absolute;
   top: var(--space-3);

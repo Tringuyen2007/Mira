@@ -31,6 +31,22 @@ ID_RE = r"^[A-Za-z0-9_-]{1,64}$"
 IDLE_PHASES = frozenset({"idle", "done"})
 
 
+@router.get("/live/media")
+async def live_media() -> dict[str, Any]:
+    """Return the current session's therapist video endpoint, never a recording URL.
+
+    This router is mounted with the full dashboard-token dependency. MediaMTX must separately validate that
+    same bearer token before accepting WHEP; see docs/vision-media-contract.md.
+    """
+    from server.config import cfg
+
+    session = get_state().sessions.current
+    if session is None or not cfg.MIRA_WHEP_URL:
+        raise HTTPException(status_code=404, detail="live camera video unavailable")
+    return {"session_id": session.session_id,
+            "whep_url": cfg.MIRA_WHEP_URL.replace("{session_id}", session.session_id)}
+
+
 def _signals(row: dict[str, Any], live_now: bool) -> Signals:
     return Signals(
         open_alert_kind=row["open_alert_kind"],

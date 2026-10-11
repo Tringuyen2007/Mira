@@ -59,6 +59,32 @@ Mira LCD kiosk connect with a least-privilege token instead of the full API one 
 [device/kiosk/README.md](device/kiosk/README.md).
 Use `make ... VENV=/path/to/venv` if your virtual environment lives elsewhere.
 
+## Remote vision agent (Vultr + camera laptop)
+
+For deployment, run the FastAPI server on Vultr and the camera/OpenVINO process on the computer physically
+attached to the camera. Set `MIRA_SOURCE=remote` and give the server a unique `MIRA_VISION_TOKEN` (at least 24
+characters, different from the API and LCD tokens). The agent makes one outbound secure WebSocket connection:
+
+```text
+wss://<your-mira-host>/ws/vision?token=<MIRA_VISION_TOKEN>
+```
+
+It sends the same JSON frames and events that `vision.Engine(emit=...)` emits today (`server/samples/engine_frame.json`)
+and listens on that same socket for the existing reverse-channel messages (`command`, `incident_closed`, and
+`end_set_early`);
+the server publishes them unchanged to `/ws/pose`, `/ws/live` and `/ws/events`. This means the iPhone and therapist
+dashboard receive the live skeleton without a camera, raw video, or an open inbound port on the laptop. Keep the
+laptop awake and connected to the camera during a session. The endpoint deliberately accepts no phone commands;
+session controls remain on the existing authenticated `/ws/events` channel.
+
+For the therapist's side-by-side camera footage and Eric's 3D body mesh, use the companion WebRTC media contract in
+[`docs/vision-media-contract.md`](docs/vision-media-contract.md). Video uses WHIP/WHEP; `/ws/vision` remains pose and
+mesh-control data only. `MIRA_WHEP_URL` is intentionally unset by default, so no raw camera video is exposed until
+the authenticated media relay is deployed.
+
+For recorded clips and patient sharing, follow [`docs/video-storage-design.md`](docs/video-storage-design.md): media
+lives in private object storage; Tiger/Timescale stores its searchable timeline, consent, share state and expiry only.
+
 The tests never read your `.env` (`server/tests/conftest.py` sets `MIRA_SKIP_DOTENV=1` before importing the
 config), never call Gemini, ElevenLabs or Retell, and never touch Tiger Cloud.
 
