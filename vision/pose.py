@@ -63,7 +63,7 @@ class PoseWorker(threading.Thread):
     def __init__(self, camera, out: queue.Queue, model: str = "full"):
         super().__init__(daemon=True, name=f"pose-{camera.cam_name}")
         self.camera, self.out, self.model = camera, out, model
-        self._stop = threading.Event()
+        self._halt = threading.Event()  # not _stop: threading.Thread uses that name internally
         self.latest: tuple[np.ndarray, PoseResult] | None = None
         self.ms = 0.0
         self.error: str | None = None
@@ -76,7 +76,7 @@ class PoseWorker(threading.Thread):
             return
         last_seq = -1
         try:
-            while not self._stop.is_set():
+            while not self._halt.is_set():
                 item = self.camera.latest()
                 if item is None or item[0] == last_seq:
                     time.sleep(0.002)
@@ -92,4 +92,4 @@ class PoseWorker(threading.Thread):
             est.close()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()

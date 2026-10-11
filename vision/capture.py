@@ -53,6 +53,9 @@ def camera_problem(cfg: CameraConfig, error: str | None, actual_size) -> str | N
     return resolution_warning(cfg, actual_size)
 
 
+READ_FAIL_S = 1.0  # reads failing for this long is an error; shorter gaps are a webcam warming up
+
+
 class Camera(threading.Thread):
     def __init__(self, name: str, index: int, width: int = 1280, height: int = 720, fps: int = 30):
         super().__init__(daemon=True, name=f"camera-{name}")
@@ -62,11 +65,12 @@ class Camera(threading.Thread):
         self._frame: np.ndarray | None = None
         self._t = 0.0
         self._seq = 0
-        self._stop = threading.Event()
+        self._halt = threading.Event()  # not _stop: threading.Thread uses that name internally
         self.meter = FpsMeter()
         self.opened = False
         self.error: str | None = None
         self.actual_size: tuple[int, int] | None = None
+        self._failing_since: float | None = None
 
     def run(self) -> None:
         cap = cv2.VideoCapture(self.index, BACKEND)
@@ -79,22 +83,29 @@ class Camera(threading.Thread):
         cap.set(cv2.CAP_PROP_FPS, self.req_fps)
         self.opened = True
         try:
-            while not self._stop.is_set():
+            while not self._halt.is_set():
                 ok, frame = cap.read()
-                t = time.monotonic()
-                if not ok:
-                    self.error = f"camera {self.cam_name}: read failed"
+                if not self._on_read(ok, frame, time.monotonic()):
                     time.sleep(0.01)
-                    continue
-                self.error = None
-                with self._lock:
-                    self._frame, self._t = frame, t
-                    self._seq += 1
-                self.meter.tick(t)
-                self.actual_size = (frame.shape[1], frame.shape[0])
         finally:
             cap.release()
             self.opened = False
+
+    def _on_read(self, ok: bool, frame, t: float) -> bool:
+        if not ok:
+            if self._failing_since is None:
+                self._failing_since = t
+            if t - self._failing_since >= READ_FAIL_S:
+                self.error = f"camera {self.cam_name}: read failed"
+            return False
+        self._failing_since = None
+        self.error = None
+        with self._lock:
+            self._frame, self._t = frame, t
+            self._seq += 1
+        self.meter.tick(t)
+        self.actual_size = (frame.shape[1], frame.shape[0])
+        return True
 
     def latest(self) -> tuple[int, float, np.ndarray] | None:
         with self._lock:
@@ -107,4 +118,4 @@ class Camera(threading.Thread):
         return self.meter.value
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
