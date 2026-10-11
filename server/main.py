@@ -214,6 +214,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if auto_restart is not None:  # first: it must not start a session while everything below shuts down
+            await auto_restart.close()
         if scheduler is not None:
             await scheduler.stop()
         await notifications.stop()
@@ -225,8 +227,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await coach.close()
         if sessions.current is not None:
             await sessions.stop(sessions.current.session_id)
-        if auto_restart is not None:
-            await auto_restart.close()
         await analyst.close()
         if writer is not None:
             await asyncio.to_thread(writer.stop)

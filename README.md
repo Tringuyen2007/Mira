@@ -271,7 +271,7 @@ passes.
 
 | route | auth | body → response |
 |---|---|---|
-| `POST /pair` | none, 5 failed attempts/min/IP | `{code, device_name?, profile{name, height_cm, mass_kg, affected_side?, condition}, emergency_contact{name, phone, relationship?}, alert_therapist}` → `{patient_id, token, me}`. `404` unknown code, `410` expired or already used, `429` rate-limited. |
+| `POST /pair` | none, 5 attempts/min/IP (any outcome) | `{code, device_name?, profile{name, height_cm, mass_kg, affected_side?, condition}, emergency_contact{name, phone, relationship?}, alert_therapist}` → `{patient_id, token, me}`. `404` unknown code, `410` expired or already used, `429` rate-limited. |
 | `GET /me` | patient (or full with `?patient_id=`) | profile, care team, plan, LCD/calibration status |
 | `PUT /me` | patient (or full with `?patient_id=`) | partial `{profile?, emergency_contact?, alert_therapist?, share_by_default?, device_prefs?}` → the updated `GET /me` body |
 | `DELETE /me` | patient (or full with `?patient_id=`) | purges the patient's own non-simulated history (sessions, reps, pose frames, alerts, …), keeps the patient row and prescriptions, revokes the token; labeled simulated demo history is kept |
@@ -280,16 +280,30 @@ passes.
 | `DELETE /patients/{id}/devices` | full | revokes every paired phone for that patient |
 
 A demo code `K7P4M2` is seeded for Maya and never expires; while `PAIRING_DEMO_CODE_REUSABLE=1` (default on)
-it can be reused so the demo phone can re-pair. Set `PAIRING_REUSABLE_UPDATES_PROFILE=0` on a public server
-once the demo phone has paired, so the reusable code can still pair a phone but no longer rewrites Maya's
-profile or emergency contact for every stranger who tries it.
+it can be reused so the demo phone can re-pair. Every phone remembers whether it paired with a reusable code
+(`patient_devices.via_reusable`, migration `004`). Setting `PAIRING_REUSABLE_UPDATES_PROFILE=0` on a public
+server, once the demo phone has paired, locks those demo phones down: `/pair` with the reusable code no longer
+rewrites Maya's profile or emergency contact, `PUT /me` from a demo phone ignores `profile` and
+`emergency_contact` (other fields still apply), `DELETE /me` from a demo phone is a `403`, and
+`POST /me/test-alert` from a demo phone only logs (never calls). Phones paired with a therapist-minted
+single-use code are unaffected. The 10-active-phones cap only ever evicts the oldest demo phones, so strangers
+pairing with the public code can never sign the real patient's phone out. The flag alone is not a secret,
+though: on a public box also rotate `PAIRING_DEMO_CODE` (re-run the seed) so the published `K7P4M2` stops
+working.
+
+Patient-scope `POST /me/messages`, `POST /me/test-alert` and `POST /sessions` are each limited to 10 per
+minute per patient (`429`; `server/api/ratelimit.py`); the admin token is never limited. A phone can't start
+a session while a Safety Guardian incident is open for its patient (`409`).
 
 Existing routes also accept a patient token, scoped to its own patient: `GET /sessions/{id}` (own session
 only), `GET /patients/{id}`, `GET /patients/{id}/progress`, `GET /prescriptions/{id}` (writes stay `full`-only).
 Any other patient's id is a `403`.
 
-Patient WebSockets (`/ws/live`, `/ws/events`, `/ws/pose`) only receive frames while the live session's
-`patient_id` matches the token's own `patient_id` — otherwise the socket stays open (pings only). Patient
+Patient WebSockets (`/ws/live`, `/ws/events`, `/ws/pose`) are filtered per message: an event tagged with a
+`patient_id` reaches the phone only if it is the token's own patient; else one tagged with a `session_id`
+reaches it only if that session (live or recently ended) is its patient's; untagged messages (`/ws/live` and
+`/ws/pose` frames) reach it only while the current live session is its patient's. Otherwise the socket stays
+open (pings only). Patient
 clients may send `command`/`hr`/`wrist`/`watch_button`, not `device_health`.
 
 Migrations (`server/db/migrations/NNN_name.sql`, idempotent) run at `server/db/setup.py` step 1b, via
@@ -320,7 +334,8 @@ patient's own rows along with the rest of their history.
 
 ## Device prefs
 
-`PUT /me {device_prefs: {...}}` saves the patient's device preferences (captions, volume, slower speech) to
+`PUT /me {device_prefs: {...}}` (at most 20 keys; flat values only: true/false, numbers or strings of at most
+64 characters, else `422`) saves the patient's device preferences (captions, volume, slower speech) to
 the `patients` row and, if that patient has a live session right now, pushes them straight onto the running
 `/ws/live` stream (`server/api/me.py::put_me` sets `state.bridge.live.device_prefs`, no session restart
 needed) — the next `/ws/live` tick already carries `device_prefs` (`server/engine_bridge.py`). The Mira LCD
@@ -467,7 +482,8 @@ takes effect the next time a session starts).
 
 ## Session end and analysis
 
-Every session ends through **one** code path, whichever gets there first: `POST /sessions/{id}/stop` (REST),
+Every session ends through **one** code path, whichever gets there first: `POST /sessions/{id}/stop` (REST;
+it first sends the engine a `stop` command for a live session, so the LCD/mock program stops counting too),
 the engine emitting `stopped` (its own program finished), or the last set's `set_done`
 (`set == sets_target`, for engines that don't send `stopped`; disable with `AUTO_STOP_AFTER_LAST_SET=0`).
 All three land on `SessionRegistry.stop()`, which is idempotent (a second stop for the same session is a
@@ -483,7 +499,7 @@ Three env flags control it:
 | Variable | Default | Effect |
 |---|---|---|
 | `MOCK_LOOP=1` | 0 | the mock program repeats forever (pre-Plan-2 behaviour); see Kill switches above. Implies no auto-stop/auto-restart: `SessionEnder`'s last-set check and `MockAutoRestart` are both skipped, since the mock program's own `stopped` never fires either |
-| `MOCK_AUTO_RESTART_S` | `30.0` | mock mode only (and not `MOCK_LOOP`): `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one; `0` disables the auto-restart so the LCD stays on "Session complete" |
+| `MOCK_AUTO_RESTART_S` | `60.0` | mock mode only (and not `MOCK_LOOP`): `MockAutoRestart` starts a fresh demo session this many seconds after one ends, unless something else (REST, boot) already started one, and keeps waiting while a Safety Guardian incident is open; auto-restarted and boot sessions are analysed with the fast model, phone/dashboard sessions with the smart one; `0` disables the auto-restart so the LCD stays on "Session complete" |
 | `AUTO_STOP_AFTER_LAST_SET=0` | 1 | see Kill switches above |
 | `ANALYST_DELAY_S` | `2.0` | how long `SessionAnalyst` waits after a session ends before reading it, so the last reps/form_events writes have landed |
 
