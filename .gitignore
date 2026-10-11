@@ -25,3 +25,4 @@ __pycache__/
 # Vision
 vision/models/*.task
 config/backups/
+data/recordings/
