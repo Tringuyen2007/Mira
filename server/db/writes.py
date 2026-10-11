@@ -364,6 +364,30 @@ async def mark_all_notifications_read(db: Database | None, therapist_id: str | N
     return await _safe(db, "mark_all_notifications_read", lambda d: d.execute(sql, {"t": therapist_id}), None)
 
 
+# ---- session analysis (Plan 2) ------------------------------------------------------------------------------
+
+async def upsert_session_analysis(db: Database | None, session_id: str, *, form_score: int | None,
+                                  reps_total: int | None, good_reps: int | None, sets_done: int | None,
+                                  spoken: str, note: str, highlights: list[Any], next_focus: str | None,
+                                  flagged_moments: list[Any], comparison: dict[str, Any], audio_url: str | None,
+                                  source: str, model: str | None) -> bool:
+    """Whole-session analysis (§5.2); re-running on_stop for the same session overwrites with the latest
+    values (ON CONFLICT DO UPDATE), never duplicates."""
+    sql = ("INSERT INTO session_analyses (session_id, form_score, reps_total, good_reps, sets_done, spoken, "
+           "note, highlights, next_focus, flagged_moments, comparison, audio_url, source, model) "
+           "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+           "ON CONFLICT (session_id) DO UPDATE SET form_score = EXCLUDED.form_score, "
+           "reps_total = EXCLUDED.reps_total, good_reps = EXCLUDED.good_reps, sets_done = EXCLUDED.sets_done, "
+           "spoken = EXCLUDED.spoken, note = EXCLUDED.note, highlights = EXCLUDED.highlights, "
+           "next_focus = EXCLUDED.next_focus, flagged_moments = EXCLUDED.flagged_moments, "
+           "comparison = EXCLUDED.comparison, audio_url = EXCLUDED.audio_url, source = EXCLUDED.source, "
+           "model = EXCLUDED.model")
+    params = (session_id, form_score, reps_total, good_reps, sets_done, spoken, note, _jsonb(highlights),
+              next_focus, _jsonb(flagged_moments), _jsonb(comparison), audio_url, source, model)
+    return await _safe(db, "upsert_session_analysis", lambda d: _done(d.execute(sql, params)), False,
+                       session_id=session_id)
+
+
 # ---- patient identity (Plan 1) ------------------------------------------------------------------------------
 
 async def touch_patient_device(db: Database | None, token_hash: str) -> bool:

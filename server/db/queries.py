@@ -191,6 +191,61 @@ async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> 
         WHERE p.id = %s""", (patient_id,), timeout_s=timeout_s)
 
 
+# ---- session analysis (Plan 2) ------------------------------------------------------------------------------
+
+async def session_analysis(db: Database, session_id: str) -> dict[str, Any] | None:
+    return await db.fetchrow("SELECT * FROM session_analyses WHERE session_id = %s", (session_id,))
+
+
+async def previous_sessions_stats(db: Database, patient_id: str, exercise_id: str, before_session_id: str,
+                                  limit: int = 5) -> dict[str, Any]:
+    """The `limit` most recent ended sessions of this patient+exercise that started before
+    `before_session_id`'s own start: average good-rep rate (mean over sessions of good_reps/reps_total, where
+    good = quality >= 1.0), average rep ROM/asymmetry (mean over all their reps), and the most recent one's
+    form_score. All None (count 0) when there are no such sessions, or `before_session_id` doesn't exist."""
+    none_result = {"count": 0, "avg_good_rep_rate": None, "avg_rom_deg": None, "avg_asym_pct": None,
+                   "last_form_score": None}
+    target = await db.fetchrow("SELECT started_at FROM sessions WHERE id = %s", (before_session_id,))
+    if target is None:
+        return none_result
+    sessions = await db.fetch(
+        "SELECT id FROM sessions WHERE patient_id = %s AND exercise_id = %s AND ended_at IS NOT NULL "
+        "AND started_at < %s ORDER BY started_at DESC LIMIT %s",
+        (patient_id, exercise_id, target["started_at"], limit))
+    if not sessions:
+        return none_result
+    ids = [row["id"] for row in sessions]
+    rate_row = await db.fetchrow(
+        "SELECT avg(good_rate) AS avg_good_rep_rate FROM ("
+        "  SELECT CASE WHEN count(*) = 0 THEN NULL "
+        "    ELSE count(*) FILTER (WHERE quality >= 1.0)::float / count(*) END AS good_rate "
+        "  FROM reps WHERE session_id = ANY(%s) GROUP BY session_id) sub", (ids,))
+    rep_row = await db.fetchrow(
+        "SELECT avg(rom) AS avg_rom_deg, avg(asym_avg) AS avg_asym_pct FROM reps WHERE session_id = ANY(%s)",
+        (ids,))
+    analysis_row = await db.fetchrow("SELECT form_score FROM session_analyses WHERE session_id = %s", (ids[0],))
+    return {
+        "count": len(ids),
+        "avg_good_rep_rate": rate_row["avg_good_rep_rate"] if rate_row else None,
+        "avg_rom_deg": rep_row["avg_rom_deg"] if rep_row else None,
+        "avg_asym_pct": rep_row["avg_asym_pct"] if rep_row else None,
+        "last_form_score": analysis_row["form_score"] if analysis_row else None,
+    }
+
+
+async def patient_sessions(db: Database, patient_id: str, limit: int = 30,
+                           before: Any = None) -> list[dict[str, Any]]:
+    """Newest-first ended sessions (NOT simulated), LEFT JOIN session_analyses; `before` pages on started_at."""
+    return await db.fetch(
+        "SELECT s.id, s.exercise_id, s.started_at, s.ended_at, s.reps_done, s.pain_post, s.effort, s.shared, "
+        "s.simulated, sa.form_score, sa.good_reps, sa.reps_total, left(sa.spoken, 140) AS spoken_preview "
+        "FROM sessions s LEFT JOIN session_analyses sa ON sa.session_id = s.id "
+        "WHERE s.patient_id = %(pid)s AND s.ended_at IS NOT NULL AND NOT s.simulated "
+        "  AND (%(before)s::timestamptz IS NULL OR s.started_at < %(before)s) "
+        "ORDER BY s.started_at DESC LIMIT %(limit)s",
+        {"pid": patient_id, "before": before, "limit": limit})
+
+
 # ---- patient identity (Plan 1) ------------------------------------------------------------------------------
 
 async def patient_device(db: Database, token_hash: str, timeout_s: float = 1.5) -> dict[str, Any] | None:
