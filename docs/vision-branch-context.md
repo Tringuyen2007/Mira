@@ -47,8 +47,8 @@ balance / on-mat / falls.
   | Session | Still p90 (cm) | Moving p90 (cm) | Jumps > 8 cm | Ankle p99 (cm) | Floating | 2D match (px) |
   |---|---|---|---|---|---|---|
   | `060807` | 1.70 → 0.56 | 3.54 → 2.32 | 128 → 54 | 10.0 → 6.6 | 3 → 0 | 8.2 → 7.1 |
-  | `054226` | n/a | 7.40 → 2.90 | 125 → 18 | 16.0 → 4.8 | 0 → 0 | 10.5 → 9.1 |
-  | `055039` | 9.09 → 0.79 | 14.35 → 2.31 | 482 → 45 | 55.1 → 3.9 | 12 → 0 | 18.8 → 9.2 |
+  | `054226` | n/a | 7.40 → 2.88 | 125 → 18 | 16.0 → 4.8 | 0 → 0 | 10.5 → 9.1 |
+  | `055039` | 9.09 → 0.92 | 14.35 → 2.31 | 482 → 45 | 55.1 → 3.9 | 12 → 0 | 18.8 → 9.2 |
 
   - restarts 25 → 0 on `055039`;
   - lag +0.05 to +0.3 frame (≤ 10 ms; accepted by Eric);
@@ -65,7 +65,7 @@ balance / on-mat / falls.
 - **Remaining limit:** camera B is low and far (was 0.83 m when this was measured). It looks down at the feet at only 12°,
   so feet-on-floor depth wobbles >6 cm in some frames. **Next physical step: raise B to ~1.6–2 m, tilt it
   down, re-run `calib_extrinsics` seeing a far marker.** Not done yet.
-- 245 tests pass (`.venv/bin/python -m pytest -q`). Nothing merged or pushed; the branch is 90+ commits
+- 248 tests pass (`.venv/bin/python -m pytest -q`). Nothing merged or pushed; the branch is 90+ commits
   ahead of `main`.
 
 ## How to run (repo root, `source .venv/bin/activate`)
