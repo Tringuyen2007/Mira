@@ -22,6 +22,7 @@ from starlette.types import Scope
 
 from server.agents.safety_guardian import SafetyGuardian
 from server.agents.scheduler import Scheduler
+from server.agents.session_analyst import SessionAnalyst
 from server.agents.session_coach import SessionCoach
 from server.ai import cue_library, gemini
 from server.ai.session_voice import SessionVoice
@@ -177,6 +178,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if cfg.MIRA_SOURCE.startswith("mock"):
         auto_restart = MockAutoRestart(sessions, cfg.MOCK_PATIENT_ID, MOCK_EXERCISE_ID, cfg.MOCK_AUTO_RESTART_S)
         sessions.on_stop.append(auto_restart.on_stop)
+    # Every ended session gets a whole-session analysis (session_summary event, session_analyses row).
+    analyst = SessionAnalyst(hub, sessions)
+    sessions.on_stop.append(analyst.on_stop)
+    state.analyst = analyst
 
     # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
     # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
@@ -204,6 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await sessions.stop(sessions.current.session_id)
         if auto_restart is not None:
             await auto_restart.close()
+        await analyst.close()
         if writer is not None:
             await asyncio.to_thread(writer.stop)
         if db is not None:

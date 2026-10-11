@@ -217,6 +217,7 @@ class AppState:
         self.coach: Any | None = None
         self.scheduler: Any | None = None
         self.notifications: Any | None = None
+        self.analyst: Any | None = None  # server.agents.session_analyst.SessionAnalyst
         self.devices: Any = None
 
 
