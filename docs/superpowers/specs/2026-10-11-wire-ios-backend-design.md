@@ -93,7 +93,7 @@ statements are appended to `schema.sql` for fresh databases.
 | `POST /pair` | none, 5/min/IP | `{code, device_name?, profile{name, height_cm, mass_kg, affected_side?, condition}, emergency_contact{name, phone, relationship?}, alert_therapist}` → `{patient_id, token, me}` |
 | `GET /me` | patient | `MeResponse` (below) |
 | `PUT /me` | patient | partial `{profile?, emergency_contact?, alert_therapist?, share_by_default?, device_prefs?}` → `MeResponse` |
-| `DELETE /me` | patient | purges the patient's sessions, reps, pose_frames, form_events, heart_rate, alerts, memory_events, messages, session_analyses, patient_devices; keeps the patient row and prescriptions (the therapist's plan is theirs) with profile fields nulled. Returns `{deleted: true}`. The token is revoked. |
+| `DELETE /me` | patient | purges the patient's own (non-simulated) sessions, reps, pose_frames, form_events, heart_rate, alerts, memory_events, messages, session_analyses, patient_devices; keeps the patient row and prescriptions (the therapist's plan is theirs) with profile fields nulled. Labeled simulated demo history is kept — it is not the patient's data. Returns `{deleted: true}`. The token is revoked. |
 | `GET /me/export` | patient | JSON of everything `DELETE /me` would delete (for "Download my data") |
 | `POST /patients/{id}/pairing-code` | full | mints a new code (24 h) → `{code, expires_at}` |
 | `DELETE /patients/{id}/devices` | full | revoke all phones |
