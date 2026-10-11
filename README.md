@@ -243,6 +243,7 @@ token (prompt, local config) is the dashboard's choice; never commit it.
 | Therapist Memory | `GET /patients/{id}/memory?days=21` — unacknowledged and acknowledged `memory_events`, newest first (`rest_get_patient_memory`) |
 | Prescriptions | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}` (`rest_get_prescriptions`, `rest_put_prescriptions`) |
 | Copilot | `POST /copilot/ask {question, patient_id?}` (`rest_post_copilot_ask`) |
+| Mira Assistant | `POST /copilot/ask {question, patient_id?, context?: [{question, answer}] ≤ 3}` for follow-ups; every answer carries `drafts: [{patient_id, text}]` (never sent); `POST /copilot/review/{patient_id}` — one-click patient review, same answer shape, may leave one pending proposal (404 unknown patient, 503 without the database) (`rest_post_copilot_ask`, `rest_post_copilot_review`) |
 | Notifications | `GET /notifications?unread=&limit=&since_id=&therapist_id=`, `GET /notifications/count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `POST /notifications/{id}/ack {therapist_id}` (see "Dashboard notifications") |
 | Health | `GET /health` (public), `GET /health/data`, `GET /stats` (`rest_get_health*`, `rest_get_stats`) |
 
@@ -385,7 +386,11 @@ takes effect the next time a session starts).
 
 ## Care Copilot (therapist Q&A, plan proposals)
 
-`POST /copilot/ask {question, patient_id?}` → `{answer, charts[], sql[], evidence[], cached, proposals[], fallback}`.
+`POST /copilot/ask {question, patient_id?}` → `{answer, charts[], sql[], evidence[], cached, proposals[], drafts[], fallback}`.
+Follow-ups send `context: [{question ≤ 500, answer ≤ 1200}]` (at most 3 earlier turns, 422 beyond): it reaches the
+model as one labelled, line-prefixed block before the question, and its numbers never count as evidence (the model
+re-queries). `drafts: [{patient_id, text}]` lists the `draft_message` drafts of the run (saved, never sent).
+`POST /copilot/review/{patient_id}` runs the weekly review for one patient and returns the same shape.
 The Copilot (`server/agents/copilot.py`) runs up to 5 Gemini steps (`GEMINI_MODEL_SMART` + fallbacks, 8 s each)
 with five tools: `run_sql` (checked by `server/agents/sql_guard.py`: one SELECT on progress_v, sessions, reps,
 form_events, memory_events, patients or prescriptions, blocked functions, LIMIT ≤ 200, then run as the read-only

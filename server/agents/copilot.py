@@ -23,7 +23,7 @@ import os
 import re
 import sys
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -247,8 +247,28 @@ def numbers_in(value: Any) -> list[float]:
     return out
 
 
-def user_message(question: str, patient_id: str | None, mode: str = "ask") -> dict[str, Any]:
-    lines = [f"QUESTION: {' '.join(question.split())}"]  # one line: the question cannot add PATIENT_ID/MODE
+MAX_CONTEXT_TURNS = 3
+CONTEXT_HEADER = "EARLIER IN THIS CONVERSATION (context, not data):"
+
+
+def context_block(context: Sequence[Mapping[str, Any]] | None) -> str | None:
+    """Earlier turns of the conversation as one labelled block, or None. Each question and answer is collapsed to
+    one line behind a "Q1:"/"A1:" prefix, so no turn can start a PATIENT_ID/MODE/QUESTION line."""
+    if not context:
+        return None
+    lines = [CONTEXT_HEADER]
+    for i, turn in enumerate(context[-MAX_CONTEXT_TURNS:], 1):
+        for key, tag in (("question", "Q"), ("answer", "A")):
+            text = " ".join(str(turn.get(key) or "").split())
+            lines.append(f"{tag}{i}: {text}".rstrip())
+    return "\n".join(lines)
+
+
+def user_message(question: str, patient_id: str | None, mode: str = "ask", *,
+                 context: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    block = context_block(context)  # before the QUESTION line; never counted as evidence (evidence_numbers)
+    lines = [block] if block else []
+    lines.append(f"QUESTION: {' '.join(question.split())}")  # one line: the question cannot add PATIENT_ID/MODE
     if patient_id:
         lines.append(f"PATIENT_ID: {patient_id}")
     if mode != "ask":
@@ -329,7 +349,7 @@ def _read_demo_cache() -> dict[str, Any] | None:
             continue
         answer = data.get("answer") if isinstance(data, dict) else None
         if isinstance(answer, dict) and answer.get("answer"):
-            return {**answer, "proposals": [], "cached": True, "fallback": None}
+            return {"drafts": [], **answer, "proposals": [], "cached": True, "fallback": None}
     return None
 
 
@@ -337,7 +357,8 @@ def fallback_answer(sql_log: list[dict[str, Any]], reason: str) -> dict[str, Any
     ran = [e for e in sql_log if "error" not in e]
     text = ("I couldn't produce an answer I could check against the data. The queries I ran are listed below."
             if ran else "I couldn't answer that right now. Please try again or rephrase the question.")
-    return {"answer": text, "charts": [], "evidence": [], "sql": sql_log, "cached": False, "fallback": reason}
+    return {"answer": text, "charts": [], "evidence": [], "sql": sql_log, "cached": False, "fallback": reason,
+            "drafts": []}
 
 
 # ---- step forcing (TRI row "agent loops without answering") ------------------------------------------------
@@ -375,15 +396,17 @@ class Copilot:
         self.system = load_prompt("copilot")
 
     async def ask(self, question: str, patient_id: str | None = None, *, mode: str = "ask",
-                  use_cache: bool = True) -> dict[str, Any]:
+                  use_cache: bool = True, context: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+        """`context` = earlier turns [{question, answer}] (follow-ups): shown to the model, never evidence."""
         demo = use_cache and is_demo_question(question)
         if demo and cfg.COPILOT_CACHED_DEMO:
             cached = await cached_demo_answer(self.db)
             if cached is not None:
                 return cached
-        msgs: list[dict[str, Any]] = [user_message(question, patient_id, mode)]
+        msgs: list[dict[str, Any]] = [user_message(question, patient_id, mode, context=context)]
         sql_log: list[dict[str, Any]] = []
         proposals: list[int] = []
+        drafts: list[dict[str, str]] = []  # draft_message results of this run (saved, never sent)
         fix_asked = False
         reason = "step limit"
         for step in range(MAX_STEPS):
@@ -403,7 +426,8 @@ class Copilot:
                 out, problem = self._validate_final(call.args, evidence_numbers(question, msgs, sql_log))
                 if out is not None:
                     log.info("copilot answered", extra={"steps": len(sql_log), "proposals": proposals})
-                    return {**out, "sql": sql_log, "cached": False, "proposals": proposals, "fallback": None}
+                    return {**out, "sql": sql_log, "cached": False, "proposals": proposals, "drafts": drafts,
+                            "fallback": None}
                 await gemini.discard(reply)
                 if fix_asked:
                     reason = f"final answer rejected twice: {problem}"
@@ -415,7 +439,7 @@ class Copilot:
                 msgs += [reply.as_message(), tool_message(call, {"error": problem})]
                 continue
             try:
-                result = await self._dispatch(call, question, msgs, sql_log, proposals)
+                result = await self._dispatch(call, question, msgs, sql_log, proposals, drafts)
                 content = {"data": result, "note": DATA_NOTE}
             except Rejected as exc:
                 content = {"error": str(exc)}
@@ -425,7 +449,7 @@ class Copilot:
             cached = await cached_demo_answer(self.db)
             if cached is not None:
                 return cached
-        return {**fallback_answer(sql_log, reason), "proposals": proposals}
+        return {**fallback_answer(sql_log, reason), "proposals": proposals, "drafts": drafts}
 
     async def review_patient(self, patient_id: str) -> dict[str, Any]:
         """Weekly review mode: one patient's last week; may leave one pending proposal card."""
@@ -454,7 +478,7 @@ class Copilot:
     # ---- tools ------------------------------------------------------------------------------------------
 
     async def _dispatch(self, call: gemini.FunctionCall, question: str, msgs: list[dict[str, Any]],
-                        sql_log: list[dict[str, Any]], proposals: list[int]) -> Any:
+                        sql_log: list[dict[str, Any]], proposals: list[int], drafts: list[dict[str, str]]) -> Any:
         if call.name not in TOOL_NAMES:
             raise Rejected(f"unknown tool {call.name!r}; available: {', '.join(sorted(TOOL_NAMES))}")
         try:
@@ -469,8 +493,10 @@ class Copilot:
                     proposals.append(pid)
                 return {"proposal_id": pid, "status": "pending", "note": "The therapist decides."}
             if call.name == "draft_message":
-                return await self.draft_message(DraftArgs.model_validate(call.args),
-                                                evidence_numbers(question, msgs, sql_log))
+                draft = DraftArgs.model_validate(call.args)
+                saved = await self.draft_message(draft, evidence_numbers(question, msgs, sql_log))
+                drafts.append({"patient_id": draft.patient_id, "text": draft.text})
+                return saved
         except ValidationError as exc:
             raise Rejected(f"invalid arguments for {call.name}: {_errors(exc)}") from None
         raise Rejected(f"tool {call.name} cannot be called here")
