@@ -92,14 +92,14 @@ def test_new_person_or_b_key_re_measures():
     assert rig.lengths is None
 
 
-def test_lost_or_missing_hips_shows_nothing_new():
+def test_lost_or_both_hips_missing_shows_nothing_new():
     X = standing_skeleton()
     rig = BodyRig()
     _measure(rig, X)
     assert rig.update(AFTER, None, "lost") is None
     J = X.copy()
-    J[23] = np.nan
-    assert rig.update(AFTER + DT, J, "3d") is None
+    J[[23, 24]] = np.nan  # one missing hip is rebuilt (test_one_hip_missing_is_rebuilt_from_the_other)
+    assert rig.update(AFTER + 1.5, J, "3d") is None  # past the brief hold (test_both_hips_briefly_missing...)
 
 
 def test_limb_never_seen_hangs_down_at_its_measured_length():
@@ -262,3 +262,37 @@ def test_elbows_forward_hands_at_the_shoulders_follow_the_tracked_elbow():
     J = _arm_pose(rig, X, 145)  # nearly folded, hand back by the shoulder
     P = rig.update(AFTER, J, "3d")
     assert np.linalg.norm(P[13] - J[13]) < 0.03
+
+
+def test_one_hip_missing_is_rebuilt_from_the_other():
+    X = standing_skeleton()
+    for constraints in (True, False):
+        rig = BodyRig(constraints=constraints)
+        _measure(rig, X)
+        J = X.copy()
+        J[24] = np.nan  # right hip hidden by the thigh in a squat
+        P = rig.update(AFTER, J, "3d")
+        assert P is not None and np.isfinite(P[[23, 24, 25, 26, 11, 12]]).all()
+        np.testing.assert_allclose(P[23], X[23], atol=1e-6)
+        assert abs(_length(P, 23, 24) - rig.lengths["hip_width"]) < 1e-9
+        J = X.copy()
+        J[23] = np.nan
+        P = rig.update(AFTER + DT, J, "3d")
+        np.testing.assert_allclose(P[24], X[24], atol=1e-6)
+    J = X.copy()
+    J[[23, 24]] = np.nan
+    assert rig.update(AFTER + 1.5, J, "3d") is None  # both hips gone for longer than the hold
+
+
+def test_both_hips_briefly_missing_holds_the_last_pose():
+    from vision.rig import HOLD_S
+
+    X = standing_skeleton()
+    rig = BodyRig()
+    _measure(rig, X)
+    P1 = rig.update(AFTER, X, "3d")
+    J = X.copy()
+    J[[23, 24]] = np.nan
+    P2 = rig.update(AFTER + DT, J, "3d")
+    np.testing.assert_allclose(P2, P1)  # a brief gap keeps the body on screen
+    assert rig.update(AFTER + DT + HOLD_S + 0.01, J, "3d") is None  # a long one doesn't

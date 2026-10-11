@@ -19,6 +19,7 @@ import numpy as np
 from vision import constraints as C
 
 FRAMES_NEEDED = 40
+HOLD_S = 1.0  # both hips missing for up to this long: keep showing the last pose
 FORGET_S = 5.0  # nobody tracked for this long: assume someone new and measure again
 
 # measured bone -> joint pairs (left and right pooled)
@@ -79,6 +80,7 @@ class BodyRig:
         self._foot_yaw: dict[str, float] = {}
         self._locked_yaw: dict[str, float | None] = {"l": None, "r": None}
         self._prev_pose_t: float | None = None
+        self._good: tuple[float, np.ndarray] | None = None  # (time, pose) of the last successful pose
         self._body_yaw: float | None = None
         self._push_face: dict[str, str] = {}  # torso face each arm point was last pushed through
 
@@ -106,10 +108,12 @@ class BodyRig:
             if self.lengths is None:
                 self._last_out = J.copy()
                 return self._last_out
-        if self.constraints:
-            self._last_out = self._pose_constrained(J, conf, t, feet_locked or {})
-        else:
-            self._last_out = self._pose(J)
+        posed = self._pose_constrained(J, conf, t, feet_locked or {}) if self.constraints else self._pose(J)
+        if posed is None and self._good is not None and t - self._good[0] <= HOLD_S:
+            return self._good[1]  # both hips briefly gone: keep the last body on screen
+        self._last_out = posed
+        if posed is not None:
+            self._good = (t, posed)
         self._prev_pose_t = t
         return self._last_out
 
@@ -136,11 +140,17 @@ class BodyRig:
     def _pose_trunk(self, J: np.ndarray) -> np.ndarray | None:
         """Hips, spine, shoulders and head at the measured lengths (shared by both posing paths)."""
         L = self.lengths
-        if not _ok(J[23], J[24]):
+        if _ok(J[23], J[24]):
+            hip_mid = (J[23] + J[24]) / 2
+            across_h = self._hold("hip_dir", _unit(J[23] - J[24]))
+        elif "hip_dir" in self._held and (_ok(J[23]) or _ok(J[24])):
+            # one hip hidden (e.g. by the thigh in a squat): rebuild it from the other and the last direction
+            across_h = self._held["hip_dir"]
+            hip_mid = (J[23] - across_h * L["hip_width"] / 2 if _ok(J[23])
+                       else J[24] + across_h * L["hip_width"] / 2)
+        else:
             return None
         P = J.copy()
-        hip_mid = (J[23] + J[24]) / 2
-        across_h = self._hold("hip_dir", _unit(J[23] - J[24]))
         P[23], P[24] = hip_mid + across_h * L["hip_width"] / 2, hip_mid - across_h * L["hip_width"] / 2
         tracked_sh = (J[11] + J[12]) / 2 if _ok(J[11], J[12]) else None
         spine = self._hold("spine", _unit(tracked_sh - hip_mid) if tracked_sh is not None else None)
