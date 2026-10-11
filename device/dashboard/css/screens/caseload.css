@@ -1,0 +1,282 @@
+/* Caseload screen (Figma 205:205 table, 227:794/227:1023/227:1200 right rail). */
+
+.caseload__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+
+.caseload__date {
+  margin-bottom: var(--space-1);
+}
+
+.caseload__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+}
+
+.search-field img {
+  width: 18px;
+  height: 18px;
+}
+
+.search-field input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-ink);
+  width: 200px;
+}
+
+.pill-tabs {
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.pill-tabs__count {
+  color: var(--color-ink-soft);
+  font-weight: 500;
+}
+
+.pill-tabs button[aria-selected="true"] .pill-tabs__count {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.caseload__body {
+  align-items: start;
+}
+
+.table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+}
+
+.table__head {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1.2fr 24px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-card-sunk);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+.table__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-card-sunk);
+  font-weight: 600;
+  border-top: 1px solid var(--color-line);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1.2fr 24px;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-line);
+  text-decoration: none;
+  color: inherit;
+}
+
+.row:hover {
+  background: var(--color-card-sunk);
+}
+
+.row__cell--patient {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.row__name {
+  display: block;
+  font-weight: 600;
+}
+
+.row__sub {
+  display: block;
+  font-size: var(--text-meta);
+  color: var(--color-ink-soft);
+}
+
+.row__cell--why {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row__reason {
+  font-weight: 500;
+}
+
+.row__cell--evidence-alert {
+  color: var(--color-alert-text);
+  font-weight: 600;
+}
+
+.row__cell--evidence-plain {
+  color: var(--color-ink-soft);
+}
+
+.table__more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3) var(--space-6);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--color-line);
+  color: var(--color-accent-text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.table__empty {
+  padding: var(--space-6);
+}
+
+.status-icon {
+  display: inline-flex;
+}
+
+.status-icon img {
+  width: 20px;
+  height: 20px;
+}
+
+.caseload__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.rail-card {
+  padding: var(--space-5);
+}
+
+.rail-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.rail-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.rail-stat:first-of-type {
+  border-top: none;
+}
+
+.rail-stat__value {
+  font-weight: 700;
+}
+
+.copilot-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.copilot-list__item {
+  background: var(--color-card-sunk);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  font-size: var(--text-meta);
+}
+
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-flag);
+}
+
+/* ---------- Add patient dialog ---------- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(28, 26, 34, 0.4);
+  z-index: 20;
+}
+
+.dialog {
+  width: 320px;
+  background: var(--color-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dialog__label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--color-ink-soft);
+}
+
+.dialog select {
+  height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-line);
+  font: inherit;
+  background: var(--color-card);
+  color: var(--color-ink);
+}
+
+.dialog__code {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+.dialog__error {
+  min-height: 1.2em;
+  color: var(--color-alert-text);
+  font-size: var(--text-meta);
+}
+
+@media (max-width: 1279.98px) {
+  .caseload__head {
+    flex-direction: column;
+  }
+}

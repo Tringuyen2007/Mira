@@ -49,5 +49,6 @@ export function createEndpoints(api, therapistId) {
     ack: (id) => api.post(`/notifications/${enc(id)}/ack`, { therapist_id: therapistId }),
 
     stats: () => api.get("/stats"),
+    pairingCode: (pid) => api.post(`/patients/${enc(pid)}/pairing-code`, { therapist_id: therapistId }),
   };
 }

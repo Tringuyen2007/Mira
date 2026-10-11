@@ -12,9 +12,10 @@ import { renderSidebar } from "./ui/sidebar.js";
 import { createToaster } from "./ui/toasts.js";
 import { empty } from "./ui/states.js";
 import { mountSignIn } from "./screens/signin/index.js";
+import { screen as caseloadScreen } from "./screens/caseload/index.js";
 
 // Screens land here in later milestones; a route that resolves but has no entry shows "Coming soon".
-const SCREENS = {};
+const SCREENS = { caseload: caseloadScreen };
 const SCREEN_ALIAS = { replay: "patient", proposal: "copilot" };
 
 const appEl = document.getElementById("app");
