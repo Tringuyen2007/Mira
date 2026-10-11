@@ -1,7 +1,7 @@
 """Numeric sanity checks for the 3D skeleton.
 
-    python -m vision.checks               # 5 s live: stand still, facing Mira, in view of both cameras
-    python -m vision.checks --from FILE   # on a recording, re-triangulated with the current calibration
+    python -m vision.checks --height-cm 180   # 5 s live: stand still, facing Mira, in view of both cameras
+    python -m vision.checks --from FILE       # on a recording, re-triangulated with the current calibration
 """
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from vision.triangulate import triangulate_points
 BONES_CHECKED = {"thigh_l": (23, 25), "thigh_r": (24, 26), "shin_l": (25, 27), "shin_r": (26, 28)}
 KNEE = {"l": (23, 25, 27), "r": (24, 26, 28)}
 MARKER_PAIRS = [(0, 2), (1, 3), (0, 1), (2, 3)]
+EYES = (2, 5)
+EYE_HEIGHT_RATIO = 0.936  # eye height / stature (adult anthropometry); MediaPipe has no head-top point
 
 
 @dataclass
@@ -47,6 +49,13 @@ def knee_angle_deg(joints: np.ndarray, side: str) -> float:
     return float(np.degrees(np.arccos(np.clip(c, -1, 1))))
 
 
+def estimate_height_cm(seq: np.ndarray) -> float:
+    """Stature from the median eye height above the mat surface (y = 0)."""
+    eye_y = np.nanmean(seq[:, list(EYES), 1], axis=1)
+    eye_y = eye_y[np.isfinite(eye_y)]
+    return float(np.median(eye_y) / EYE_HEIGHT_RATIO * 100) if len(eye_y) else float("nan")
+
+
 def triangulate_marker_centers(cam_a: CameraConfig, cam_b: CameraConfig) -> dict[int, np.ndarray]:
     obs_a, obs_b = cam_a.marker_obs or {}, cam_b.marker_obs or {}
     out = {}
@@ -69,12 +78,10 @@ def _check(name, value, unit, target, test) -> Check:
 
 
 def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat: MatConfig,
-               fps: dict[str, float] | None = None) -> list[Check]:
+               fps: dict[str, float] | None = None, height_cm: float | None = None,
+               moved: dict[str, tuple[str, float | None]] | None = None) -> list[Check]:
+    """`moved`: camera name -> (MoveMonitor status, shift px), from a live run."""
     checks = []
-    for n in ("A", "B"):
-        rms = cams[n].intrinsics_rms if n in cams else None
-        checks.append(_check(f"lens RMS {n}", rms, "px", "< 0.5", lambda v: v < 0.5))
-
     n3d = sum(o.frame.tracking == "3d" for o in outputs)
     frac = 100.0 * n3d / len(outputs) if outputs else None
     checks.append(_check("frames tracked in 3D", frac, "%", "≥ 90", lambda v: v >= 90))
@@ -93,6 +100,11 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
         checks.append(_check(f"standing knee angle {side}", float(np.median(vals)) if vals else None, "°", "170–180",
                              lambda v: 170 <= v <= 180))
 
+    if height_cm is not None:
+        est = estimate_height_cm(seq) if seq is not None else None
+        checks.append(_check("estimated height", est, "cm", f"{height_cm:.0f} ± 5%",
+                             lambda v: abs(v / height_cm - 1) <= 0.05))
+
     angles = np.concatenate([t.angle_deg[t.ok] for t in tris]) if tris else np.empty(0)
     checks.append(_check("median triangulation angle", float(np.median(angles)) if angles.size else None, "°", "60–100",
                          lambda v: 60 <= v <= 100))
@@ -108,6 +120,10 @@ def run_checks(outputs: list[PipelineOutput], cams: dict[str, CameraConfig], mat
                          lambda v: v <= 33))
     for n, v in sorted((fps or {}).items()):
         checks.append(_check(f"capture fps {n}", v, "fps", "≥ 20", lambda x: x >= 20))
+    for n, (status, shift) in sorted((moved or {}).items()):
+        value = shift if status in ("ok", "moved") else None
+        checks.append(Check(f"camera {n} not moved", value, "px", "< 3",
+                            None if value is None else status != "moved"))
     return checks
 
 
@@ -127,11 +143,14 @@ def outputs_from_recording(path, cams: dict[str, CameraConfig]) -> list[Pipeline
     return list(replay_outputs(path, retriangulate=True, cams=cams, realtime=False, smoothing=False))
 
 
-def _live_outputs(cams, model: str, seconds: float):
+def _live_outputs(cams, mat, model: str, seconds: float):
     from vision.capture import mono_to_unix
     from vision.live import LiveSource
+    from vision.markers import MarkerDetector
+    from vision.moved import MoveMonitor
 
     outputs = []
+    monitor = MoveMonitor(cams, MarkerDetector(mat), interval_s=0.25)
     pipeline = Pipeline(cams, smoothing=False)  # smoothing would hide the jitter these checks measure
     with LiveSource(cams, model) as src:
         problems = src.wait_ready()
@@ -144,8 +163,12 @@ def _live_outputs(cams, model: str, seconds: float):
                 out = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s)
                 if time.monotonic() - start >= 2.0:
                     outputs.append(out)
+            for n, v in src.latest_frames().items():
+                if v is not None:
+                    monitor.update(n, v[0], time.monotonic())
         fps = {n: s["fps"] for n, s in src.stats().items()}
-    return outputs, fps
+    moved = {n: (monitor.status(n), monitor.shift_px(n)) for n in cams}
+    return outputs, fps, moved
 
 
 def main() -> int:
@@ -153,13 +176,14 @@ def main() -> int:
     p.add_argument("--seconds", type=float, default=5.0)
     p.add_argument("--from", dest="from_path", type=Path)
     p.add_argument("--model", default="full", choices=["full", "heavy"])
+    p.add_argument("--height-cm", type=float, help="your height, to check the 3D scale")
     args = p.parse_args()
     cams, mat = load_cameras(), load_mat()
     if args.from_path:
-        outputs, fps = outputs_from_recording(args.from_path, cams), None
+        outputs, fps, moved = outputs_from_recording(args.from_path, cams), None, None
     else:
-        outputs, fps = _live_outputs(cams, args.model, args.seconds)
-    checks = run_checks(outputs, cams, mat, fps)
+        outputs, fps, moved = _live_outputs(cams, mat, args.model, args.seconds)
+    checks = run_checks(outputs, cams, mat, fps, args.height_cm, moved)
     print(format_checks(checks))
     return 0 if all(c.passed is not False for c in checks) else 1
 

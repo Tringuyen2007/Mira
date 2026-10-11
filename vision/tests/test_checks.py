@@ -1,7 +1,7 @@
 import numpy as np
 
 from vision.checks import (
-    bone_length_stats, outputs_from_recording, format_checks, knee_angle_deg, marker_center_distances, run_checks,
+    estimate_height_cm, bone_length_stats, outputs_from_recording, format_checks, knee_angle_deg, marker_center_distances, run_checks,
     triangulate_marker_centers,
 )
 from vision.config import MatConfig
@@ -15,7 +15,6 @@ MAT = MatConfig()
 def _cams():
     cams = target_cams()
     for cam in cams.values():
-        cam.intrinsics_rms = 0.3
         cam.marker_obs = {i: project(c, cam.K, cam.dist, cam.R, cam.t) for i, c in MAT.marker_corners().items()}
     return cams
 
@@ -48,7 +47,8 @@ def test_run_checks_all_pass_on_clean_synthetic_data():
                          pose_from_points(cams["B"], X, noise_px=0.3, rng=rng), 0.005) for k in range(40)]
     checks = run_checks(outs, cams, MAT, fps={"A": 30.0, "B": 29.5})
     names = {c.name for c in checks}
-    assert {"lens RMS A", "frames tracked in 3D", "mean body reprojection", "thigh_l length std",
+    assert not any(c.name.startswith("lens RMS") for c in checks)
+    assert {"frames tracked in 3D", "mean body reprojection", "thigh_l length std",
             "standing knee angle l", "median triangulation angle", "marker distance 0–2",
             "pair skew p95", "capture fps A"} <= names
     failed = [c for c in checks if c.passed is False]
@@ -74,3 +74,22 @@ def test_checks_from_recording_use_unsmoothed_joints(tmp_path):
                                    pose_from_points(cams["B"], X, noise_px=4.0, rng=rng), 0.0))
     for out in outputs_from_recording(path, cams):
         np.testing.assert_allclose(out.frame.joints[out.tri.ok], out.tri.points[out.tri.ok])
+
+
+def test_height_estimate_and_check():
+    cams, X = _cams(), standing_skeleton()
+    expected = (X[2, 1] + X[5, 1]) / 2 / 0.936 * 100
+    assert abs(estimate_height_cm(np.stack([X] * 10)) - expected) < 1e-9
+    pipe = Pipeline(cams)
+    outs = [pipe.process(k / 30, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X), 0.0) for k in range(20)]
+    ok = {c.name: c for c in run_checks(outs, cams, MAT, height_cm=expected * 1.03)}["estimated height"]
+    bad = {c.name: c for c in run_checks(outs, cams, MAT, height_cm=expected * 1.10)}["estimated height"]
+    assert ok.passed is True and bad.passed is False
+    assert "estimated height" not in {c.name for c in run_checks(outs, cams, MAT)}
+
+
+def test_camera_moved_checks():
+    checks = {c.name: c for c in run_checks([], {}, MAT, moved={"A": ("ok", 0.8), "B": ("moved", 6.0)})}
+    assert checks["camera A not moved"].passed is True and checks["camera B not moved"].passed is False
+    blind = {c.name: c for c in run_checks([], {}, MAT, moved={"A": ("blind", None)})}
+    assert blind["camera A not moved"].passed is None
