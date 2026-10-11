@@ -1,0 +1,12 @@
+{
+  "type": "alert",
+  "alert_id": "31c3430d-b341-4be4-ac3a-da4682bf71cb",
+  "kind": "fall",
+  "step": "escalated",
+  "patient_id": "maya",
+  "session_id": "fea67dbd-f43f-4803-85d5-5e205100a69b",
+  "call_id": "sim_31c3430d-b341-4be4-ac3a-da4682bf71cb",
+  "message": "No response from Maya. Calling the emergency contact.",
+  "show_call_911": true,
+  "t": 1791664159.239
+}

@@ -1,0 +1,5 @@
+{
+  "type": "command",
+  "name": "pause",
+  "payload": {}
+}

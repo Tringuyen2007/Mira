@@ -1,0 +1,175 @@
+-- Mira schema (TRI.md §5.5 + notifications §8.7.1). Apply with: python -m server.db.apply_sql server/db/schema.sql "$DSN"
+-- Tiger Cloud services have TimescaleDB enabled. Toolkit hyperfunctions are included on Tiger Cloud;
+-- if a function is missing, run the second line.
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;
+
+CREATE TABLE therapists (
+  id    text PRIMARY KEY,
+  name  text NOT NULL,
+  phone text                                  -- E.164, e.g. +17135550100
+);
+
+CREATE TABLE patients (
+  id                       text PRIMARY KEY,
+  name                     text NOT NULL,
+  age                      int,
+  height_cm                real,
+  mass_kg                  real,
+  affected_side            text CHECK (affected_side IN ('left','right','none')),
+  condition                text,
+  therapist_id             text REFERENCES therapists(id),
+  emergency_contact_name   text,
+  emergency_contact_phone  text,
+  hr_limit                 int DEFAULT 130,
+  simulated                boolean NOT NULL DEFAULT false,
+  created_at               timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE prescriptions (               -- versioned: never UPDATE a row, insert a new version
+  id             bigserial PRIMARY KEY,
+  patient_id     text NOT NULL REFERENCES patients(id),
+  exercise_id    text NOT NULL,
+  version        int  NOT NULL,
+  sets           int  NOT NULL,
+  reps           int  NOT NULL,
+  targets        jsonb NOT NULL DEFAULT '{}',   -- e.g. {"knee_deg": 90}
+  limits         jsonb NOT NULL DEFAULT '{}',   -- e.g. {"min_reps": 8, "max_rest_s": 120}
+  rule_overrides jsonb NOT NULL DEFAULT '{}',
+  active         boolean NOT NULL DEFAULT true,
+  created_by     text NOT NULL,                 -- therapist id or 'proposal:<id>'
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (patient_id, exercise_id, version)
+);
+
+CREATE TABLE calibrations (
+  id          bigserial PRIMARY KEY,
+  patient_id  text REFERENCES patients(id),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  extrinsics  jsonb,
+  errors      jsonb
+);
+
+CREATE TABLE sessions (                     -- note: started_at/ended_at, because "end" is a reserved word
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  patient_id  text NOT NULL REFERENCES patients(id),
+  exercise_id text NOT NULL,
+  started_at  timestamptz NOT NULL,
+  ended_at    timestamptz,
+  reps_done   int,
+  pain_pre    smallint,
+  pain_post   smallint,
+  effort      smallint,
+  note        text,
+  shared      boolean NOT NULL DEFAULT false,
+  ai_summary  text,
+  ai_note     text,                         -- always shown as "AI draft — review before use"
+  simulated   boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE reps (
+  session_id  uuid NOT NULL REFERENCES sessions(id),
+  rep         int  NOT NULL,
+  set_no      smallint,
+  started_at  timestamptz,
+  ended_at    timestamptz,
+  peak_angle  real, rom real, hold_s real,
+  asym_avg    real, asym_max real,
+  smoothness  real, quality real,
+  flags       text[],
+  PRIMARY KEY (session_id, rep)
+);
+
+CREATE TABLE pose_frames (
+  time         timestamptz NOT NULL,
+  patient_id   text NOT NULL,
+  session_id   uuid NOT NULL,
+  exercise_id  text NOT NULL,
+  set_no       smallint,
+  knee_l real, knee_r real, hip_l real, hip_r real,
+  trunk_lean real, trunk_side real, pelvis_rot real, knee_ratio real,
+  com_x real, com_y real, com_z real,
+  load_l_pct real,                          -- % of body weight on the LEFT leg (50 = even)
+  heel_l_pct real, heel_r_pct real,
+  confidence real,
+  landmarks real[]                          -- 33 joints × 3 = 99 values (may be NULL for most simulated rows)
+);
+
+CREATE TABLE heart_rate   (time timestamptz NOT NULL, patient_id text, session_id uuid, bpm smallint);
+CREATE TABLE wrist_motion (time timestamptz NOT NULL, session_id uuid,
+                           quat_w real, quat_x real, quat_y real, quat_z real, rotation_deg real);
+CREATE TABLE form_events  (time timestamptz NOT NULL, patient_id text, session_id uuid,
+                           rep int, rule_id text, severity text, duration_s real);
+CREATE TABLE alerts       (time timestamptz NOT NULL, alert_id uuid NOT NULL, patient_id text,
+                           session_id uuid, kind text, step text, channel text, payload jsonb);
+
+CREATE TABLE memory_events (
+  id           bigserial PRIMARY KEY,
+  patient_id   text NOT NULL REFERENCES patients(id),
+  time         timestamptz NOT NULL DEFAULT now(),
+  kind         text NOT NULL,               -- depth_gain | asymmetry_worse | pain | missed_days | compensation
+  message      text NOT NULL,
+  evidence     jsonb NOT NULL,
+  dedupe_key   text UNIQUE,                 -- e.g. 'maya:depth_gain:2026-W41' so it isn't re-written every 15 min
+  agent        text NOT NULL DEFAULT 'insight',
+  acknowledged boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE plan_proposals (
+  id          bigserial PRIMARY KEY,
+  patient_id  text NOT NULL REFERENCES patients(id),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  agent       text NOT NULL,
+  rationale   text NOT NULL,
+  evidence    jsonb NOT NULL,
+  change      jsonb NOT NULL,               -- e.g. {"exercise_id":"squat","rest_days_between":1,"add":"weight_shift_drill"}
+  status      text NOT NULL DEFAULT 'pending'
+              CHECK (status IN ('pending','approved','edited','dismissed')),
+  decided_by  text,
+  decided_at  timestamptz
+);
+
+CREATE TABLE notifications (
+  id           bigserial PRIMARY KEY,
+  time         timestamptz NOT NULL DEFAULT now(),
+  therapist_id text NOT NULL REFERENCES therapists(id),
+  patient_id   text REFERENCES patients(id),
+  kind         text NOT NULL,     -- alert | call_update | insight | proposal | milestone | coach | data_guard
+  severity     text NOT NULL CHECK (severity IN ('urgent','high','normal','low')),
+  title        text NOT NULL,
+  body         text,
+  link         text,              -- e.g. /dashboard#/replay/<session>?t=<ts>, /dashboard#/proposals/<id>
+  source_table text, source_id text,
+  dedupe_key   text UNIQUE,       -- e.g. 'alert:<alert_id>:escalated' → never notify twice
+  read_at      timestamptz,
+  acked_at     timestamptz,
+  acked_by     text
+);
+CREATE INDEX ON notifications (therapist_id, id DESC);
+CREATE INDEX ON notifications (therapist_id) WHERE read_at IS NULL;
+
+CREATE TABLE agent_actions (time timestamptz NOT NULL DEFAULT now(), agent text, action text,
+                            patient_id text, session_id uuid, detail jsonb);
+CREATE TABLE ai_calls      (time timestamptz NOT NULL DEFAULT now(), agent text, model text,
+                            ms int, ok boolean, cached boolean, error text);
+CREATE TABLE data_checks   (time timestamptz NOT NULL DEFAULT now(), check_name text,
+                            status text, details jsonb);
+
+-- Hypertables (new by_range syntax). Create them BEFORE inserting data.
+SELECT create_hypertable('pose_frames',  by_range('time', INTERVAL '1 day'));
+SELECT create_hypertable('form_events',  by_range('time', INTERVAL '7 days'));
+SELECT create_hypertable('alerts',       by_range('time', INTERVAL '7 days'));
+SELECT create_hypertable('heart_rate',   by_range('time', INTERVAL '1 day'));
+SELECT create_hypertable('wrist_motion', by_range('time', INTERVAL '1 day'));
+
+CREATE INDEX ON pose_frames (session_id, time DESC);
+CREATE INDEX ON pose_frames (patient_id, time DESC);
+CREATE INDEX ON form_events (patient_id, time DESC);
+CREATE INDEX ON alerts (alert_id, time DESC);
+
+-- Columnstore settings (2.18+ names). This only sets HOW chunks compress; it doesn't compress anything yet.
+ALTER TABLE pose_frames SET (
+  timescaledb.enable_columnstore,
+  timescaledb.segmentby = 'patient_id, session_id',
+  timescaledb.orderby   = 'time'
+);

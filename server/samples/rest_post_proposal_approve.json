@@ -1,0 +1,54 @@
+{
+  "proposal": {
+    "id": 1,
+    "patient_id": "maya",
+    "created_at": "2026-10-10T21:22:15.305211Z",
+    "agent": "copilot",
+    "rationale": "Maya Ellis's squat depth rose from 61.3\u00b0 to 85.3\u00b0 while load on the affected leg fell from 47.9% to 36.8% over the last 21 days, a compensation pattern. Pain after back-to-back days averaged 6/10. Suggest a rest day between squat days and a weight-shift drill.",
+    "evidence": {
+      "sql": [
+        "WITH w AS (SELECT v.patient_id, p.name, p.affected_side, v.day, v.p95_knee, v.affected_load_pct, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day) AS first_n, ROW_NUMBER() OVER (PARTITION BY v.patient_id ORDER BY v.day DESC) AS last_n, COUNT(*) OVER (PARTITION BY v.patient_id) AS days FROM progress_v AS v JOIN patients AS p ON p.id = v.patient_id WHERE v.exercise_id = 'squat' AND v.affected_load_pct IS NOT NULL AND v.day >= CAST((CURRENT_TIMESTAMP AT TIME ZONE 'America/Chicago') AS DATE) - 21) SELECT patient_id, name, affected_side, MAX(days) AS days, ROUND(CAST(AVG(p95_knee) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS depth_from, ROUND(CAST(AVG(p95_knee) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS depth_to, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE first_n <= 3) AS DECIMAL), 1) AS load_from, ROUND(CAST(AVG(affected_load_pct) FILTER(WHERE last_n <= 3) AS DECIMAL), 1) AS load_to, ROUND(CAST((AVG(affected_load_pct) FILTER(WHERE first_n <= 3) - AVG(affected_load_pct) FILTER(WHERE last_n <= 3)) AS DECIMAL), 1) AS load_drop FROM w WHERE days >= 6 GROUP BY patient_id, name, affected_side HAVING AVG(p95_knee) FILTER(WHERE last_n <= 3) - AVG(p95_knee) FILTER(WHERE first_n <= 3) > 5 AND AVG(affected_load_pct) FILTER(WHERE first_n <= 3) - AVG(affected_load_pct) FILTER(WHERE last_n <= 3) > 2 ORDER BY load_drop DESC NULLS LAST LIMIT 200"
+      ],
+      "items": [
+        "progress_v: p95_knee 61.3 \u2192 85.3, affected_load_pct 47.9 \u2192 36.8",
+        "sessions.pain_post after a training day: 6"
+      ]
+    },
+    "change": {
+      "add": [
+        "weight_shift_drill"
+      ],
+      "exercise_id": "squat",
+      "rest_days_between": 1
+    },
+    "status": "approved",
+    "decided_by": "okafor",
+    "decided_at": "2026-10-10T21:22:15.321669Z"
+  },
+  "prescription": {
+    "id": 46,
+    "patient_id": "maya",
+    "exercise_id": "squat",
+    "version": 2,
+    "sets": 3,
+    "reps": 10,
+    "targets": {
+      "add": [
+        "weight_shift_drill"
+      ],
+      "knee_deg": 90,
+      "rest_days_between": 1,
+      "sessions_per_week": 5
+    },
+    "limits": {
+      "max_reps": 15,
+      "min_reps": 8,
+      "max_rest_s": 120,
+      "min_rest_s": 30
+    },
+    "rule_overrides": {},
+    "active": true,
+    "created_by": "proposal:1",
+    "created_at": "2026-10-10T21:22:15.322440Z"
+  }
+}

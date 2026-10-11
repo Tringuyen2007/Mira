@@ -1,0 +1,30 @@
+{
+ "candidates": [
+  {
+   "content": {
+    "parts": [
+     {
+      "text": "Hello Maya, get ready to crush those 12 squats!",
+      "thought_signature": "EmAKXgFpFH0TGYNmEL2Rd0Z0htbzlQa_uSM2emzIzkjolnpwQPMCIBr5ZvR-Xg9p73vEkh6w-XlolILMOXEzu27BIkccCk2TTWcSSvaC5W0eReZmvBTsQ0dmovNbyRN3vi8="
+     }
+    ],
+    "role": "model"
+   },
+   "finish_reason": "STOP",
+   "index": 0
+  }
+ ],
+ "model_version": "gemini-3.5-flash-lite",
+ "response_id": "Sp3KaonwHqaez7IP2aeR0A0",
+ "usage_metadata": {
+  "candidates_token_count": 13,
+  "prompt_token_count": 30,
+  "prompt_tokens_details": [
+   {
+    "modality": "TEXT",
+    "token_count": 30
+   }
+  ],
+  "total_token_count": 43
+ }
+}

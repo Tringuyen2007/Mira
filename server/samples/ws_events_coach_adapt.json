@@ -1,0 +1,7 @@
+{
+  "type": "coach_adapt",
+  "action": "adjust_next_set",
+  "detail": {"reps_requested": 6, "reps_applied": 8, "rest_s_requested": 150, "rest_s_applied": 120},
+  "t": 1791662259.706,
+  "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"
+}

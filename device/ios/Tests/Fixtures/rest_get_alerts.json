@@ -1,0 +1,40 @@
+{
+  "alerts": [
+    {
+      "alert_id": "a1825878-8f95-456b-8458-d4533db46e06",
+      "patient_id": "maya",
+      "session_id": "0590e71e-b7a4-4add-ab11-c14a27b7a1d6",
+      "kind": "fall",
+      "started_at": "2026-10-10T20:31:46.261925Z",
+      "steps": [
+        {
+          "time": "2026-10-10T20:31:46.261925Z",
+          "step": "detected",
+          "channel": "device",
+          "payload": {
+            "drop_m": 0.9
+          }
+        },
+        {
+          "time": "2026-10-10T20:32:01.267457Z",
+          "step": "checked_in",
+          "channel": "device",
+          "payload": {
+            "responded": false
+          }
+        },
+        {
+          "time": "2026-10-10T20:32:16.267943Z",
+          "step": "escalated",
+          "channel": "call",
+          "payload": {
+            "call_id": "call_123"
+          }
+        }
+      ],
+      "last_step": "escalated",
+      "updated_at": "2026-10-10T20:32:16.267943Z",
+      "open": true
+    }
+  ]
+}

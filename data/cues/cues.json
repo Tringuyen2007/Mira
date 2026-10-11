@@ -1,0 +1,256 @@
+{
+ "set_start": [
+  {
+   "text": "Nice and slow. Let's begin.",
+   "file": "set_start_1.mp3"
+  },
+  {
+   "text": "Here we go, nice and easy.",
+   "file": "set_start_2.mp3"
+  },
+  {
+   "text": "Let's start. Take it slow.",
+   "file": "set_start_3.mp3"
+  }
+ ],
+ "knees_out": [
+  {
+   "text": "Push your knees out over your toes.",
+   "file": "knees_out_1.mp3"
+  },
+  {
+   "text": "Knees out, over your toes.",
+   "file": "knees_out_2.mp3"
+  },
+  {
+   "text": "Keep those knees pushed out.",
+   "file": "knees_out_3.mp3"
+  }
+ ],
+ "knee_cave_l": [
+  {
+   "text": "Push your left knee out.",
+   "file": "knee_cave_l_1.mp3"
+  },
+  {
+   "text": "Left knee out a little.",
+   "file": "knee_cave_l_2.mp3"
+  },
+  {
+   "text": "Watch your left knee, push it out.",
+   "file": "knee_cave_l_3.mp3"
+  }
+ ],
+ "knee_cave_r": [
+  {
+   "text": "Push your right knee out.",
+   "file": "knee_cave_r_1.mp3"
+  },
+  {
+   "text": "Right knee out a little.",
+   "file": "knee_cave_r_2.mp3"
+  },
+  {
+   "text": "Watch your right knee, push it out.",
+   "file": "knee_cave_r_3.mp3"
+  }
+ ],
+ "trunk_lean": [
+  {
+   "text": "Keep your chest up.",
+   "file": "trunk_lean_1.mp3"
+  },
+  {
+   "text": "Chest up, nice and tall.",
+   "file": "trunk_lean_2.mp3"
+  },
+  {
+   "text": "Lift your chest a little.",
+   "file": "trunk_lean_3.mp3"
+  }
+ ],
+ "depth_more": [
+  {
+   "text": "A little deeper if it feels okay.",
+   "file": "depth_more_1.mp3"
+  },
+  {
+   "text": "Try going a bit lower.",
+   "file": "depth_more_2.mp3"
+  },
+  {
+   "text": "Sink a little lower if comfortable.",
+   "file": "depth_more_3.mp3"
+  }
+ ],
+ "slow_down": [
+  {
+   "text": "Slow it down a little.",
+   "file": "slow_down_1.mp3"
+  },
+  {
+   "text": "Nice and slow now.",
+   "file": "slow_down_2.mp3"
+  },
+  {
+   "text": "Take your time with each one.",
+   "file": "slow_down_3.mp3"
+  }
+ ],
+ "good_rep": [
+  {
+   "text": "Nice one!",
+   "file": "good_rep_1.mp3"
+  },
+  {
+   "text": "That was a good one.",
+   "file": "good_rep_2.mp3"
+  },
+  {
+   "text": "Great form on that rep.",
+   "file": "good_rep_3.mp3"
+  }
+ ],
+ "encouragement": [
+  {
+   "text": "You're doing great.",
+   "file": "encouragement_1.mp3"
+  },
+  {
+   "text": "Keep it up, nice work.",
+   "file": "encouragement_2.mp3"
+  },
+  {
+   "text": "Looking strong, keep going.",
+   "file": "encouragement_3.mp3"
+  }
+ ],
+ "countdown_3": [
+  {
+   "text": "Three.",
+   "file": "countdown_3_1.mp3"
+  }
+ ],
+ "countdown_2": [
+  {
+   "text": "Two.",
+   "file": "countdown_2_1.mp3"
+  }
+ ],
+ "countdown_1": [
+  {
+   "text": "One.",
+   "file": "countdown_1_1.mp3"
+  }
+ ],
+ "rest": [
+  {
+   "text": "Rest now and breathe.",
+   "file": "rest_1.mp3"
+  },
+  {
+   "text": "Take a breather.",
+   "file": "rest_2.mp3"
+  },
+  {
+   "text": "Good time to rest and breathe.",
+   "file": "rest_3.mp3"
+  }
+ ],
+ "set_done": [
+  {
+   "text": "Set done, well done!",
+   "file": "set_done_1.mp3"
+  },
+  {
+   "text": "That's the set. Nice work!",
+   "file": "set_done_2.mp3"
+  },
+  {
+   "text": "All done with this set. Great job!",
+   "file": "set_done_3.mp3"
+  }
+ ],
+ "pause": [
+  {
+   "text": "Okay, we're paused.",
+   "file": "pause_1.mp3"
+  },
+  {
+   "text": "Pausing for now.",
+   "file": "pause_2.mp3"
+  },
+  {
+   "text": "Taking a pause. Rest easy.",
+   "file": "pause_3.mp3"
+  }
+ ],
+ "resume": [
+  {
+   "text": "Okay, let's keep going.",
+   "file": "resume_1.mp3"
+  },
+  {
+   "text": "Back to it, nice and easy.",
+   "file": "resume_2.mp3"
+  },
+  {
+   "text": "Resuming now.",
+   "file": "resume_3.mp3"
+  }
+ ],
+ "fatigue": [
+  {
+   "text": "You seem tired. Take it easy.",
+   "file": "fatigue_1.mp3"
+  },
+  {
+   "text": "Go easy, no rush at all.",
+   "file": "fatigue_2.mp3"
+  },
+  {
+   "text": "Let's slow down and take it easy.",
+   "file": "fatigue_3.mp3"
+  }
+ ],
+ "rest_extended": [
+  {
+   "text": "Let's take a longer rest.",
+   "file": "rest_extended_1.mp3"
+  },
+  {
+   "text": "Take a little extra rest now.",
+   "file": "rest_extended_2.mp3"
+  },
+  {
+   "text": "Rest a bit longer before the next set.",
+   "file": "rest_extended_3.mp3"
+  }
+ ],
+ "greeting_generic": [
+  {
+   "text": "Hi there! Thumbs up when you're ready.",
+   "file": "greeting_generic_1.mp3"
+  },
+  {
+   "text": "Hello! Raise your hand when you're ready.",
+   "file": "greeting_generic_2.mp3"
+  },
+  {
+   "text": "Welcome back! Thumbs up to begin.",
+   "file": "greeting_generic_3.mp3"
+  }
+ ],
+ "check_in": [
+  {
+   "text": "Are you okay? Give me a thumbs up or raise your hand.",
+   "file": "check_in_1.mp3"
+  }
+ ],
+ "im_ok_thanks": [
+  {
+   "text": "Thanks for letting me know you're okay.",
+   "file": "im_ok_thanks_1.mp3"
+  }
+ ]
+}

@@ -1,0 +1,58 @@
+{
+  "notifications": [
+    {
+      "id": 3,
+      "time": 1791667045.422167,
+      "kind": "proposal",
+      "severity": "normal",
+      "therapist_id": "okafor",
+      "patient_id": "maya",
+      "title": "New plan-change proposal for Maya.",
+      "body": null,
+      "link": "/dashboard#/proposals/7",
+      "source_table": "plan_proposals",
+      "source_id": "7",
+      "dedupe_key": "proposal:7:created",
+      "read_at": null,
+      "acked_at": null,
+      "acked_by": null,
+      "push": false
+    },
+    {
+      "id": 2,
+      "time": 1791667045.421996,
+      "kind": "milestone",
+      "severity": "low",
+      "therapist_id": "okafor",
+      "patient_id": "maya",
+      "title": "Maya hit her 90\u00b0 squat goal.",
+      "body": null,
+      "link": "/dashboard#/replay/fea67dbd-f43f-4803-85d5-5e205100a69b",
+      "source_table": null,
+      "source_id": null,
+      "dedupe_key": "milestone:maya:squat_90",
+      "read_at": null,
+      "acked_at": null,
+      "acked_by": null,
+      "push": true
+    },
+    {
+      "id": 1,
+      "time": 1791667045.421938,
+      "kind": "alert",
+      "severity": "urgent",
+      "therapist_id": "okafor",
+      "patient_id": "maya",
+      "title": "No response from Maya. Calling the emergency contact.",
+      "body": null,
+      "link": "/dashboard#/replay/fea67dbd-f43f-4803-85d5-5e205100a69b?t=1791664159.239",
+      "source_table": "alerts",
+      "source_id": "31c3430d-b341-4be4-ac3a-da4682bf71cb",
+      "dedupe_key": "alert:31c3430d-b341-4be4-ac3a-da4682bf71cb:escalated",
+      "read_at": null,
+      "acked_at": null,
+      "acked_by": null,
+      "push": true
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "uptime_s": 7.3,
+  "hub": {
+    "clients": {
+      "pose": 1,
+      "live": 1,
+      "events": 1,
+      "notifications": 0
+    },
+    "published": {
+      "pose": 169,
+      "live": 67,
+      "events": 11,
+      "notifications": 0
+    },
+    "dropped": {
+      "pose": 0,
+      "live": 0,
+      "events": 0,
+      "notifications": 0
+    },
+    "pose_throttled": 34,
+    "slow_disconnects": 0
+  },
+  "bridge": {
+    "source": "mock",
+    "mode": "thread",
+    "running": true,
+    "fps": 30.0,
+    "frames_total": 203,
+    "events_total": 11,
+    "seq_gaps": 0,
+    "dropped": 0,
+    "engine_restarts": 0,
+    "ring_frames": 203,
+    "ring_span_s": 6.73,
+    "subscriber_errors": 0,
+    "event_loop_lag_ms": {
+      "p50": 1.0,
+      "p95": 2.0,
+      "max": 2.0,
+      "samples": 66
+    }
+  },
+  "db": {
+    "available": true,
+    "writer": {
+      "frames_per_s": 25.4,
+      "written_total": 486,
+      "dropped": 0,
+      "skipped": 54,
+      "queue_depth": 0,
+      "connected": true,
+      "errors": 0,
+      "last_copy_ms": 7.6
+    },
+    "total_rows": 900486,
+    "compression": {
+      "total_chunks": 76,
+      "compressed_chunks": 74,
+      "before_bytes": 347611136,
+      "after_bytes": 127000576,
+      "ratio": 2.74
+    },
+    "aggregate_query_ms": 1.71,
+    "raw_query_ms": 69.82,
+    "rows_by_origin": {
+      "simulated": 900000,
+      "live": 486
+    },
+    "data_checks": [
+      {
+        "time": "2026-10-10T20:27:27.495964Z",
+        "check_name": "compress_verified",
+        "status": "ok",
+        "details": {
+          "rows": 6000,
+          "chunk": "_timescaledb_internal._hyper_1_49_chunk",
+          "bytes_after": 1392640,
+          "fingerprint": "721499700bc1b3cf2184c651ceebfbb0",
+          "range_start": "2026-10-08 00:00:00+00:00",
+          "bytes_before": 2899968,
+          "fingerprint_match": true
+        }
+      },
+      {
+        "time": "2026-10-10T20:27:19.029023Z",
+        "check_name": "raw_vs_summary",
+        "status": "ok",
+        "details": {
+          "examples": [],
+          "mismatches": 0,
+          "window_days": 82,
+          "days_compared": 74,
+          "rows_compared": 799,
+          "summaries_without_raw": 0
+        }
+      }
+    ],
+    "ai_calls_today": {
+      "calls": 0,
+      "cached": 0,
+      "failures": 0,
+      "cached_pct": null
+    },
+    "refreshed_at": 1791664348.0
+  }
+}

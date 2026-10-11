@@ -1,0 +1,138 @@
+{
+  "seed": 42,
+  "days": 75,
+  "patients": 15,
+  "generated_for_local_date": "2026-10-10",
+  "notes": "Relative to generated_for_local_date. Knee = flexion degrees (p95_knee). Day = America/Chicago.",
+  "compensating_ranking": {
+    "definition": "patients whose p95 squat depth rose > 5 deg while affected-leg load fell > 2 pts over the last 21 days (mean of first vs last 3 squat days), ranked by load drop",
+    "ranking": [
+      {
+        "patient_id": "maya",
+        "name": "Maya Ellis",
+        "affected_side": "right",
+        "affected_load_from": 47.9,
+        "affected_load_to": 36.8,
+        "drop_pts": 11.1,
+        "depth_from": 61.3,
+        "depth_to": 85.5
+      },
+      {
+        "patient_id": "p02",
+        "name": "Daniel Reyes",
+        "affected_side": "left",
+        "affected_load_from": 48.0,
+        "affected_load_to": 41.9,
+        "drop_pts": 6.1,
+        "depth_from": 70.1,
+        "depth_to": 81.7
+      },
+      {
+        "patient_id": "p03",
+        "name": "Grace Kim",
+        "affected_side": "right",
+        "affected_load_from": 48.8,
+        "affected_load_to": 44.8,
+        "drop_pts": 4.0,
+        "depth_from": 64.8,
+        "depth_to": 72.1
+      }
+    ]
+  },
+  "missed_3plus_last_14_days": {
+    "definition": "scheduled training days (5/week, prescriptions.targets.sessions_per_week) in the last 14 days (yesterday back) with no session",
+    "patients": [
+      {
+        "patient_id": "p04",
+        "name": "Samuel Ortiz",
+        "missed": 3,
+        "sessions_last_14_days": 7
+      },
+      {
+        "patient_id": "p05",
+        "name": "Helen Brooks",
+        "missed": 4,
+        "sessions_last_14_days": 6
+      },
+      {
+        "patient_id": "p12",
+        "name": "Marcus Bell",
+        "missed": 3,
+        "sessions_last_14_days": 7
+      }
+    ],
+    "all": {
+      "maya": {
+        "missed": 2,
+        "sessions_last_14_days": 8
+      },
+      "p02": {
+        "missed": 1,
+        "sessions_last_14_days": 9
+      },
+      "p03": {
+        "missed": 0,
+        "sessions_last_14_days": 10
+      },
+      "p04": {
+        "missed": 3,
+        "sessions_last_14_days": 7
+      },
+      "p05": {
+        "missed": 4,
+        "sessions_last_14_days": 6
+      },
+      "p06": {
+        "missed": 1,
+        "sessions_last_14_days": 9
+      },
+      "p07": {
+        "missed": 1,
+        "sessions_last_14_days": 9
+      },
+      "p08": {
+        "missed": 1,
+        "sessions_last_14_days": 9
+      },
+      "p09": {
+        "missed": 0,
+        "sessions_last_14_days": 10
+      },
+      "p10": {
+        "missed": 0,
+        "sessions_last_14_days": 10
+      },
+      "p11": {
+        "missed": 0,
+        "sessions_last_14_days": 10
+      },
+      "p12": {
+        "missed": 3,
+        "sessions_last_14_days": 7
+      },
+      "p13": {
+        "missed": 1,
+        "sessions_last_14_days": 9
+      },
+      "p14": {
+        "missed": 0,
+        "sessions_last_14_days": 10
+      }
+    }
+  },
+  "single_session_patient": {
+    "patient_id": "p15",
+    "name": "Chloe Martin",
+    "sessions": 1
+  },
+  "maya_depth": {
+    "from": 61.3,
+    "to": 85.5,
+    "window_days": 21,
+    "definition": "progress_v.p95_knee for squat, mean of the first vs last 3 session days in the window"
+  },
+  "maya_right_load_this_week": {
+    "value": 37.2,
+    "definition": "mean of daily progress_v.affected_load_pct (100 - tw_load_left) for squat over the last 7 local days including today (no session today in the simulated data)"
+  }
+}

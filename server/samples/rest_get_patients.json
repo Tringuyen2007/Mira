@@ -1,0 +1,37 @@
+{
+  "patients": [
+    {
+      "id": "p06",
+      "name": "Arjun Mehta",
+      "age": 52,
+      "affected_side": "right",
+      "condition": "right meniscus repair",
+      "therapist_id": "okafor",
+      "simulated": true,
+      "last_session_at": "2026-10-09T15:13:00Z",
+      "sessions_7d": 5
+    },
+    {
+      "id": "p15",
+      "name": "Chloe Martin",
+      "age": 48,
+      "affected_side": "right",
+      "condition": "right ankle fracture",
+      "therapist_id": "okafor",
+      "simulated": true,
+      "last_session_at": "2026-10-07T15:17:00Z",
+      "sessions_7d": 1
+    },
+    {
+      "id": "p02",
+      "name": "Daniel Reyes",
+      "age": 58,
+      "affected_side": "left",
+      "condition": "left ACL reconstruction",
+      "therapist_id": "okafor",
+      "simulated": true,
+      "last_session_at": "2026-10-09T23:15:00Z",
+      "sessions_7d": 4
+    }
+  ]
+}

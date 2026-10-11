@@ -1,0 +1,13 @@
+{
+  "type": "rep",
+  "index": 5,
+  "set": 1,
+  "exercise_id": "squat",
+  "quality": "fix_form",
+  "flags": [
+    "knee_cave_l"
+  ],
+  "seq": 569,
+  "t": 1791662218.872,
+  "session_id": "f9b98da1-7896-49bf-b4d7-8a785febc6c1"
+}

@@ -1,17 +1,34 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# environments / caches
+.venv/
+__pycache__/
+*.pyc
+*.py[cod]
+venv/
+.pytest_cache/
 .DS_Store
+
+# runtime output
+logs/
+data/ai_cache/
+data/recordings/
+
+# local tooling
+.superpowers/
+
+# Xcode / iOS build output
 DerivedData/
 *.xcuserstate
 xcuserdata/
-
-# Build output and exports
 .build/
+.swiftpm/
 build/
 *.xcarchive
 *.ipa
 *.dSYM
 *.dSYM.zip
 
-# Local environment configuration
-.env
-.env.*
-!.env.example
