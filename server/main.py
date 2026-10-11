@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
+from server.agents.clock_sync import ClockSync
 from server.agents.haptics import HapticCoach
 from server.agents.recovery import RecoveryAgent
 from server.agents.rotation import RotationCoach
@@ -220,6 +221,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rotation = RotationCoach(hub, bridge, sessions)
     bridge.subscribe_events(rotation.on_event)
     bridge.subscribe_frames(rotation.on_frame)
+
+    clock_sync = ClockSync(hub, sessions)
+    state.clock_sync = clock_sync  # main._on_watch_sync hands it the sync-wave windows
+    bridge.subscribe_frames(clock_sync.on_frame)
+    if wrist_recorder is not None:
+        wrist_recorder.offset_s = clock_sync.offset_s  # wrist rows on the server clock once locked
 
     ender = SessionEnder(sessions, bridge.live, auto_stop_after_last_set=_last_set_enabled(cfg))
     bridge.subscribe_events(ender.on_event)
