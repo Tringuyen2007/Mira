@@ -98,3 +98,47 @@ def test_uncalibrated_falls_back_to_first_person():
     cams["B"].R = None
     sel = PersonSelector(cams, MAT).select(0.0, [a], [b])
     assert sel.a is a and sel.b is b
+
+
+def _giant(cam, x=0.0, z=0.0, scale=2.0):
+    """A skeleton standing at (x, z) in one view, blown up about its feet: far too tall for a person
+    (head well above the image), like MediaPipe fitting a body to a hand over the lens."""
+    p = pose_from_points(cam, standing_skeleton() + [x, 0.0, z])
+    feet = p.lm2d[[27, 28, 29, 30]].mean(axis=0)
+    p.lm2d = feet + (p.lm2d - feet) * scale
+    return p
+
+
+def test_plausible_height():
+    from vision.select import plausible_height
+
+    cams = _cams()
+    a, _ = _person(cams, 0.0, 0.0)
+    assert plausible_height(a, cams["A"], floor_position(a, cams["A"]))
+    giant = _giant(cams["A"])
+    assert not plausible_height(giant, cams["A"], floor_position(giant, cams["A"]))
+    tiny = _giant(cams["A"], scale=0.4)
+    assert not plausible_height(tiny, cams["A"], floor_position(tiny, cams["A"]))
+    headless = pose_from_points(cams["A"], standing_skeleton())
+    headless.vis[[0, 2, 5]] = 0.0
+    assert not plausible_height(headless, cams["A"], floor_position(headless, cams["A"]))
+
+
+def test_oversized_junk_on_the_mat_in_one_camera_loses_to_the_real_person():
+    cams = _cams()
+    junk = _giant(cams["A"])  # its feet put it at the mat centre, but it is ~3 m tall
+    assert mat_distance(MAT, floor_position(junk, cams["A"])) == 0.0
+    _, b = _person(cams, 0.0, -0.8)  # the real person, at the mat edge, seen only by B
+    sel = PersonSelector(cams, MAT).select(0.0, [junk], [b])
+    assert sel.a is None and sel.b is b and sel.dropped == "A"
+    assert sel.ignored["A"] == [junk]
+
+
+def test_single_camera_fallback_never_switches_to_a_closer_person():
+    cams = _cams()
+    sel = PersonSelector(cams, MAT)
+    tr_a, tr_b = _person(cams, 0.0, 0.6)
+    assert sel.select(0.0, [tr_a], [tr_b]).a is tr_a
+    ch_a, _ = _person(cams, 0.0, -0.05)  # plausible person 0.55 m closer to the centre, only in A
+    picks = [sel.select(0.1 * k, [ch_a, tr_a], []).a for k in range(1, 20)]  # nobody pairs: fallback
+    assert all(p is tr_a for p in picks)

@@ -5,8 +5,10 @@ their hip, shoulder and ankle midpoints triangulate consistently (midpoints don'
 MediaPipe's left/right flips). Of the consistent pairs standing within `vicinity_m` of the mat, the
 one closest to the mat centre wins, with stickiness so tracking doesn't flicker between people. If
 no pair agrees (a hand over one lens, the wrong person in one view), each camera's people are placed
-on the floor through their feet, and the camera that puts someone at the mat is kept; the other is
-dropped for that frame and the pipeline's single-camera fallback takes over.
+on the floor through their feet, and the camera that puts someone of human size at the mat is kept;
+the other is dropped for that frame and the pipeline's single-camera fallback takes over. One camera
+can't confirm a newcomer, so in that fallback the tracked person is never swapped for one nearer the
+centre.
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ import cv2
 import numpy as np
 
 from vision.config import CameraConfig, MatConfig
-from vision.frames import cam_center
+from vision.frames import cam_center, mat_to_cam
 from vision.triangulate import triangulate_points
 from vision.types import PoseResult
 
@@ -24,6 +26,7 @@ FOOT_HEIGHTS = {27: 0.08, 28: 0.08, 29: 0.04, 30: 0.04}  # ankles, heels: metres
 MIDPOINTS = ((23, 24), (11, 12), (27, 28))  # hips first: its triangulation is the person's position
 MIN_VIS = 0.5
 STICK_M = 0.5  # the tracked person is the candidate within this distance of where they were
+HEIGHT_RANGE_M = (0.8, 2.4)  # implied feet-to-head height of a person seen by one camera (squats allowed)
 
 
 @dataclass
@@ -62,6 +65,26 @@ def floor_position(person: PoseResult, cam: CameraConfig) -> np.ndarray | None:
     return np.median(np.array(hits)[:, [0, 2]], axis=0)
 
 
+def plausible_height(person: PoseResult, cam: CameraConfig, xz) -> bool:
+    """Is the feet-to-head span the size of a person standing at floor point xz? Rejects a skeleton
+    fitted to a hand over the lens whose feet happen to land on the mat. Needs a visible head."""
+    feet = [j for j in FOOT_HEIGHTS if person.vis[j] >= MIN_VIS]
+    heads = []
+    if person.vis[0] >= MIN_VIS:
+        heads.append(person.lm2d[0])
+    if person.vis[2] >= MIN_VIS and person.vis[5] >= MIN_VIS:
+        heads.append((person.lm2d[2] + person.lm2d[5]) / 2)
+    if not feet or not heads:
+        return False
+    head = min(heads, key=lambda h: h[1])  # the higher one in the image
+    px = float(np.linalg.norm(head - person.lm2d[feet].mean(axis=0)))
+    depth = float(mat_to_cam(np.array([xz[0], 0.0, xz[1]]), cam.R, cam.t)[2])
+    if not np.isfinite(px) or depth <= 0:
+        return False
+    height = px * depth / float(cam.K[1, 1])
+    return HEIGHT_RANGE_M[0] <= height <= HEIGHT_RANGE_M[1]
+
+
 def _midpoints(p: PoseResult) -> dict[int, np.ndarray]:
     return {k: (p.lm2d[i] + p.lm2d[j]) / 2 for k, (i, j) in enumerate(MIDPOINTS)
             if p.vis[i] >= MIN_VIS and p.vis[j] >= MIN_VIS}
@@ -86,6 +109,15 @@ class PersonSelector:
         self.vicinity_m, self.pair_px, self.switch_m, self.switch_s = vicinity_m, pair_px, switch_m, switch_s
         self._pos: np.ndarray | None = None
         self._challenge_since: float | None = None
+
+    def _choose_single(self, cands: list[tuple[np.ndarray, object]]):
+        """One camera only: keep the tracked person (the candidate nearest where they were); with no
+        track, the one nearest the mat centre. Never switch to someone just for being nearer the centre."""
+        ref = self._pos if self._pos is not None else np.zeros(2)
+        pick = int(np.argmin([float(np.linalg.norm(xz - ref)) for xz, _ in cands]))
+        self._challenge_since = None
+        self._pos = np.asarray(cands[pick][0], float)
+        return cands[pick]
 
     def _choose(self, t: float, cands: list[tuple[np.ndarray, object]]):
         """cands: (xz, key). Closest to the mat centre, but stick with the current person unless another
@@ -136,12 +168,13 @@ class PersonSelector:
             for name, people, cam in (("A", a_people, ca), ("B", b_people, cb)):
                 for k, p in enumerate(people):
                     xz = floor_position(p, cam)
-                    if xz is not None and mat_distance(self.mat, xz) <= self.vicinity_m:
+                    if (xz is not None and mat_distance(self.mat, xz) <= self.vicinity_m
+                            and plausible_height(p, cam, xz)):
                         singles.append((xz, (name, k)))
             if not singles:
                 self._pos, self._challenge_since = None, None
                 return Selection(None, None, {"A": a_people, "B": b_people})
-            xz, (name, k) = self._choose(t, singles)
+            xz, (name, k) = self._choose_single(singles)
             a = a_people[k] if name == "A" else None
             b = b_people[k] if name == "B" else None
             other = b_people if name == "A" else a_people
