@@ -97,3 +97,13 @@ Rig testing showed jittery feet in the skeleton while standing still or squattin
 - Debug view: a white square under an anchored foot in the top view. `checks`: "feet anchored while standing" (% of 3D frames with both feet anchored, target ≥ 80).
 - Tests that compared unsmoothed joints to the triangulation exclude the foot joints (27–32).
 - Success: a planted foot with 1 cm raw jitter varies < 2 mm; a 30 cm step releases within 2 frames of moving more than 5 cm, with no frame-to-frame jump ≥ 6 cm; feet stay anchored through a squat while the hips drop.
+
+## Addendum: after the final review
+
+- **No vertical snap:** a planted foot is held at its raw average position. Snapping the lowest point to the mat surface silently corrected floor errors of up to 12 cm and stretched the shin.
+- **Checks measure unanchored joints:** `checks` builds its pipelines with `anchor_feet=False`; "feet anchored while standing" comes from a shadow `FootAnchor` run over those joints. A new check "foot height above mat" (median lowest heel/toe height, −1 to 5 cm) exposes a floor offset.
+- **Single-camera fallback is size-checked and never challenges:** a single-camera candidate must imply a plausible human height (0.8–2.4 m, from its pixel height and floor depth), and the fallback never switches to a closer-to-centre person; it keeps the candidate nearest the current track.
+- **Track memory:** the last track position is kept for 1 s after the last pick, so one missed frame doesn't reset stickiness.
+- **Pose cost on the rig:** `checks` reports "pose time A/B" (≤ 45 ms); `--poses N` on `checks` and `debug_view` compares people counts.
+- **calib_refine:** when each camera sees exactly one person, those are used directly for refinement (no cross-camera agreement required), so a calibration that is off can still be refined.
+- Hip fallback for single-camera placement stays out (most frames it would recover were junk on the real recording).
