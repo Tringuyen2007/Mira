@@ -74,6 +74,23 @@ and arms and legs use two-bone IK to reach the tracked wrists/ankles (so anchore
 bending toward the tracked elbows/knees. It re-measures after 5 s with nobody tracked, or on b. Only
 the 3D view is rigged; FrameResult.joints, recordings and checks stay as measured.
 
+### Body rules (3D view)
+
+On top of the fixed proportions, the 3D person follows simple anatomy (`vision/constraints.py`):
+knees and elbows bend one way only (0–150°), thighs don't swing far behind the body, elbows and
+hands are pushed out of the torso, and feet point within 35° of the body's facing, stay put when
+MediaPipe is unsure of the heel/toe, lock while anchored, lie flat near the floor and turn at most
+240°/s. Joints MediaPipe is unsure about lean on the previous frame. Press **c** in the 3D view to
+compare with the rules off. Measure any recording with:
+
+```
+python -m vision.avatar_eval data/recordings/<file>.jsonl [--plain]
+```
+
+It prints arm-in-torso %, hinge violations %, foot yaw change per frame (median/p95/max), bone-length
+std, how far confidently tracked wrists/ankles are from the detections, and ms per frame.
+It replays with the calibration saved in each recording; `--current-calibration` uses `config/cameras.yaml` instead.
+
 ### Who gets tracked
 
 Only the person on the mat or within 1 m of it. Each camera's pose detection searches only the area
