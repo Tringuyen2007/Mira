@@ -45,3 +45,7 @@ Apple Watch events: `ws_events_client_watch_button_resume`, `ws_events_client_wr
 `ws_events_rotation_set`, `ws_events_sync_progress`, `ws_events_limits_changed` and `ws_events_watch_features_changed`
 are the server events. These are emitted with `Hub.emit`, so on the wire `seq` may be absent — treat it as optional.
 `watch_sync` is never broadcast back.
+
+LCD trainer voice: `ws_events_say` is the `say` event `server/agents/trainer_voice.py` (`TrainerVoice`) emits with
+`Hub.emit` for each scripted line (a counted good rep here): `id` is the cue-library id, `text` the caption and
+`audio_url` the pre-recorded MP3 (null when the line has no audio yet). `seq` is absent.

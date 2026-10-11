@@ -7,6 +7,18 @@ function text(root, id, value) {
   if (el && el.textContent !== value) el.textContent = value;
 }
 
+// Like text(), but re-triggers the CSS `pop` animation when the displayed value changes (a class toggle with a
+// forced reflow in between restarts the keyframes; an unchanged value never re-pops on the 250 ms redraw).
+function popText(root, id, value) {
+  const el = $(root, id);
+  if (!el || el.textContent === value) return;
+  el.textContent = value;
+  if (value === "") return;
+  el.classList.remove("pop");
+  void el.offsetWidth;
+  el.classList.add("pop");
+}
+
 function show(root, id, visible) {
   const el = $(root, id);
   if (el) el.hidden = !visible;
@@ -21,6 +33,10 @@ export function render(root, vm, mascot) {
   stage.dataset.screen = vm.screen;
   stage.dataset.mood = vm.mood ?? "none";
   stage.dataset.offline = String(vm.offline);
+  stage.dataset.speaking = String(vm.speaking === true);
+  stage.dataset.rep = String(vm.rep);
+  stage.dataset.tick = vm.countdown === null ? "" : String(vm.countdown);
+  stage.dataset.call = vm.callStatus ? vm.callStatus.phase : "none";
 
   const img = $(root, "mira");
   if (vm.mood) {
@@ -37,7 +53,7 @@ export function render(root, vm, mascot) {
   text(root, "exercise-name", vm.exerciseName);
   text(root, "dose", spaced(vm.dose));
 
-  text(root, "rep-now", String(vm.rep));
+  popText(root, "rep-now", String(vm.rep));
   text(root, "rep-target", vm.repsTarget === null ? "" : ` / ${vm.repsTarget}`);
   text(root, "rep-label", vm.exerciseName ? `REPS${DOT}${vm.exerciseName.toUpperCase()}` : "REPS");
 
@@ -49,7 +65,7 @@ export function render(root, vm, mascot) {
     text(root, "balance-status", vm.balance.ok ? "EVEN WEIGHT" : "Even out your weight");
   }
 
-  text(root, "countdown-n", vm.countdown === null ? "" : String(vm.countdown));
+  popText(root, "countdown-n", vm.countdown === null ? "" : String(vm.countdown));
   const progress = vm.countdown === null ? 0 : Math.min(1, Math.max(0, (4 - vm.countdown) / 3));
   stage.style.setProperty("--countdown-progress", String(progress));
   text(root, "countdown-eyebrow", vm.setLabel ? `GET READY${DOT}${vm.setLabel}` : "GET READY");
@@ -72,6 +88,11 @@ export function render(root, vm, mascot) {
   }
 
   text(root, "fall-name", vm.firstName || "the patient");
+  // The live call narration (alert.message from the server) under the gestures; textContent only.
+  text(root, "call-status", vm.callStatus ? vm.callStatus.message : "");
+  show(root, "call-status", vm.callStatus !== null && vm.callStatus.message !== "");
+  const call = root.querySelector(".call");
+  if (call) call.classList.toggle("call-emphasis", vm.show911 === true || vm.callStatus?.phase === "failed");
   text(root, "caption-text", vm.caption);
   show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== ""
     && vm.captionsOn !== false);

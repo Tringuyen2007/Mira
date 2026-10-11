@@ -26,6 +26,7 @@ log = get_logger("retell")
 
 CONTACT = "emergency_contact"
 THERAPIST = "therapist"
+TEST = "test"
 RETRY_DELAYS_S = (0.0, 2.0, 5.0)
 POLL_INTERVAL_S = 3.0
 MAX_POLLS = 80  # ~4 min at 3 s
@@ -182,6 +183,52 @@ class RetellNotifier:
             log.warning("Retell call placed", extra={**extra, "call_id": call_id})
         self._by_call[call_id] = inc
         return call_id
+
+    # ---- test calls (POST /me/test-alert) -----------------------------------------------------------
+
+    async def test_call(self, to_number: str, *, patient_first_name: str | None, contact_name: str | None) -> str | None:
+        """Place one short test call ("this is a test, no action needed") to `to_number`. Same create path and
+        agent as a real escalation, so it also verifies the number, credentials and caller ID. At most one per
+        contact per hour (the ledger keys on the hour bucket, and Retell dedupes on the same idempotency key).
+        No watcher, no live updates. Returns the call id, or None when refused or Retell rejected it."""
+        name = patient_first_name or "the patient"
+        alert_id = f"test_{int(time.time() // 3600)}_{''.join(ch for ch in to_number if ch.isdigit())[-10:]}"
+        if not self.ledger.may_call(alert_id, TEST):
+            log.warning("test call refused: already placed this hour", extra={"to": mask_phone(to_number)})
+            return None
+        self.ledger.record(alert_id, TEST)
+        situation = (f"This is only a test of Mira's alert system for {name}. {name} is fine and no action is "
+                     "needed. You can hang up now.")
+        variables = {
+            "contact_name": contact_name or "there",
+            "patient_first_name": name,
+            "patient_phone": f"the number you have for {name}",
+            "situation": situation,
+            "situation_short": f"This is only a test of Mira's alert system for {name}. No action is needed.",
+            "current_status": "This is a test. Nothing has happened.",
+            "context": "This call was started from the Mira app's test-alert button.",
+            "limits": "This is a test call; Mira is not reporting a real event.",
+            "therapist_name": "the care team",
+            "therapist_phone": "not available",
+        }
+        extra = {"alert_id": alert_id, "role": TEST, "to": mask_phone(to_number)}
+        if self.mode == "log_only":
+            call_id = f"sim_{alert_id}"
+            log.warning("CALLS_DISABLED: simulating Retell test call (no real call placed)", extra={
+                **extra, "call_id": call_id, "retell_llm_dynamic_variables": variables})
+            return call_id
+        for attempt, delay in enumerate(self.retry_delays_s):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                call_id = await asyncio.to_thread(self._create_call, alert_id, TEST, to_number, variables, "")
+            except Exception as exc:  # noqa: BLE001 - a test call must never raise into the API
+                log.warning("test call create_phone_call failed", extra={**extra, "attempt": attempt,
+                                                                         "error": repr(exc)})
+                continue
+            log.warning("Retell test call placed", extra={**extra, "call_id": call_id})
+            return call_id
+        return None
 
     def _client(self) -> Any:
         if self._client_obj is None:

@@ -45,3 +45,47 @@ relay must independently require that same bearer token for WHEP playback; a URL
 Raw video is live-only by default and must not be recorded. A patient-facing replay/share feature requires an
 explicit retention period, patient consent, encrypted recording storage, and a separate patient-scoped media
 grant before it is enabled.
+
+## Falls and safety events
+
+The server's Safety Guardian reads these messages on `/ws/vision` exactly as it reads them from the built-in
+sources. Every message carries the active `session_id` and an epoch-second `t` (within an hour of server time;
+otherwise the server clock is used). Messages sent before `command start`, or for another `session_id`, are dropped.
+
+```json
+{"type": "fall", "stage": "confirmed", "session_id": "<sid>", "t": 1791729381.4,
+ "drop_m": 0.9, "peak_down_speed_mps": 2.1, "posture": "lying", "on_mat": true}
+```
+
+Required: `type`, `stage` (only `"confirmed"` opens an incident; send `"possible"` for your own debugging, the
+server ignores it), `session_id`, `t`. Optional and spoken on the call when present: `drop_m` (metres),
+`peak_down_speed_mps`, `posture` (`standing` | `sitting` | `lying` | `unknown`), `on_mat`.
+
+```json
+{"type": "fall_status", "session_id": "<sid>", "t": 1791729383.4,
+ "posture": "lying", "moving": false, "still_s": 2.0, "on_mat": true}
+```
+
+Send one every ~2 s while the person is down. `moving` (bool) and `posture` drive the live updates the caller
+hears ("Maya is still not moving", "she is sitting up now"); `still_s` is seconds without movement.
+
+```json
+{"type": "gesture", "name": "thumbs_up", "session_id": "<sid>", "t": 1791729390.1}
+```
+
+`name` is `thumbs_up` or `raised_hand`. This is the patient's answer to the check-in.
+
+```json
+{"type": "hr", "bpm": 111, "session_id": "<sid>", "t": 1791729383.4}
+```
+
+Optional; the Apple Watch sends heart rate too. It is quoted before/after the fall on the call.
+
+**What happens after `fall`:** the server opens one incident for the session, plays the check-in cue on the LCD
+and watch, and waits `CHECKIN_TIMEOUT_S` (15 s on the demo servers) for a `gesture` (or the phone's "I'm OK").
+A response in time closes the incident with no call. No response: the server builds the situation from the
+incident data and places a Retell call to the emergency contact, keeps polling the call, and pushes your
+`fall_status` changes into it as live updates until the contact hangs up. One call per incident, however many
+`fall` events arrive; voicemail or no answer falls back to one therapist call. When the incident closes, the agent
+receives `{"type": "incident_closed"}` on this socket. Real calls require `CALLS_DISABLED=0` on the server
+(`GET /health` → `"calls": "live"`); with `CALLS_DISABLED=1` the same path runs a log-only simulator.

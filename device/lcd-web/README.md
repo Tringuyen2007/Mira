@@ -5,8 +5,13 @@ frames), showing demo content instead of the live session. No server data, no lo
 can be shared and edited freely.
 
 Served by the Mira server at `/lcd-web/` (on Vultr: http://45.76.255.253:8000/lcd-web/). Open a screen
-directly with `?screen=greeting|gesture|countdown|cue|rep|paused|setDone|fall|idle`; use the buttons, the
-←/→ keys, or Play to cycle through them.
+directly with `?screen=greeting|gesture|countdown|cue|rep|paused|setDone|fall|calling|idle`; use the buttons,
+the ←/→ keys, or Play to cycle through them. `calling` is the fall screen after the alert escalates: the live
+call status line ("No response from Maya. Calling the emergency contact.") and the emphasised CALL 911 pill.
+
+There is no audio. Whenever a screen with a caption is shown, Mira "speaks" for 2 s (`data-speaking="true"` on
+`#stage`): the mascot bobs and the caption's voice bars move, as on the kiosk while a `say` line plays. The
+gesture screen waves, and the rep / countdown numbers pop when they change between screens.
 
 ## Editing
 

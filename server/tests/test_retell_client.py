@@ -313,3 +313,47 @@ async def test_a_crashing_watcher_still_closes_the_incident(monkeypatch: pytest.
     await guardian.on_event(fall(sid))
     await until(lambda: "closed" in steps, timeout=3)
     assert sid not in guardian.incidents
+
+
+# ---- test calls (POST /me/test-alert) -------------------------------------------------------------------------
+
+async def test_test_call_places_one_short_call_and_dedupes_within_the_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_env(monkeypatch)
+    calls = FakeCalls({})
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), retry_delays_s=(0,))
+    assert notifier.mode == "live"
+    call_id = await notifier.test_call(CONTACT_PHONE, patient_first_name="Maya", contact_name="Eric")
+    assert call_id == "call_1" and len(calls.created) == 1
+    created = calls.created[0]
+    assert created["from_number"] == "+15550100999" and created["to_number"] == CONTACT_PHONE
+    assert created["override_agent_id"] == "agent_test" and created["timeout"] == 10.0
+    assert created["metadata"]["role"] == "test"
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", created["idempotency_key"])
+    variables = created["retell_llm_dynamic_variables"]
+    assert all(isinstance(v, str) and v for v in variables.values())
+    assert variables["contact_name"] == "Eric" and variables["patient_first_name"] == "Maya"
+    assert "test" in variables["situation"].lower() and "no action" in variables["situation"].lower()
+    assert set(variables) >= {"contact_name", "patient_first_name", "patient_phone", "situation", "situation_short",
+                              "current_status", "context", "limits", "therapist_name", "therapist_phone"}
+    # Same contact again within the hour: the ledger refuses; nothing is created, no watcher is started.
+    assert await notifier.test_call(CONTACT_PHONE, patient_first_name="Maya", contact_name="Eric") is None
+    assert len(calls.created) == 1 and notifier.stats()["watching"] == 0
+    await notifier.stop()
+
+
+async def test_test_call_returns_none_when_retell_rejects_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    live_env(monkeypatch)
+    calls = FakeCalls({}, fail_creates=5)
+    notifier = RetellNotifier(client=SimpleNamespace(call=calls), retry_delays_s=(0, 0))
+    assert await notifier.test_call(CONTACT_PHONE, patient_first_name="Maya", contact_name="Eric") is None
+    assert calls.created == []
+    await notifier.stop()
+
+
+async def test_test_call_in_log_only_mode_simulates_and_creates_nothing() -> None:
+    notifier = RetellNotifier()
+    assert notifier.mode == "log_only"
+    call_id = await notifier.test_call(CONTACT_PHONE, patient_first_name="Maya", contact_name=None)
+    assert call_id is not None and call_id.startswith("sim_test_")
+    assert notifier.stats()["watching"] == 0
+    await notifier.stop()

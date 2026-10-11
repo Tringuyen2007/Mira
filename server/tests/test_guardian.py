@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -112,6 +113,9 @@ async def test_fall_checks_in_and_a_response_resolves_and_cancels_the_timer(setu
     inc = guardian.incidents[sid]
     assert inc.state == "checking_in" and step_names(steps) == ["detected", "checked_in"]
     assert hub.of("cue")[0]["id"] == "check_in" and hub.of("haptic")[0]["pattern"] == "check_in"
+    audio_url = hub.of("cue")[0]["audio_url"]
+    assert audio_url.startswith("/audio/")
+    assert (Path(__file__).resolve().parents[2] / "data" / "cues" / "mp3" / audio_url.removeprefix("/audio/")).is_file()
     alert = hub.of("alert")[-1]
     assert alert["step"] == "checked_in" and alert["alert_id"] == inc.alert_id and alert["show_call_911"] is False
     assert alert["message"] == "Fall detected. Asking Maya if she is OK."

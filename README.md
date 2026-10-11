@@ -179,7 +179,7 @@ Then configure the Retell agent from code (free, never places a call):
 ```
 
 It must end with `N/N fields verified` and prints `RETELL_AGENT_ID` and `RETELL_AGENT_VERSION` for `.env`.
-Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" below).
+Real calls are on when `CALLS_DISABLED=0` (the `.env.example` default; see "Retell live calls: ON" below).
 
 ## Kill switches
 
@@ -189,8 +189,8 @@ Real calls stay off until `CALLS_DISABLED=0` (see "Retell live calls: BLOCKED" b
 | `GEMINI_MODE` | `fake` | `fake` = no Gemini requests; `replay` = saved answers from `data/ai_cache/`; `live` = real requests |
 | `GEMINI_DISABLED=1` | 0 | every AI caller uses its fallback (templates, SQL-only notes, cached demo answer) |
 | `ELEVEN_DISABLED=1` | 0 | no ElevenLabs requests; captions and already-recorded MP3s only |
-| `CALLS_DISABLED=1` | 1 | log-only call simulator, no Retell calls, no credits spent |
-| `ALLOW_TEST_CALLS=1` | 0 | `POST /me/test-alert` may place a real call (still needs `CALLS_DISABLED=0` too; else it only logs a notification) |
+| `CALLS_DISABLED=1` | 1 in code, **0 in `.env`** | log-only call simulator, no Retell calls, no credits spent. `GET /health` → `calls` shows `live` or `log_only` |
+| `ALLOW_TEST_CALLS=1` | 0 in code, **1 in `.env`** | `POST /me/test-alert` places one short real test call per contact per hour (needs `CALLS_DISABLED=0` too; else it only logs a notification) |
 | `INSIGHT_ENABLED=0` | 1 | no scheduled Insight agent / milestones |
 | `DATA_GUARD_ENABLED=0` | 1 | no scheduled Data Guard checks |
 | `COPILOT_CACHED_DEMO=1` | 0 | the demo question is answered from `data/copilot_demo.json` (stage backup) |
@@ -446,6 +446,13 @@ no new engine API — but it depends on these specifically:
 - `rep {index, set, quality}`.
 - frames with `load_l_pct` (drives the L/R balance bar) and `hr` when available (drives the heart-rate chip;
   hidden when null).
+
+The server adds one event of its own for the LCD's trainer voice (`server/agents/trainer_voice.py`, no AI, pre-recorded
+lines only):
+
+| `type` | Fields | Sent by | Meaning |
+|---|---|---|---|
+| `say` | `session_id`, `t`, `id`, `text`, `audio_url` | TrainerVoice | a scripted trainer line for the kiosk to play (`audio_url`, same-origin `/audio/*.mp3`, may be null) and caption (`text`); also becomes `/ws/live` `caption` (sample `ws_events_say.json`) |
 
 ## Engine reverse channel
 
@@ -951,27 +958,46 @@ the live stream (default: all). Without `since_id` there is no replay (load the 
 (`server/samples/ws_notifications_message.json`). A reconnecting dashboard never misses one. Fallback
 when the socket is down: poll `GET /notifications?since_id=` every 10 s.
 
-## Retell live calls: BLOCKED (no spend approved) — exact manual steps to enable
+## Retell live calls: ON
 
-**What is blocked:** placing a real phone call. Every real call spends the existing Retell credit balance
-(about $0.07–0.15 per minute), and the owner has not approved spending it. So `CALLS_DISABLED=1` stays on and the
-log-only simulator stands in for the call; no code change is needed to switch.
+**Normal state (since 2026-10-11):** a confirmed fall with no response within `CHECKIN_TIMEOUT_S` (15 s in
+`.env`) places a real Retell call to the patient's emergency contact, on every server whose `.env` follows
+`.env.example` (`CALLS_DISABLED=0`, `ALLOW_TEST_CALLS=1`). The code default is still off, so the test suite and a bare
+checkout never dial. Every real call spends Retell credit (about $0.07–0.15 per minute); set `CALLS_DISABLED=1`
+to develop against the log-only simulator. `GET /health` reports `"calls": "live"` or `"log_only"`, and
+`tools/deploy_vultr.sh` refuses a deploy whose box comes up `log_only` (pass `ALLOW_LOG_ONLY=1` to override).
+
+Verified live on 2026-10-11: fall → 15 s check-in → call placed in under 1 s → answered → live update
+("still not moving") → hang-up → incident closed. The remote vision agent's fall takes the same path
+(`docs/vision-media-contract.md`, "Falls and safety events"; test `server/tests/test_remote_fall_calls.py`).
+
+**Vultr:** the box keeps its own `/opt/mira/app/.env`. Turn calls on there once:
+
+```bash
+ssh -i ~/.ssh/mira_vultr root@45.76.255.253 '
+  cd /opt/mira/app
+  for kv in CALLS_DISABLED=0 ALLOW_TEST_CALLS=1; do
+    k=${kv%%=*}; grep -q "^$k=" .env && sed -i "s/^$k=.*/$kv/" .env || echo "$kv" >> .env
+  done
+  systemctl restart mira'
+curl -s http://45.76.255.253:8000/health   # "calls": "live"
+```
 
 **Already done (free, no call placed):** the "Mira Safety Caller" agent and its LLM are configured from code
 (`retell_setup --apply`), published as **version 1**, and the Retell number's outbound agent is bound to that
 version. The code paths for a live call (create, poll, live updates, post-call analysis) are covered by tests
 with a fake client.
 
-**To enable, in order:**
+**Checklist for a new number, agent version or server (in order):**
 
-1. Get the owner's approval to spend Retell credits; check the balance in the Retell dashboard (Billing).
+1. Check the Retell credit balance in the Retell dashboard (Billing).
 2. In `.env`: `RETELL_API_KEY`, `RETELL_FROM_NUMBER` (E.164, the bought number), `RETELL_AGENT_ID=agent_...`
    (printed by `retell_setup --apply`) and `RETELL_AGENT_VERSION=1`. If you ever re-run `--apply`, copy the newly
    printed version instead.
 3. Set `DEMO_EMERGENCY_PHONE` to a real phone you own, in E.164 (e.g. `+17135550123`, not `713-555-0123`).
    Optionally `DEMO_THERAPIST_PHONE` (no-answer / voicemail fallback call) and `DEMO_PATIENT_PHONE`. Save the
    Retell number as a contact "Mira Alert" on those phones so it isn't shown as spam.
-4. Set `CALLS_DISABLED=0` (and `CHECKIN_TIMEOUT_S=15` for a shorter wait).
+4. Confirm `CALLS_DISABLED=0` and `CHECKIN_TIMEOUT_S=15` in `.env`.
 5. Start a staged fall, either `MIRA_SOURCE=mock:fall make run` (falls 20 s after start), or `make run` with
    `DEMO_TOOLS_ENABLED=1` and then
    `curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}' localhost:8000/demo/trigger_fall`.
@@ -992,7 +1018,7 @@ with a fake client.
      ```bash
      .venv/bin/python -c "from retell import Retell; from server.config import cfg; c=Retell(api_key=cfg.RETELL_API_KEY).call.retrieve('<call_id>'); print(c.call_status, c.disconnection_reason, getattr(c.call_analysis,'custom_analysis_data',None))"
      ```
-7. Set `CALLS_DISABLED=1` again afterwards.
+7. Leave `CALLS_DISABLED=0`; set it to 1 only while developing without Retell credit.
 
 **Verify** (with a database): the incident's steps, in order, from the `alerts` table:
 
