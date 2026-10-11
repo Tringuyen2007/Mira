@@ -24,7 +24,10 @@ _started_at = time.time()
 
 @router.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "time": round(time.time(), 3)}
+    """Liveness plus the call mode (`live` | `log_only`): one word, not secret, so a deploy can refuse a box whose
+    Retell settings are incomplete without reading its env."""
+    notifier = get_state().notifier
+    return {"status": "ok", "time": round(time.time(), 3), "calls": getattr(notifier, "mode", "log_only")}
 
 
 @router.get("/stats", dependencies=[Depends(require_token)])

@@ -148,8 +148,9 @@ def test_demo_phone_test_alert_never_calls_when_locked(make_client: Callable[...
 
     calls: list[str] = []
 
-    async def fake_call(phone: str) -> None:
+    async def fake_call(phone: str, *, patient_first_name: str | None, contact_name: str | None) -> str:
         calls.append(phone)
+        return "call_fake"
 
     get_state().notifier.test_call = fake_call
     with psycopg.connect(dsn, autocommit=True) as conn:
