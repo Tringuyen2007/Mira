@@ -1,4 +1,21 @@
 import SwiftUI
+import UIKit
+
+/// A temp-file export ready to hand to the system share sheet.
+private struct ExportFile: Identifiable {
+    let url: URL
+    var id: String { url.path }
+}
+
+/// `UIActivityViewController` wrapper; SwiftUI's `ShareLink` needs the item ready
+/// before the view renders, but the export is fetched from the server on tap.
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
@@ -21,15 +38,27 @@ struct SettingsView: View {
             }
             #endif
         }.navigationTitle("").toolbar(.hidden, for: .navigationBar)
+            .task {
+                // Wires local-notification syncing in once per app run; Reminders.swift
+                // (outside the MiraNetworking package) is only reachable from here/the
+                // app target, not from AppState itself.
+                if state.onPreferencesChanged == nil {
+                    state.onPreferencesChanged = { prefs in Task { await Reminders.sync(prefs) } }
+                }
+            }
     }
     private func detail(_ screen: SettingsDetailView.Screen) -> String {
         switch screen {
         case .rerun: preview ? "Last done Oct 1" : "Set up your mat and cameras"
         case .voice: "\(state.preferences.voice) voice · Volume \(Int((state.preferences.volume * 100).rounded()))%"
         case .captions: "\(state.preferences.showCaptions ? "On" : "Off") · \(state.preferences.extraLargeCaptions ? "Extra large" : "Large") text"
-        case .reminders: "Reminders not active yet"
+        case .reminders: state.preferences.dailyReminder ? "Daily at \(reminderTimeLabel)" : "Off"
         default: "No video leaves your home"
         }
+    }
+    private var reminderTimeLabel: String {
+        (Calendar.current.date(from: DateComponents(hour: state.preferences.reminderHour, minute: state.preferences.reminderMinute)) ?? Date())
+            .formatted(date: .omitted, time: .shortened)
     }
 }
 
@@ -47,6 +76,13 @@ struct SettingsDetailView: View {
     @State private var showSetup = false
     @State private var changeTime = false
     @State private var speech = MiraSpeech()
+    @State private var devicePrefsTask: Task<Void, Never>?
+    @State private var exportFile: ExportFile?
+    @State private var exportError: String?
+    @State private var isExporting = false
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
     var body: some View {
         MiraPage {
             if screen == .delete { Image("MascotWorried").resizable().scaledToFit().frame(width: 120, height: 134).accessibilityHidden(true) }
@@ -55,6 +91,13 @@ struct SettingsDetailView: View {
         }.navigationTitle("").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Text("Settings").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft) } }
             .sheet(isPresented: $showSetup) { NavigationStack { SetupView(initialStep: camerasOnly ? 1 : 0) } }
+            .sheet(item: $exportFile) { file in ActivityShareSheet(items: [file.url]) }
+            .alert("Delete everything?", isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete everything", role: .destructive) { Task { await deleteEverything() } }
+            } message: {
+                Text("This removes your sessions, scores and notes from Mira's server and this phone. It cannot be undone.")
+            }
             .onDisappear { speech.stop() }
     }
     private var rerun: some View {
@@ -86,8 +129,11 @@ struct SettingsDetailView: View {
             HStack { FigmaIcon(screen: "voice", slot: "imgIconLow"); MiraVolumeSlider(value: $state.preferences.volume); FigmaIcon(screen: "voice", slot: "imgIconSpeaker") }
             Text("Speaking speed").font(MiraUI.font(20, "SemiBold")).padding(.top, 12)
             MiraSegments(labels: ["Slower", "Normal"], selection: Binding(get: { state.preferences.slowerSpeech ? "Slower" : "Normal" }, set: { state.preferences.slowerSpeech = $0 == "Slower" }))
-            Text("These choices apply to voice previews on this phone. Mira device voice sync is not available yet.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
+            Text("Applies to your phone and Mira's screen volume. Mira's device uses the clinic voice.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
         }
+        .onChange(of: state.preferences.voice) { _, _ in syncDevicePrefs() }
+        .onChange(of: state.preferences.volume) { _, _ in syncDevicePrefs() }
+        .onChange(of: state.preferences.slowerSpeech) { _, _ in syncDevicePrefs() }
     }
     private var captions: some View {
         @Bindable var state = state
@@ -96,7 +142,7 @@ struct SettingsDetailView: View {
                 VStack(spacing: 14) {
                     settingToggle("Show captions", detail: "Words appear for everything Mira says", value: $state.preferences.showCaptions)
                     Divider()
-                    settingToggle("On Mira’s screen too", detail: "Shown under the mascot", value: $state.preferences.deviceCaptions).disabled(!preview)
+                    settingToggle("On Mira’s screen too", detail: "Shown under the mascot", value: $state.preferences.deviceCaptions)
                 }
             }
             Text("Text size").font(MiraUI.font(20, "SemiBold"))
@@ -111,8 +157,8 @@ struct SettingsDetailView: View {
                     else { Text("Captions are off").font(MiraUI.font(18)).foregroundStyle(MiraUI.soft) }
                 }
             }
-            if !preview { Text("Mira device captions will be available when device settings are connected.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft) }
         }
+        .onChange(of: state.preferences.deviceCaptions) { _, _ in syncDevicePrefs() }
     }
     private func captionSize(_ label: String, large: Bool) -> some View {
         let selected = state.preferences.extraLargeCaptions == large
@@ -123,7 +169,7 @@ struct SettingsDetailView: View {
     private var reminders: some View {
         @Bindable var state = state
         return VStack(alignment: .leading, spacing: 22) {
-            MiraCard { settingToggle("Daily reminder", detail: "Mira reminds you to do your exercises", value: $state.preferences.dailyReminder).disabled(!preview) }
+            MiraCard { settingToggle("Daily reminder", detail: "Mira reminds you to do your exercises", value: $state.preferences.dailyReminder) }
             MiraField(label: "Time") {
                 if changeTime {
                     DatePicker("Reminder time", selection: Binding(get: { Calendar.current.date(from: DateComponents(hour: state.preferences.reminderHour, minute: state.preferences.reminderMinute)) ?? Date() }, set: { let parts = Calendar.current.dateComponents([.hour, .minute], from: $0); state.preferences.reminderHour = parts.hour ?? 9; state.preferences.reminderMinute = parts.minute ?? 0 }), displayedComponents: .hourAndMinute).labelsHidden()
@@ -144,11 +190,11 @@ struct SettingsDetailView: View {
             MiraCard {
                 VStack(spacing: 16) {
                     settingToggle("Phone notification", value: $state.preferences.phoneReminder)
-                    Divider(); settingToggle("Mira says hello", detail: "Mira speaks from the mat", value: $state.preferences.deviceReminder)
-                    Divider(); settingToggle("Apple Watch tap", value: $state.preferences.watchReminder)
-                }.disabled(!preview)
+                    Divider(); settingToggle("Mira says hello", detail: "Coming with the next Mira device update.", value: $state.preferences.deviceReminder).disabled(true)
+                    Divider(); settingToggle("Apple Watch tap", value: $state.preferences.watchReminder).disabled(!state.watchPaired)
+                }
             }
-            Text("Reminders are not active yet. Your time and day choices are saved on this phone for later setup.").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft)
+            Text("Reminders arrive on this phone at the time you choose.").font(MiraUI.font(16)).foregroundStyle(MiraUI.soft)
         }
     }
     private var timeLabel: String { (Calendar.current.date(from: DateComponents(hour: state.preferences.reminderHour, minute: state.preferences.reminderMinute)) ?? Date()).formatted(date: .omitted, time: .shortened) }
@@ -158,19 +204,68 @@ struct SettingsDetailView: View {
                 HStack(spacing: 12) { FigmaIcon(screen: "privacy", slot: "imgIconLock").padding(10).background(.white, in: Circle()); Text("No video leaves your home").font(MiraUI.font(20, "SemiBold")) }
                 Text("Mira is designed to share skeleton numbers: angles, reps, balance and your ratings. Never your video.").font(MiraUI.font(18)).foregroundStyle(MiraUI.soft)
             }.padding(20).background(MiraUI.mist, in: RoundedRectangle(cornerRadius: 28))
-            MiraCard { Toggle(isOn: .constant(preview)) { VStack(alignment: .leading, spacing: 6) { Text(preview ? "Share with Dr. Lee" : "Share with your therapist").font(MiraUI.font(20, "SemiBold")); Text("After each session").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) } }.tint(MiraUI.accent).disabled(true) }
-            MiraButton(title: "Download my data", secondary: true, icon: ("privacy", "imgIconDownload")) {}.disabled(true)
+            MiraCard { Toggle(isOn: preview ? .constant(true) : shareBinding) { VStack(alignment: .leading, spacing: 6) { Text(preview ? "Share with Dr. Lee" : "Share with your therapist").font(MiraUI.font(20, "SemiBold")); Text("After each session").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft) } }.tint(MiraUI.accent).disabled(preview) }
+            MiraButton(title: isExporting ? "Preparing…" : "Download my data", secondary: true, icon: ("privacy", "imgIconDownload")) { Task { await downloadData() } }.disabled(isExporting)
+            if let exportError { Text(exportError).font(MiraUI.font(15)).foregroundStyle(.red) }
             NavigationLink { SettingsDetailView(screen: .delete) } label: { HStack { FigmaIcon(screen: "privacy", slot: "imgIconTrash"); Text("Delete all my data").font(MiraUI.font(19, "SemiBold")) }.foregroundStyle(MiraUI.ink).frame(maxWidth: .infinity, minHeight: 64).background(.white, in: Capsule()).overlay { Capsule().stroke(MiraUI.border, lineWidth: 1.5) } }.buttonStyle(.plain)
-            Text("Sharing, full data export and server deletion are not available yet.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+    private var shareBinding: Binding<Bool> {
+        Binding(get: { state.me?.patient.shareByDefault ?? false },
+                set: { newValue in Task { try? await state.updateMe(MeUpdate(shareByDefault: newValue)) } })
+    }
+    private func downloadData() async {
+        guard let client = state.apiClient else { exportError = APIError.invalidAddress.localizedDescription; return }
+        isExporting = true
+        exportError = nil
+        defer { isExporting = false }
+        do {
+            let data = try await client.exportMe()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("mira-export-\(formatter.string(from: Date())).json")
+            try data.write(to: url, options: .atomic)
+            exportFile = ExportFile(url: url)
+        } catch {
+            exportError = error.localizedDescription
         }
     }
     private var delete: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Deleting your data would remove sessions, scores, notes and replays from this phone and Mira. It cannot be undone.").font(MiraUI.font(20)).lineSpacing(4)
-            Text("Your therapist keeps the reports you already sent.").font(MiraUI.font(18)).foregroundStyle(MiraUI.soft)
-            Text("Deletion is not available yet. Your saved information will remain on this phone.").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+            Text("Deleting removes your sessions, scores and notes from Mira's server and this phone.").font(MiraUI.font(20)).lineSpacing(4)
+            Text("Your therapist keeps the plan they prescribed.").font(MiraUI.font(18)).foregroundStyle(MiraUI.soft)
+            if let deleteError { Text(deleteError).font(MiraUI.font(16)).foregroundStyle(.red) }
             MiraButton(title: "Keep my data") { dismiss() }.padding(.top, 80)
-            MiraButton(title: "Delete everything", secondary: true, icon: ("delete", "imgIconWarn")) {}.disabled(true)
+            MiraButton(title: isDeleting ? "Deleting…" : "Delete everything", secondary: true, icon: ("delete", "imgIconWarn")) { showDeleteConfirm = true }.disabled(isDeleting)
+        }
+    }
+    private func deleteEverything() async {
+        guard let client = state.apiClient else { deleteError = APIError.invalidAddress.localizedDescription; return }
+        isDeleting = true
+        deleteError = nil
+        defer { isDeleting = false }
+        do {
+            try await client.deleteMe()
+            state.wipeLocalData()
+            dismiss()
+        } catch {
+            deleteError = error.localizedDescription
+        }
+    }
+    /// Debounces voice/caption edits before pushing them to `/me`'s `device_prefs`.
+    private func syncDevicePrefs() {
+        devicePrefsTask?.cancel()
+        let prefs = state.preferences
+        devicePrefsTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            let body = MeUpdate(devicePrefs: .object([
+                "voice": .string(prefs.voice),
+                "volume": .number(prefs.volume),
+                "slower_speech": .bool(prefs.slowerSpeech),
+                "captions": .bool(prefs.deviceCaptions)
+            ]))
+            try? await state.updateMe(body)
         }
     }
     private func settingToggle(_ title: String, detail: String? = nil, value: Binding<Bool>) -> some View {

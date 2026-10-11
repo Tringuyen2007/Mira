@@ -18,6 +18,18 @@ final class PatientStore {
     private(set) var lastError: String?
     private(set) var isRefreshing = false
 
+    /// Clears every cached record, e.g. after `DELETE /me` wipes this phone's copy
+    /// of the patient's data.
+    func reset() {
+        me = nil
+        care = nil
+        sessions = []
+        progress = [:]
+        milestones = []
+        messages = []
+        lastError = nil
+    }
+
     /// Fetches everything the Care/Progress screens need, in parallel. Each piece's
     /// failure is recorded independently; a failure in one does not discard the
     /// others' successful results (so a flaky `/me/care` doesn't blank the sessions

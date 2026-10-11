@@ -134,6 +134,32 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(state.me?.patient.firstName, "Maya")
         XCTAssertEqual(state.store.care?.unreadMessages, 0)
     }
+
+    func testWipeLocalDataForgetsPairingAndClearsLocalState() async {
+        StubProtocol.handler = { _ in (200, #"{"patient_id":"maya","token":"pt_abc123","me":\#(Self.meJSON)}"#) }
+        let store = MemoryTokenStore()
+        let state = draftState(tokenStore: store)
+        _ = await state.pair()
+        XCTAssertTrue(state.isLinked)
+        state.hasCompletedOnboarding = true
+
+        state.wipeLocalData()
+
+        XCTAssertFalse(state.isPaired)
+        XCTAssertNil(state.patientID)
+        XCTAssertNil(store.load())
+        XCTAssertFalse(state.hasCompletedOnboarding)
+        XCTAssertNil(state.me)
+        XCTAssertNil(state.store.me)
+        XCTAssertEqual(state.onboarding, OnboardingDraft())
+        XCTAssertEqual(state.preferences, MiraPreferences())
+        XCTAssertNil(defaults.data(forKey: "onboardingDraft.v1"))
+        XCTAssertNil(defaults.data(forKey: "miraPreferences.v1"))
+        XCTAssertFalse(defaults.bool(forKey: "hasCompletedOnboarding.v2"))
+        XCTAssertNil(defaults.string(forKey: "patientID.v1"))
+        // serverAddress survives a wipe.
+        XCTAssertEqual(state.serverAddress, "http://mira.test:8000")
+    }
 }
 
 extension URLRequest {

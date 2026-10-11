@@ -104,6 +104,26 @@ final class AppState {
     var preferences: MiraPreferences {
         didSet {
             if let data = try? JSONEncoder().encode(preferences) { defaults.set(data, forKey: "miraPreferences.v1") }
+            notifyPreferencesChanged()
+        }
+    }
+
+    /// Set by `MiraApp` on iOS to `{ prefs in Task { await Reminders.sync(prefs) } }`.
+    /// Kept as a closure (rather than importing `Reminders` here) so this file keeps
+    /// building in the macOS `swift test` package, which has no UserNotifications.
+    @ObservationIgnored var onPreferencesChanged: ((MiraPreferences) -> Void)?
+    @ObservationIgnored private var preferencesChangeTask: Task<Void, Never>?
+
+    /// Debounces rapid preference edits (e.g. dragging the volume slider or tapping
+    /// several reminder days) before syncing to local notifications.
+    private func notifyPreferencesChanged() {
+        guard let onPreferencesChanged else { return }
+        preferencesChangeTask?.cancel()
+        let prefs = preferences
+        preferencesChangeTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            onPreferencesChanged(prefs)
         }
     }
     var onboarding: OnboardingDraft {
@@ -142,6 +162,8 @@ final class AppState {
 
     var isPaired: Bool { token != nil }
     var isLinked: Bool { patientID != nil && isPaired }
+    /// Placeholder until Plan 4 wires up real Apple Watch pairing.
+    var watchPaired: Bool { false }
 
     static let demoServerAddress = "http://45.76.255.253:8000"
     private static var defaultServerAddress: String {
@@ -238,6 +260,24 @@ final class AppState {
         if connectionEnabled, let address = try? ServerAddress(serverAddress) {
             liveSession.connect(to: address, token: nil, reset: true)
         }
+    }
+
+    /// After a confirmed `DELETE /me`: forgets the pairing token and every local
+    /// record of this patient, so the app falls back to onboarding. `serverAddress`
+    /// is kept — deleting your data doesn't mean re-typing the clinic's server.
+    func wipeLocalData() {
+        forgetToken()
+        onboarding = OnboardingDraft()
+        preferences = MiraPreferences()
+        hasCompletedOnboarding = false
+        me = nil
+        store.reset()
+        // The property `didSet`s above re-persist the fresh defaults; remove the
+        // keys afterward so a deleted account truly leaves nothing behind.
+        defaults.removeObject(forKey: "onboardingDraft.v1")
+        defaults.removeObject(forKey: "miraPreferences.v1")
+        defaults.removeObject(forKey: "hasCompletedOnboarding.v2")
+        defaults.removeObject(forKey: "patientID.v1")
     }
 
     /// Builds the /pair request from the onboarding draft and preferences.
