@@ -185,3 +185,68 @@ test("a 409 on a proposal decision says 'Already decided' and reloads instead of
   assert.equal(reloaded, 1);
   assert.deepEqual(toasts, [{ kind: "info", text: "Already decided" }]);
 });
+
+// ---- Apple Watch ------------------------------------------------------------------------------------------------
+
+function eventSockets() {
+  const subs = new Set();
+  return {
+    subscribe(_channel, fn) { subs.add(fn); return () => subs.delete(fn); },
+    emit(msg) { for (const fn of subs) fn(msg); },
+  };
+}
+
+test("with the watch capability, a watch exercise can be added from the plan card and is saved with PUT", async () => {
+  const root = document.createElement("div");
+  const calls = [];
+  const ctx = makeCtx({ putPrescription: async (pid, body) => { calls.push([pid, body]); return { prescription: {} }; } });
+  ctx.caps = { has: (p) => p === "/patients/{patient_id}/watch" };
+  const unmount = screen.mount(root, ctx, { params: { pid: "maya" }, query: {} });
+  await flush();
+  assert.match(root.textContent, /Add a watch exercise/);
+  const add = root.querySelectorAll("button").find((b) => b.textContent.startsWith("Add Forearm turns to the plan"));
+  assert.ok(add, "watch quick pick rendered");
+  assert.match(add.textContent, /Watch/);
+  add.dispatch("click");
+  await flush();
+  assert.equal(calls.length, 0, "staged only");
+  assert.ok(root.querySelector(".prescribe__watch-tag"), "Watch tag on the plan row");
+  assert.match(root.textContent, /Turn goal/);
+  root.querySelectorAll("button").find((b) => b.textContent === "Save plan").dispatch("click");
+  await flush();
+  assert.deepEqual(calls.map(([pid, b]) => [pid, b.exercise_id, b.sets, b.reps]), [["maya", "forearm_rotation", 3, 10]]);
+  unmount();
+});
+
+test("without the watch capability there are no watch quick picks", async () => {
+  const root = document.createElement("div");
+  const unmount = screen.mount(root, makeCtx(), { params: { pid: "maya" }, query: {} });
+  await flush();
+  assert.doesNotMatch(root.textContent, /Add a watch exercise/);
+  unmount();
+});
+
+test("after a limit save, the server's limits_changed push shows 'Sent to Maya's watch' (no extra request)", async () => {
+  const root = document.createElement("div");
+  const sockets = eventSockets();
+  let patches = 0;
+  const ctx = makeCtx({ setLimits: async (_pid, { hrLimit }) => {
+    patches += 1;
+    // The server emits limits_changed inside the PATCH handler, i.e. before the response reaches us.
+    sockets.emit({ type: "limits_changed", patient_id: "maya", hr_limit: hrLimit, set_by_name: "Dr. Lee" });
+    return { patient_id: "maya", hr_limit: hrLimit };
+  } });
+  ctx.sockets = sockets;
+  const unmount = screen.mount(root, ctx, { params: { pid: "maya" }, query: {} });
+  await flush();
+  // An unrelated push before any save is ignored.
+  sockets.emit({ type: "limits_changed", patient_id: "maya", hr_limit: 120 });
+  assert.doesNotMatch(root.textContent, /Sent to/);
+  const hrInput = root.querySelectorAll("input").find((i) => i.getAttribute("aria-label") === "Heart rate limit: pause and check in above");
+  hrInput.dispatch("input", { target: { value: "150" } });
+  root.querySelectorAll("button").find((b) => b.textContent === "Save plan").dispatch("click");
+  for (let i = 0; i < 4; i++) await flush();
+  assert.equal(patches, 1);
+  assert.match(root.querySelector(".prescribe__limit-sent").textContent, /Sent to Maya's watch/);
+  unmount();
+});

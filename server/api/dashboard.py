@@ -19,9 +19,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from server.api.db_dep import require_db
 from server.dashboard_triage import Signals, triage
-from server.db import dashboard_queries, dashboard_writes, queries, writes
+from server.db import dashboard_queries, queries, writes
 from server.db.pool import Database
 from server.state import get_state
+from server.watch_limits import apply_hr_limit_change
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -235,11 +236,12 @@ async def set_limits(patient_id: str = Path(pattern=ID_RE, max_length=64), body:
     if patient["therapist_id"] not in (None, body.therapist_id):
         raise HTTPException(status_code=403, detail="this patient belongs to another therapist")
     before = patient["hr_limit"]
-    new_limit = await dashboard_writes.set_hr_limit(db, patient_id, body.hr_limit)
+    new_limit = await writes.set_patient_hr_limit(db, patient_id, body.hr_limit, body.therapist_id)
     if new_limit is None:
         raise HTTPException(status_code=503, detail="database unavailable: heart-rate limit not saved")
     audited = await writes.insert_agent_action(db, "therapist", "hr_limit_set", patient_id,
                                                detail={"from": before, "to": new_limit, "by": body.therapist_id})
     if not audited:
         log.warning("hr_limit_set for %s saved but not audited", patient_id)
+    await apply_hr_limit_change(db, patient, patient_id, body.therapist_id, new_limit)
     return {"patient_id": patient_id, "hr_limit": new_limit}

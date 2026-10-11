@@ -30,3 +30,18 @@ read (so `read_at` is set). `rest_post_me_messages` is the response to the patie
 `POST /me/messages`. `rest_get_patient_milestones` is `GET /patients/maya/milestones` with one
 `memory_events` row of `kind='milestone'` inserted directly. `ws_events_message` is the `message` event a
 therapist's `POST /patients/{id}/messages` emits on the patient's `/ws/events` socket.
+
+Apple Watch (tri-watch, contract `docs/superpowers/plans/2026-10-11-watch-contract.md`): `rest_get_me_watch` is
+`GET /me/watch` (the iPhone's `setup` push to the watch); `rest_post_me_tremor_request` / `rest_post_me_tremor` are
+`POST /me/tremor` (403 `{"detail":"tremor monitoring off"}` while the therapist hasn't enabled it);
+`rest_patch_patient_limits_request` / `rest_patch_patient_limits` are the therapist-page `PATCH /patients/{id}/limits`
+contract (the response file is byte-identical to therapist-page's); `rest_patch_patient_watch_features_request` /
+`rest_patch_patient_watch_features` and `rest_get_patient_watch` are the therapist's watch routes. Files ending in
+`_request` are request bodies; the others are responses.
+
+Apple Watch events: `ws_events_client_watch_button_resume`, `ws_events_client_wrist` (now with `rotation_deg`) and
+`ws_events_client_watch_sync` are what the phone sends for the watch; `ws_events_haptic` shows the new
+`countdown_tick` pattern; `ws_events_breather`, `ws_events_hr_recovery`, `ws_events_rotation_rep`,
+`ws_events_rotation_set`, `ws_events_sync_progress`, `ws_events_limits_changed` and `ws_events_watch_features_changed`
+are the server events. These are emitted with `Hub.emit`, so on the wire `seq` may be absent — treat it as optional.
+`watch_sync` is never broadcast back.

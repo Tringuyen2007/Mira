@@ -27,6 +27,10 @@ COLUMNS = ("time", "patient_id", "session_id", "exercise_id", "set_no", "knee_l"
 COPY_SQL = f"COPY pose_frames ({', '.join(COLUMNS)}) FROM STDIN"
 ANGLES = ("knee_l", "knee_r", "hip_l", "hip_r", "trunk_lean", "trunk_side", "pelvis_rot", "knee_ratio")
 
+WRIST_COLUMNS = ("time", "patient_id", "session_id", "quat_w", "quat_x", "quat_y", "quat_z", "rotation_deg", "accel")
+WRIST_COPY_SQL = f"COPY wrist_motion ({', '.join(WRIST_COLUMNS)}) FROM STDIN"
+WRIST_MAX_QUEUE = 3000  # 5 minutes at 10 Hz
+
 FLUSH_INTERVAL_S = 0.5
 MAX_QUEUE = 9000  # 5 minutes at 30 Hz
 RATE_WINDOW_S = 10.0
@@ -46,10 +50,19 @@ def frame_row(frame: dict[str, Any], patient_id: str) -> tuple[Any, ...]:
     )
 
 
+def wrist_row(msg: dict[str, Any], patient_id: str) -> tuple[Any, ...]:
+    """A sanitised `wrist` event → a wrist_motion row (quat is [w, x, y, z])."""
+    quat = msg.get("quat") or [None, None, None, None]
+    return (datetime.fromtimestamp(float(msg["t"]), UTC), patient_id, msg["session_id"], quat[0], quat[1], quat[2],
+            quat[3], msg.get("rotation_deg"), msg.get("accel"))
+
+
 class FrameWriter:
     def __init__(self, dsn: str, *, patient_provider: Callable[[], str | None] | None = None,
                  max_queue: int = MAX_QUEUE, flush_interval_s: float = FLUSH_INTERVAL_S,
-                 backoff_max_s: float = BACKOFF_MAX_S) -> None:
+                 backoff_max_s: float = BACKOFF_MAX_S, copy_sql: str = COPY_SQL,
+                 row_fn: Callable[[dict[str, Any], str], tuple[Any, ...]] = frame_row,
+                 thread_name: str = "frame-writer") -> None:
         self._dsn = dsn
         self._patient_provider = patient_provider
         self._max_queue = max_queue
@@ -63,6 +76,9 @@ class FrameWriter:
         self._backoff_max = backoff_max_s
         self._retry_at = 0.0
         self._written: deque[tuple[float, int]] = deque()
+        self._copy_sql = copy_sql
+        self._row_fn = row_fn
+        self._thread_name = thread_name
         self.written_total = 0
         self.dropped = 0
         self.skipped = 0  # frames without a session/patient (nothing to attach them to)
@@ -99,7 +115,7 @@ class FrameWriter:
 
     def start(self) -> None:
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="frame-writer", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=self._thread_name, daemon=True)
         self._thread.start()
 
     def stop(self, timeout_s: float = 3.0) -> None:
@@ -154,13 +170,13 @@ class FrameWriter:
         rows = []
         for frame, patient_id in batch:
             try:
-                rows.append(frame_row(frame, patient_id))
+                rows.append(self._row_fn(frame, patient_id))
             except (KeyError, TypeError, ValueError):
                 self.skipped += 1
         try:
             conn = self._connection()
             started = time.perf_counter()
-            with conn.cursor() as cur, cur.copy(COPY_SQL) as copy:
+            with conn.cursor() as cur, cur.copy(self._copy_sql) as copy:
                 for row in rows:
                     copy.write_row(row)
             self.last_copy_ms = round((time.perf_counter() - started) * 1000, 1)

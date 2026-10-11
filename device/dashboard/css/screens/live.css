@@ -163,3 +163,47 @@
 .live__cue-time {
   min-width: 40px;
 }
+
+/* ---------- Apple Watch (breather banner, side card) ---------- */
+
+.live__breather-banner {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-alert);
+  color: var(--color-on-alert);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.live__watch-line {
+  margin-top: var(--space-2);
+}
+
+.live__watch-rotation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-weight: 600;
+}
+
+.live__watch-goal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.live__watch-goal .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.live__watch-goal--reached { color: var(--color-accent-text-small); }
+.live__watch-goal--short { color: var(--color-watch-text); }

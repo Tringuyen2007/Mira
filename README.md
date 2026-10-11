@@ -840,6 +840,66 @@ Watch app"; otherwise it streams into
    the phone is paired and a session is live, the watch mirrors reps/set/exercise and plays the matching
    haptic on `good_rep`/`fix_form`/`set_done`/`check_in`.
 
+### Apple Watch app (tri-watch): server side
+
+Wire contract: `docs/superpowers/plans/2026-10-11-watch-contract.md` (samples in `server/samples/`). The watch still
+talks only to the iPhone; everything below rides the phone's `/ws/events` socket and REST token. The watch app's
+own UI (screens, haptics as felt on-device) is the watch track's own concern — see `device/ios/MiraWatch/` above;
+this section is the server contract it is built against.
+
+- **Tables** (`server/db/migrations/007_watch.sql`, mirrored in `schema.sql`, readable by `copilot_ro`):
+  `hr_recovery`, `rotation_sets`, `tremor_daily`; `patients.tremor_monitoring`, `patients.hr_limit_set_by`,
+  `sessions.watch_clock_offset_ms`; `wrist_motion` gains `patient_id` and `accel`.
+- **REST:** `GET /me/watch` (patient token; the watch's setup: first name, heart limit and who set it, therapist,
+  tremor monitoring, `watch_*` prefs with defaults, today's plan with `done_sets` and `goal_deg` for watch
+  exercises — with `MOCK_WRIST=1`, any catalog watch exercise not already prescribed is appended with catalog
+  defaults (3 sets × 10 reps, 80° goal) so the demo has something to show on the watch's Rotation list; flag off,
+  unchanged); `POST /me/tremor` (≤ 14 days, 403 while monitoring is off, rate-limited); therapist (full token):
+  `PATCH /patients/{id}/limits` (therapist-page contract, extended with a `limits_changed` push and a live-session
+  refresh — the handler lives in `server/api/dashboard.py`; the helper is `server/watch_limits.py::
+  apply_hr_limit_change`), `PATCH /patients/{id}/watch-features` (`watch_features_changed`), `GET
+  /patients/{id}/watch`. Watch settings are `device_prefs` keys `watch_taps`, `watch_arm`, `watch_double_tap`,
+  `watch_captions` via `PUT /me`; a `PUT /me` that omits them (the iPhone Settings screen always does) keeps
+  whatever is already stored, so saving a profile edit from the phone never wipes the watch's settings.
+- **Client → server:** `watch_button {name: "resume"}` (= `command start`; blocked while the Guardian holds the
+  session, same as a phone `start`); `wrist {t?, quat?, accel?, rotation_deg?}` (sanitised, broadcast, stored
+  ≤ 10 Hz per patient in `wrist_motion` via `WristRecorder`); `watch_sync {t0, dt_ms, accel_mag[]}` (never
+  broadcast; goes straight to `ClockSync`).
+- **Server → clients:** `haptic` (`good_rep`, `fix_form`, `set_done`, `check_in`, plus `countdown_tick` and
+  `breather`), `breather`, `hr_recovery`, `rotation_rep`, `rotation_set`, `sync_progress`, `limits_changed`,
+  `watch_features_changed`. These come from `Hub.emit`, which does not add `seq` — clients treat `seq` as
+  optional on all of them.
+- **Breather** (`SafetyGuardian`, `server/agents/safety_guardian.py`): an HR incident over the limit pauses the
+  engine (`command pause`, `payload.source = "guardian"`) and emits `breather start` + a `haptic breather` + a
+  therapist `heart_rate` notification; HR back under `limit − BREATHER_MARGIN_BPM` (5) for `BREATHER_RESUME_S`
+  (10 s) auto-resumes (`breather end`, reason `hr_recovered`, `command start`) before the incident escalates; a
+  "resolved" check-in doesn't end the breather by itself — it ends on `hr_recovered`, on the incident's own
+  escalated-close (`escalated`), or on the session stopping (`stopped`). A watch `resume`/a phone `start` is
+  blocked the whole time (`SafetyGuardian.holding`).
+- **Recovery** (`server/agents/recovery.py::RecoveryAgent`): tracks the peak `hr` bpm during each set and, 60 s
+  (`RECOVERY_S`) after `set_done` or at the next set's countdown if sooner, emits one `hr_recovery
+  {set_index, peak_bpm, bpm_60s, drop_bpm}` and writes a row. No `hr` reading during a set → no event for it.
+- **Rotation** (`server/agents/rotation.py::RotationCoach`): counts reps from the watch's `rotation_deg` (60% of
+  the goal, with a small zero-crossing zone) and injects them as ordinary `rep` events with `"source": "watch"`,
+  quality `good` when the goal was reached else `partial` (no `fix_form` haptic for a short turn — these never
+  loop back into `RotationCoach` itself). Elbow drift (watch-arm elbow away from the same-side shoulder, > 0.08 m
+  for > 0.5 s) sends a `cue {id: "elbow_drift", text: "Keep your elbow at your side"}` + `haptic fix_form`; the
+  next counted rep carries `flags: ["elbow_drift"]`. Emits `rotation_rep`/`rotation_set` and writes a
+  `rotation_sets` row per set.
+- **Clock sync** (`server/agents/clock_sync.py::ClockSync`): correlates the watch's `accel_mag` windows against
+  the camera wrist's acceleration (not speed) to lock an offset (`offset_ms = watch_clock − server_clock`) after
+  2 agreeing cross-correlated windows, or falls back to an RTT estimate after 8 s; emits `sync_progress` and
+  stores the offset on the session once locked. `WristRecorder.offset_s` reads it to correct stored `wrist` rows.
+- **AI:** `SessionAnalyst` adds `hr_recovery`, `rotation_sets` and 7-day `tremor_7d` to its context; Insight gets
+  a `tremor_trend` rule (≥ 30% rise in mild+strong tremor minutes week-over-week, ≥ 3 days of data each week);
+  the Copilot prompt and `sql_guard` allow-list both know the three new tables.
+- **Demo without a watch:** `MIRA_SOURCE=mock MOCK_WRIST=1` — the boot (and auto-restart) mock session then runs
+  Maya's `forearm_rotation` demo program instead of squats, streaming synthesised `wrist` rotation at 10 Hz and
+  lifting the elbow on rep 6 of every set (no seed-prescription change; Maya's seeded plan is untouched). `POST
+  /sessions` with `forearm_rotation` still 422s unless a watch exercise has actually been prescribed to that
+  patient (e.g. via the dashboard's Prescribe "Add a watch exercise" quick pick) — the catalog fallback above is
+  for `GET /me/watch`'s display only.
+
 ## Dashboard notifications
 
 One backend turns alerts, call progress, Insight notes, Copilot proposals, milestones, Coach

@@ -5,14 +5,17 @@
 // element alive across value changes).
 import { h, clear } from "../../core/dom.js";
 import { patientMeta, firstName } from "../../core/format.js";
-import { exerciseName } from "../../core/exercises.js";
+import { exerciseName, isWatchExercise } from "../../core/exercises.js";
+import { WATCH_CAP } from "../../net/endpoints.js";
 import { errorState } from "../../ui/states.js";
 import { proposalCard } from "../../ui/proposalCard.js";
 import { decideProposal } from "../../ui/proposalDecision.js";
-import { prescribeModel, diffPrescription, buildPutBody, hrLimitChanged } from "./model.js";
+import {
+  prescribeModel, diffPrescription, buildPutBody, hrLimitChanged, watchExerciseChoices, limitsSentText,
+} from "./model.js";
 import {
   renderHead, renderExerciseCard, renderSearchResults, renderEditorCard, renderReferenceRepCard, renderFlagsCard,
-  renderHrLimitCard, renderEmergencyCard, renderProposalsRail, renderUnsavedBar,
+  renderHrLimitCard, renderEmergencyCard, renderProposalsRail, renderUnsavedBar, setLimitSent,
 } from "./view.js";
 
 const EXERCISES_CAP = "/exercises";
@@ -70,7 +73,12 @@ export const screen = {
       pendingHref: null,
       staged: new Map(), // exerciseId -> staged library pick (not written until Save plan)
       loadError: null, // set when the patient or prescriptions can't be loaded: no editing, no Save
+      // Apple Watch: set just before PATCH /patients/{id}/limits (the server's limits_changed push can beat the
+      // PATCH response), cleared if the PATCH fails; limitSentText is shown on the limit card once it arrives.
+      awaitingLimitPush: false,
+      limitSentText: null,
     };
+    let limitCardRefs = null;
     const proposalCards = new Map();
     let searchTimer = null;
     let searchSeq = 0;
@@ -136,11 +144,16 @@ export const screen = {
         state.selectedExerciseId);
       const canAdd = Boolean(ctx.caps && ctx.caps.has && ctx.caps.has(EXERCISES_CAP));
       const n = m.exercises.length;
+      // Watch exercises can be added straight from the plan card when this server has the Apple Watch routes.
+      const watchChoices = ctx.caps && ctx.caps.has && ctx.caps.has(WATCH_CAP)
+        ? watchExerciseChoices(m.exercises.map((x) => x.id)) : [];
       const card = renderExerciseCard(m.exercises, {
         onSelect: (id) => { state.selectedExerciseId = id; buildEditorFlagsLimit(); },
         onSearch: (q) => onSearchInput(q),
         canAddFromLibrary: canAdd,
         summary: n ? `${n} ${n === 1 ? "exercise" : "exercises"}` : null,
+        watchChoices,
+        onAddWatch: (id) => stageFromLibrary(id, watchChoices),
       });
       exerciseHost.replaceChildren(card.el);
     }
@@ -164,7 +177,8 @@ export const screen = {
       const list = items.slice(0, 8)
         .map((x) => (typeof x === "string" ? { id: x } : x))
         .filter((x) => x && PID_RE.test(String(x.id || "")))
-        .map((x) => ({ id: String(x.id), name: x.name ? String(x.name) : exerciseName(x.id) }));
+        .map((x) => ({ id: String(x.id), name: x.name ? String(x.name) : exerciseName(x.id),
+          watch: x.watch === true || isWatchExercise(String(x.id)) }));
       exerciseHost.querySelector?.(".prescribe__search-results")
         ?.replaceChildren(renderSearchResults(list, { onAdd: (id) => stageFromLibrary(id, list) }));
     }
@@ -215,11 +229,16 @@ export const screen = {
 
       const m = prescribeModel(state.patientJson, rxJson, state.progressJson, state.selectedExerciseId);
       const hrValue = state.hrLimitEdit != null ? state.hrLimitEdit : m.hrLimit;
-      const limitCard = renderHrLimitCard(hrValue, {
+      limitCardRefs = renderHrLimitCard(hrValue, {
         firstName: name,
-        onChange: (v) => { state.hrLimitEdit = v; refreshDirty(); },
+        sentText: state.limitSentText,
+        onChange: (v) => {
+          state.hrLimitEdit = v;
+          if (state.limitSentText) { state.limitSentText = null; setLimitSent(limitCardRefs.statusEl, null); }
+          refreshDirty();
+        },
       });
-      limitHost.replaceChildren(limitCard.el);
+      limitHost.replaceChildren(limitCardRefs.el);
 
       buildExerciseCard(); // re-highlight the selected row
       refreshDirty();
@@ -254,9 +273,12 @@ export const screen = {
           await ctx.api.putPrescription(pid, buildPutBody(original, diff));
         }
         if (hrLimitChanged(baseHrLimit(), state.hrLimitEdit)) {
+          state.limitSentText = null;
+          state.awaitingLimitPush = true;
           await ctx.api.setLimits(pid, { hrLimit: state.hrLimitEdit });
         }
       } catch {
+        state.awaitingLimitPush = false;
         if (!alive) return;
         refreshDirty();
         ctx.toast({ kind: "error", text: "Couldn't save the plan. Try again." });
@@ -273,6 +295,7 @@ export const screen = {
     }
 
     function discard() {
+      state.limitSentText = null;
       state.edits.clear();
       state.staged.clear();
       state.hrLimitEdit = null;
@@ -424,7 +447,17 @@ export const screen = {
 
     // Proposals for this patient can be created or decided elsewhere (the Assistant, another tab): refresh.
     const unsubEvents = ctx.sockets.subscribe("events", (msg) => {
-      if (!msg || !PROPOSAL_EVENTS.has(msg.type)) return;
+      if (!alive || !msg) return;
+      // "Sent to Maya's watch": only for a limit this screen just saved (no new request; the server pushes it).
+      if (msg.type === "limits_changed" && state.awaitingLimitPush) {
+        const text = limitsSentText(msg, pid, firstNameHere());
+        if (!text) return;
+        state.awaitingLimitPush = false;
+        state.limitSentText = text;
+        if (limitCardRefs) setLimitSent(limitCardRefs.statusEl, text);
+        return;
+      }
+      if (!PROPOSAL_EVENTS.has(msg.type)) return;
       clearTimeout(proposalsTimer);
       proposalsTimer = setTimeout(() => { if (alive) loadProposals(); }, 800);
     });

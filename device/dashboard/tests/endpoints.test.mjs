@@ -97,3 +97,23 @@ test("assistant calls: context only when non-empty, review route, 30 s timeout p
     ["/patients/maya/messages", { body: "x".repeat(1000), kind: "message" }, undefined],
   ]);
 });
+
+test("Apple Watch endpoints: GET /patients/{id}/watch and PATCH watch-features with a real boolean body", async () => {
+  const { WATCH_CAP, WATCH_FEATURES_CAP, watchFeaturesBody } = await import("../js/net/endpoints.js");
+  const api = rec();
+  const ep = createEndpoints(api, "okafor");
+  await ep.patientWatch("maya");
+  await ep.setWatchFeatures("maya", { tremorMonitoring: true });
+  await ep.setWatchFeatures("a/b", { tremorMonitoring: false });
+  assert.deepEqual(api.calls, [
+    ["GET", "/patients/maya/watch", undefined],
+    ["PATCH", "/patients/maya/watch-features", { tremor_monitoring: true }],
+    ["PATCH", "/patients/a%2Fb/watch-features", { tremor_monitoring: false }],
+  ]);
+  // Anything but `true` is off: a missing/truthy-string value never turns monitoring on by accident.
+  assert.deepEqual(watchFeaturesBody({ tremorMonitoring: "yes" }), { tremor_monitoring: false });
+  assert.deepEqual(watchFeaturesBody(), { tremor_monitoring: false });
+  // Capability templates match the server's OpenAPI path keys (server/api/watch_admin.py).
+  assert.equal(WATCH_CAP, "/patients/{patient_id}/watch");
+  assert.equal(WATCH_FEATURES_CAP, "/patients/{patient_id}/watch-features");
+});

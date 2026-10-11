@@ -10,15 +10,17 @@ import { errorState } from "../../ui/states.js";
 import { createAvatarView } from "../../avatar/avatarView.js";
 import { attachWhep } from "../../media/whep.js";
 import { lerpJoints, isValidJoints } from "../../three/joints.js";
-import { liveModel, cueHistoryModel } from "./model.js";
+import { isWatchExercise } from "../../core/exercises.js";
+import { liveModel, cueHistoryModel, breatherModel, hrRecoveryLine, rotationLiveModel } from "./model.js";
 import {
   renderHead, renderRoomCard, renderCuePanel, renderCuePanelDisabled, renderCueHistory,
-  renderCueHistoryList, emptyNoLiveSession, emptyNoOneLive,
+  renderCueHistoryList, emptyNoLiveSession, emptyNoOneLive, renderWatchLiveCard,
 } from "./view.js";
 
 const SAY_CAP = "/live/say";
 const POSE_LERP_T = 0.4; // same smoothing budget as the Patient review screen's live mode
 
+const WATCH_EVENTS = new Set(["breather", "hr_recovery", "rotation_rep", "rotation_set"]);
 const IDLE_PHASES = new Set(["idle", "done"]);
 const RECHECK_MIN_MS = 5000; // /ws/live pushes ~10 Hz: re-check the caseload at most this often while waiting
 
@@ -68,6 +70,9 @@ export const screen = {
     let headRefs = null;
     let roomRefs = null;
     let cueHistoryRefs = null;
+    let watchRefs = null;
+    // Latest watch state, kept across a re-mount of the live UI: {breather, recovery, rotation}.
+    const watchLive = { breather: null, recovery: null, rotation: null };
     let avatar = null;
     let pid = null;
     let patient = null;
@@ -83,7 +88,8 @@ export const screen = {
         ? renderCuePanel({ onSend: (text) => ctx.api.sayLive(pid, text) }).el
         : renderCuePanelDisabled();
       cueHistoryRefs = renderCueHistory();
-      const sideHost = h("div", { class: "live__side" }, cuePanelEl, cueHistoryRefs.el);
+      watchRefs = renderWatchLiveCard();
+      const sideHost = h("div", { class: "live__side" }, cuePanelEl, watchRefs.el, cueHistoryRefs.el);
       const gridEl = h("div", { class: "live__grid" }, roomRefs.el, sideHost);
       bodyHost.replaceChildren(headRefs.el, gridEl);
 
@@ -97,6 +103,7 @@ export const screen = {
       });
       renderCueHistoryList(cueHistoryRefs.listHost, cueHistoryModel(cueEvents));
       applySnapshot(lastSnapshot, lastReceivedAt);
+      applyWatch();
       startVideo();
     }
 
@@ -124,6 +131,27 @@ export const screen = {
       roomRefs.hrChipEl.hidden = !m.hr;
       if (m.hr) roomRefs.hrChipEl.textContent = m.hr;
       roomRefs.pausedEl.hidden = !m.paused;
+      applyWatch();
+    }
+
+    // The rotation row only shows while a watch exercise runs (the snapshot's exercise_id, when it has one).
+    function applyWatch() {
+      if (!roomRefs || !watchRefs) return;
+      const b = watchLive.breather;
+      roomRefs.breatherEl.hidden = !(b && b.active);
+      roomRefs.breatherEl.textContent = b && b.active ? b.text : "";
+      watchRefs.setBreatherLine(b ? b.text : null);
+      watchRefs.setRecovery(watchLive.recovery);
+      const exerciseId = lastSnapshot && lastSnapshot.exercise_id;
+      const watchExerciseRunning = !exerciseId || isWatchExercise(exerciseId);
+      watchRefs.setRotation(watchExerciseRunning ? watchLive.rotation : null);
+    }
+
+    function onWatchEvent(msg) {
+      if (msg.type === "breather") watchLive.breather = breatherModel(msg) || watchLive.breather;
+      else if (msg.type === "hr_recovery") watchLive.recovery = hrRecoveryLine(msg) || watchLive.recovery;
+      else watchLive.rotation = rotationLiveModel(msg) || watchLive.rotation;
+      applyWatch();
     }
 
     function subscribeSockets() {
@@ -142,7 +170,9 @@ export const screen = {
         if (roomRefs && isValidJoints(lastJoints)) roomRefs.poseStatusEl.textContent = "Private pose stream connected · no camera video is shared.";
       });
       unsubEvents = ctx.sockets.subscribe("events", (msg) => {
-        if (!alive || !msg || msg.type !== "cue") return;
+        if (!alive || !msg) return;
+        if (WATCH_EVENTS.has(msg.type)) { onWatchEvent(msg); return; }
+        if (msg.type !== "cue") return;
         cueEvents = [...cueEvents, msg];
         if (cueHistoryRefs) renderCueHistoryList(cueHistoryRefs.listHost, cueHistoryModel(cueEvents));
       });

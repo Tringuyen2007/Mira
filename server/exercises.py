@@ -33,6 +33,8 @@ EXERCISES: dict[str, Exercise] = {e.exercise_id: e for e in (
 
 WATCH_EXERCISES: frozenset[str] = frozenset(e.exercise_id for e in EXERCISES.values() if e.watch)
 DEFAULT_ROTATION_GOAL_DEG = 80.0
+CATALOG_DEFAULT_SETS = 3   # the MOCK_WRIST demo program's set/rep counts (engine_bridge._SETS/_REPS)
+CATALOG_DEFAULT_REPS = 10
 _GOAL_RANGE = (10.0, 180.0)
 
 

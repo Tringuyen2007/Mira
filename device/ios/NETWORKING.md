@@ -308,6 +308,34 @@ heart-rate sample is indistinguishable from one the phone sent itself.
   tap-to-confirm or 1 s hold — and `HKWorkoutSession` heart-rate capture) — see the README "Apple Watch
   companion" section and the sources in `device/ios/MiraWatch/`.
 
+### Server events for the watch (tri-watch)
+
+The authoritative shapes are in `docs/superpowers/plans/2026-10-11-watch-contract.md` and the samples in
+`server/samples/ws_events_*.json` / `server/samples/rest_*.json`. Decode `seq` as optional on all of these
+(they are emitted with `Hub.emit`, which never adds it). This is the server contract only — the watch app's
+own screens for them are W8's concern, not documented here.
+
+| Event | When | Decode as |
+|---|---|---|
+| `haptic {pattern}` | `good_rep`, `fix_form`, `set_done`, `check_in`, plus `countdown_tick` (every countdown number) and `breather` (breather start/end) — `HAPTIC_PATTERNS` on the server now has all six | an unrecognized pattern decodes to `nil`/falls through to `.directionUp`, same as today |
+| `breather {state: "start"\|"end", bpm, limit, session_id, resolution?}` | an HR incident opens the breather; it ends on recovery, on the incident's own escalated-close, or on the session stopping | not yet decoded by `WatchWire`; ignore until a phone/watch UI exists for it |
+| `hr_recovery {set_index, peak_bpm, bpm_60s, drop_bpm, session_id}` | ~60 s after `set_done`, or at the next set's countdown if sooner | not yet decoded |
+| `rotation_rep {exercise_id, set_index, rep, reps_target, angle_deg, goal_deg, reached}` | each watch turn `RotationCoach` counts | not yet decoded; the watch already feels its own turn via `wrist`, this is for the phone/dashboard |
+| `rotation_set {exercise_id, set_index, angles, best_deg, avg_deg, goal_deg}` | `set_done` of a watch (rotation) exercise | not yet decoded |
+| `sync_progress {progress, locked, offset_ms?, method?}` | each `watch_sync` window while a session is current | not yet decoded |
+| `limits_changed {patient_id, hr_limit, set_by_name}` | the therapist changed the heart limit | re-fetch `GET /me/watch`, refresh Settings |
+| `watch_features_changed {patient_id, tremor_monitoring}` | the therapist toggled tremor monitoring | re-fetch `GET /me/watch` |
+| `cue {id: "elbow_drift", text}` | the watch-arm elbow drifted off the side for > 0.5 s during a rotation set | same `cue` the phone already decodes for camera exercises; the id is just new |
+
+Client → server additions `WatchWire`/`WatchBridge` must stay compatible with: `watch_button {name:
+"resume"}` (a third button name alongside `ready`/`stop`; relays to `command start`, blocked by the same
+Guardian hold as any `start`); `wrist {t?, quat?, accel?, rotation_deg?}` (≤ 10 Hz, sanitised and persisted
+server-side, only meaningful during a rotation set or a clock-sync window); `watch_sync {t0, dt_ms,
+accel_mag[]}` (1 Hz during a sync wave; the server never echoes or broadcasts it). Watch exercises also
+produce ordinary `rep` events with `"source": "watch"` and quality `good`/`partial` (never `fix_form`) —
+decoders must accept these like any other `rep`. As always, an unrecognized event type or field must decode
+to `nil`/be ignored rather than crash, so the app never regresses when the server adds one of the above.
+
 ## Open items
 
 - Session commands (`start/pause/skip/stop`) are forwarded to the engine over the

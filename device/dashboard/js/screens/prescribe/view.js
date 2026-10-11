@@ -25,6 +25,11 @@ export function renderHead({ onSave, onDiscard }) {
   } };
 }
 
+// Small "Watch" tag on watch exercises (counted by the Apple Watch, not the cameras); text, not colour alone.
+function watchTag() {
+  return h("span", { class: "chip prescribe__watch-tag" }, "Watch");
+}
+
 // ---- Exercise plan card -----------------------------------------------------------------------------------
 
 // Each row is one <button> (aria-pressed = selected for editing). The tick is a drawn box, not an <input>, so
@@ -40,11 +45,24 @@ export function renderExerciseList(exercises, { onSelect }) {
     },
       h("span", { class: "prescribe__check", "aria-hidden": "true" }),
       h("span", { class: "prescribe__exercise-name" }, ex.name,
+        ex.watch ? [" ", watchTag()] : null,
         ex.staged ? h("span", { class: "prescribe__staged meta" }, " · new, not saved yet") : null),
       h("span", { class: "prescribe__exercise-dose" }, ex.dose)))));
 }
 
-export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLibrary, summary }) {
+// `watchChoices` ([{id, name}], may be empty) + `onAddWatch(id)`: the "Add a watch exercise" quick picks, shown
+// when the server has the Apple Watch routes; a pick only stages the exercise, like a library pick.
+function renderWatchChoices(choices, onAddWatch) {
+  if (!choices || choices.length === 0) return null;
+  return h("div", { class: "prescribe__watch-add" },
+    h("p", { class: "meta" }, "Add a watch exercise"),
+    h("ul", { class: "prescribe__search-list" }, choices.map((x) => h("li", {},
+      h("button", { class: "btn btn--ghost", type: "button", onclick: () => onAddWatch(x.id) },
+        `Add ${x.name} to the plan`, " ", watchTag())))));
+}
+
+export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLibrary, summary, watchChoices,
+  onAddWatch }) {
   const listHost = h("div", {}, renderExerciseList(exercises, { onSelect }));
   const searchInput = canAddFromLibrary
     ? h("input", { type: "search", class: "prescribe__search", placeholder: "Add from exercise library",
@@ -56,7 +74,8 @@ export function renderExerciseCard(exercises, { onSelect, onSearch, canAddFromLi
     summary ? h("p", { class: "meta" }, summary) : null,
     listHost,
     canAddFromLibrary ? h("div", { class: "prescribe__search-wrap" },
-      h("span", { class: "prescribe__search-icon" }, icon("search")), searchInput, resultsHost) : null);
+      h("span", { class: "prescribe__search-icon" }, icon("search")), searchInput, resultsHost) : null,
+    renderWatchChoices(watchChoices, onAddWatch));
   return { el, listHost, searchInput, resultsHost,
     setExercises: (list) => listHost.replaceChildren(renderExerciseList(list, { onSelect })) };
 }
@@ -66,7 +85,7 @@ export function renderSearchResults(items, { onAdd }) {
   if (items.length === 0) return h("p", { class: "meta" }, "No matching exercises.");
   return h("ul", { class: "prescribe__search-list" }, items.map((x) => h("li", {},
     h("button", { class: "btn btn--ghost", type: "button", onclick: () => onAdd(x.id) },
-      `Add ${x.name} to the plan`))));
+      `Add ${x.name} to the plan`, x.watch ? [" ", watchTag()] : null))));
 }
 
 // ---- Editor card ------------------------------------------------------------------------------------------
@@ -92,6 +111,8 @@ export function renderEditorCard(editor, limits, { onChange, title }) {
   const hasKnee = editor.kneeTarget != null;
   const kneeSlider = hasKnee ? slider({ label: "Knee bend target", min: 0, max: 150, value: editor.kneeTarget,
     format: DEG_TEXT, onChange: (v) => onChange({ kneeTarget: v }) }) : null;
+  const rotationSlider = editor.watch ? slider({ label: "Turn goal (from the watch)", min: 10, max: 180,
+    value: editor.rotationGoal, format: DEG_TEXT, onChange: (v) => onChange({ rotationGoal: v }) }) : null;
   const tempoSlider = slider({ label: "Speed: seconds down and up", min: 1, max: 10, value: editor.tempoS,
     format: (v) => ({ text: `${v} s each`, valueText: `${v} seconds each way` }),
     onChange: (v) => onChange({ tempoS: v }) });
@@ -102,15 +123,16 @@ export function renderEditorCard(editor, limits, { onChange, title }) {
 
   const el = h("section", { class: "card prescribe__card", "aria-label": `${title} settings` },
     h("div", { class: "prescribe__card-head" },
-      h("h2", { class: "card__title" }, title),
+      h("h2", { class: "card__title" }, title, editor.watch ? [" ", watchTag()] : null),
       editor.lastChanged ? h("p", { class: "meta" }, `Last changed ${editor.lastChanged}`) : null),
     h("div", { class: "prescribe__fields" },
       field("Sets", setsStepper), field("Reps", repsStepper), field("Rest", restStepper)),
     kneeSlider ? kneeSlider.el : null,
+    rotationSlider ? rotationSlider.el : null,
     editor.todayAvg ? h("p", { class: "meta prescribe__today" }, editor.todayAvg) : null,
     tempoSlider.el);
 
-  return { el, setsStepper, repsStepper, restStepper, kneeSlider, tempoSlider };
+  return { el, setsStepper, repsStepper, restStepper, kneeSlider, rotationSlider, tempoSlider };
 }
 
 // ---- Reference rep card (right column) ------------------------------------------------------------------------
@@ -145,15 +167,25 @@ export function renderFlagsCard(flags, { onChange, firstName }) {
 
 // ---- Heart rate limit card --------------------------------------------------------------------------------
 
-export function renderHrLimitCard(hrLimit, { onChange, firstName }) {
+// `sentText`: "Sent to Maya's watch" once the server's limits_changed push for this patient arrives after a save
+// (index.js also sets statusEl directly when the event lands while the card is up).
+export function renderHrLimitCard(hrLimit, { onChange, firstName, sentText = null }) {
   const hr = slider({ label: "Pause and check in above", min: 40, max: 220, value: hrLimit,
     format: (v) => ({ text: `${v} bpm`, valueText: `${v} beats per minute` }), onChange: (v) => onChange(v) });
   hr.el.querySelector("input")?.setAttribute("aria-label", "Heart rate limit: pause and check in above");
+  const statusEl = h("p", { class: "prescribe__limit-sent", role: "status" });
   const el = h("section", { class: "card prescribe__card", "aria-label": "Heart rate limit" },
     h("h2", { class: "card__title prescribe__title-icon" }, icon("heart"), "Heart rate limit"),
     hr.el,
-    h("p", { class: "meta" }, `From ${firstName}'s Apple Watch. Mira asks ${firstName} to rest and tells you.`));
-  return { el, hr };
+    h("p", { class: "meta" }, `From ${firstName}'s Apple Watch. Mira asks ${firstName} to rest and tells you.`),
+    statusEl);
+  setLimitSent(statusEl, sentText);
+  return { el, hr, statusEl };
+}
+
+export function setLimitSent(statusEl, text) {
+  if (!text) { statusEl.replaceChildren(); return; }
+  statusEl.replaceChildren(icon("check-circle"), h("span", {}, text));
 }
 
 // ---- Emergency contact card (read-only) --------------------------------------------------------------------

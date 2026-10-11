@@ -39,6 +39,7 @@ ANALYST_TIMEOUT_S = 12.0
 MIN_SESSION_S = 20.0  # 0 reps and shorter than this = a false start: no analysis
 MAX_FLAGGED_MOMENTS = 12
 DEFAULT_THERAPIST_ID = "okafor"
+TREMOR_CONTEXT_DAYS = 7
 _SEVERITY_RANK = {"critical": 0, "urgent": 0, "high": 1, "major": 1, "warning": 2, "medium": 2, "minor": 3,
                   "low": 3, "info": 4}
 
@@ -313,6 +314,10 @@ class SessionAnalyst:
         previous = await self._read("previous", sid, queries.previous_sessions_stats(db, patient_id, exercise_id,
                                                                                       sid), {"count": 0})
         plans = await self._read("prescriptions", sid, queries.prescriptions(db, patient_id), [])
+        hr_recovery = await self._read("hr_recovery", sid, queries.session_hr_recovery(db, sid), [])
+        rotation = await self._read("rotation_sets", sid, queries.session_rotation_sets(db, sid), [])
+        tremor = await self._read("tremor_daily", sid,
+                                  queries.patient_tremor_days(db, patient_id, TREMOR_CONTEXT_DAYS), [])
 
         started = _seconds(row.get("started_at")) or (live.started_at if live else None)
         ended = _seconds(row.get("ended_at")) or time.time()
@@ -367,6 +372,15 @@ class SessionAnalyst:
             "rom_avg_deg": rom_avg, "asym_avg_pct": asym_avg, "good_rep_rate": good_rate,
             "previous": {k: _r(v, 2) if isinstance(v, float) else v for k, v in previous.items()},
             "comparison": comparison, "targets": targets,
+            "hr_recovery": [{"set": r["set_index"], "peak_bpm": r["peak_bpm"], "bpm_60s": r["bpm_60s"],
+                             "drop_bpm": r["drop_bpm"]} for r in hr_recovery],
+            "rotation_sets": [{"exercise_id": r["exercise_id"], "set": r["set_index"], "reps": len(r["angles"] or []),
+                               "best_deg": _r(r["best_deg"]), "avg_deg": _r(r["avg_deg"]),
+                               "goal_deg": _r(r["goal_deg"])} for r in rotation],
+            "tremor_7d": [{"day": str(r["day"]), "none_min": r["none_min"], "slight_min": r["slight_min"],
+                           "mild_min": r["mild_min"], "strong_min": r["strong_min"],
+                           "unknown_min": r["unknown_min"], "dyskinesia": r["dyskinesia"], "source": r["source"]}
+                          for r in tremor],
         }
         return data, flagged, comparison
 
