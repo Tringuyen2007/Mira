@@ -6,10 +6,13 @@ import SwiftUI
 struct ProgressRing: View {
     let progress: Double
     let lineWidth: CGFloat
+    /// Progress colour: `good` everywhere except Holding to Stop, which fills in charcoal (305:185).
+    let tint: Color
 
-    init(progress: Double, lineWidth: CGFloat = 8) {
+    init(progress: Double, lineWidth: CGFloat = 8, tint: Color = WatchTheme.good) {
         self.progress = progress
         self.lineWidth = lineWidth
+        self.tint = tint
     }
 
     private var clamped: Double { min(max(progress, 0), 1) }
@@ -18,7 +21,7 @@ struct ProgressRing: View {
         ZStack {
             Circle().stroke(WatchTheme.track, lineWidth: lineWidth)
             Circle().trim(from: 0, to: clamped)
-                .stroke(WatchTheme.good, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .opacity(clamped > 0 ? 1 : 0)
         }
