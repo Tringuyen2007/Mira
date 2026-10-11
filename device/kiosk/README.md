@@ -105,6 +105,11 @@ Awaiting gesture > Greeting > Cue > Rep > Idle.
 The caption bar shows `live.caption.text`; the same text is what the audio plays (greeting/cue/summary_ready/
 session_summary events carry `audio_url`, played only when it's a same-origin `/audio/*.mp3` path).
 
+`live.device_prefs` (set from the phone's Settings, Plan 3 §6.5) is honoured on every `/ws/live` message: the
+caption bar is hidden when `device_prefs.captions === false` (`state.js` `view().captionsOn`), and
+`AudioPlayer.volume` is set from `device_prefs.volume` (0..1, default 1, clamped in `main.js`) before each clip
+plays. Missing/empty `device_prefs` means captions on and full volume.
+
 ## How to add mascot frames
 
 Mira's five moods (idle, worried, cheering, sleeping, celebrating) are listed in `assets/mira/mascot.json`, one

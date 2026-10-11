@@ -179,7 +179,7 @@ async def ro_recent_sessions(db: Database, patient_id: str, limit: int = 10,
 async def profile_row(db: Database, patient_id: str, timeout_s: float = 0.9) -> dict[str, Any] | None:
     """Everything the cached PatientProfile needs, in one round trip."""
     return await db.fetchrow(f"""
-        SELECT p.id, p.name, p.age, p.condition, p.affected_side, p.hr_limit,
+        SELECT p.id, p.name, p.age, p.condition, p.affected_side, p.hr_limit, p.device_prefs,
                p.emergency_contact_name, p.emergency_contact_phone,
                t.id AS therapist_id, t.name AS therapist_name, t.phone AS therapist_phone,
                (SELECT s.pain_pre FROM sessions s WHERE s.patient_id = p.id AND s.pain_pre IS NOT NULL

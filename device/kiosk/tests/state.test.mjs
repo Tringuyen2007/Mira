@@ -180,3 +180,17 @@ test("countdown phase wins over a fresh session summary (next session started)",
   s = reduce(s, live({ phase: "countdown", countdown: 3 }), 1000);
   assert.equal(view(s, 1000).screen, "countdown");
 });
+
+test("captionsOn defaults true when device_prefs is absent or captions is not false", () => {
+  let s = run([open, live()]);
+  assert.equal(view(s, 1000).captionsOn, true);
+  s = run([open, live({ device_prefs: {} })]);
+  assert.equal(view(s, 1000).captionsOn, true);
+  s = run([open, live({ device_prefs: { captions: true } })]);
+  assert.equal(view(s, 1000).captionsOn, true);
+});
+
+test("captionsOn is false only when device_prefs.captions === false", () => {
+  const s = run([open, live({ device_prefs: { captions: false } })]);
+  assert.equal(view(s, 1000).captionsOn, false);
+});

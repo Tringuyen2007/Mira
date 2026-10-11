@@ -73,5 +73,6 @@ export function render(root, vm, mascot) {
 
   text(root, "fall-name", vm.firstName || "the patient");
   text(root, "caption-text", vm.caption);
-  show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== "");
+  show(root, "caption-bar", vm.screen !== "fall" && vm.screen !== "unpaired" && vm.caption !== ""
+    && vm.captionsOn !== false);
 }

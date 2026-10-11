@@ -6,7 +6,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from server.config import Config, cfg
@@ -44,6 +44,7 @@ class PatientProfile:
     pain_today: int | None
     falls_30d: int
     age: int | None = None
+    device_prefs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

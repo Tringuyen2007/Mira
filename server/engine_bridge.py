@@ -695,11 +695,13 @@ class LiveState:
     first_name: str | None = None
     exercise_name: str | None = None
     incident: bool = False
+    device_prefs: dict[str, Any] = field(default_factory=dict)  # captions/volume/slower_speech (Plan 3 §6.5)
 
-    def on_session_start(self, first_name: str, exercise_id: str) -> None:
+    def on_session_start(self, first_name: str, exercise_id: str, device_prefs: dict[str, Any] | None = None) -> None:
         self.first_name = first_name
         self.exercise_id = exercise_id
         self.exercise_name = exercises.display_name(exercise_id)
+        self.device_prefs = device_prefs or {}
         self.caption = None
         self.incident = False
         self.phase = "idle"
@@ -781,7 +783,8 @@ class LiveState:
                 "countdown": self.countdown, "main_angle": self.main_angle, "load_l_pct": self.load_l_pct,
                 "load_conf": self.load_conf, "hr": self.hr, "flags": self.flags, "cue_id": self.cue_id,
                 "paused": self.paused, "caption": self.caption, "first_name": self.first_name,
-                "exercise_name": self.exercise_name, "incident": self.incident}
+                "exercise_name": self.exercise_name, "incident": self.incident,
+                "device_prefs": self.device_prefs}
 
 
 @dataclass(eq=False)

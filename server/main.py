@@ -199,7 +199,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Every session start (boot or REST) restarts the mock engine's program (so it `arrived`s again) and
     # warms up the greeting, so server.ai.session_voice.SessionVoice can emit it as soon as `arrived` fires.
     sessions.on_start.append(lambda session: bridge.live.on_session_start(session.profile.first_name,
-                                                                        session.exercise_id))
+                                                                        session.exercise_id,
+                                                                        session.profile.device_prefs))
     sessions.on_start.append(lambda session: bridge.notify_session_start(session.patient_id))
     sessions.on_start.append(voice.prepare_greeting)
 

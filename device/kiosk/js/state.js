@@ -91,7 +91,9 @@ export function view(state, now) {
   const set = num(live.set);
   const setsTarget = num(live.sets_target);
   const caption = live.caption && typeof live.caption.text === "string" ? live.caption.text : "";
+  const devicePrefs = live.device_prefs && typeof live.device_prefs === "object" ? live.device_prefs : {};
   const base = {
+    captionsOn: devicePrefs.captions !== false,
     offline: state.socket === "closed" && state.closedAt !== null && now - state.closedAt > OFFLINE_AFTER_MS,
     setLabel: set !== null && setsTarget !== null ? `SET ${set} OF ${setsTarget}` : null,
     hr: num(live.hr),

@@ -74,7 +74,12 @@ async def put_me(body: MeUpdate, principal: security.Principal = Depends(securit
         share_by_default=body.share_by_default, device_prefs=body.device_prefs)
     if not ok:
         raise HTTPException(status_code=503, detail="database unavailable: could not save")
-    return await build_me(db, pid)
+    me = await build_me(db, pid)
+    state = get_state()
+    current = state.sessions.current
+    if current is not None and current.patient_id == pid:
+        state.bridge.live.device_prefs = me["patient"]["device_prefs"]
+    return me
 
 
 @router.get("/me/export")

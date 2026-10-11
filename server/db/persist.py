@@ -50,6 +50,7 @@ def profile_from_row(row: dict[str, Any]) -> PatientProfile:
         pain_today=row.get("pain_today"),
         falls_30d=int(row.get("falls_30d") or 0),
         age=row.get("age"),
+        device_prefs=row.get("device_prefs") or {},
     )
 
 
