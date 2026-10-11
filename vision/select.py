@@ -8,8 +8,9 @@ no pair agrees (a hand over one lens, the wrong person in one view), each camera
 on the floor through their feet, and the camera that puts someone of human size at the mat is kept;
 the other is dropped for that frame and the pipeline's single-camera fallback takes over. One camera
 can't confirm a newcomer, so in that fallback the tracked person is never swapped for one nearer the
-centre. With one camera only, a tracked person whose feet are hidden is kept by their 2D hips (position
-unknown) for up to forget_s instead of being lost or swapped for a placeable bystander.
+centre. With one camera only, an already tracked person can continue through a floor exercise by
+their nearby 2D hips and visible torso, even when their projected head-to-foot span looks too short
+for an upright person. New tracks still require the human-size check.
 """
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ MIDPOINTS = ((23, 24), (11, 12), (27, 28))  # hips first: its triangulation is t
 MIN_VIS = 0.5
 FEET_AGREE_M = 0.6  # two feet placed closer than this are taken as both planted
 STICK_M = 0.5  # the tracked person is the candidate within this distance of where they were
-HEIGHT_RANGE_M = (0.5, 2.4)  # implied feet-to-head height of a person seen by one camera (squats allowed)
+HEIGHT_RANGE_M = (0.5, 2.4)  # implied upright feet-to-head size of a person seen by one camera
+CONTINUITY_PX = 100.0  # maximum hip displacement between adjacent detections in one view
 
 
 @dataclass
@@ -183,13 +185,26 @@ class PersonSelector:
             xz = floor_position(p, cam)
             if xz is not None and mat_distance(self.mat, xz) <= self.vicinity_m and plausible_height(p, cam, xz):
                 cands.append((xz, k))
-        # the tracked person this frame by their 2D hips (they may be unplaceable: feet hidden)
+        # A floor exercise shortens the projected head-to-foot span. Keep an already
+        # tracked person by their hips and torso even when the upright height test fails.
+        # New people must still pass plausible_height before they can start a track.
         tracked = None
         if self._pos is not None and self._hip2d is not None:
             hips = {k: _hip2d(p) for k, p in enumerate(people)}
             hips = {k: h for k, h in hips.items() if h is not None}
             if hips:
                 tracked = min(hips, key=lambda k: float(np.linalg.norm(hips[k] - self._hip2d)))
+                hip_step = float(np.linalg.norm(hips[tracked] - self._hip2d))
+                p = people[tracked]
+                torso_visible = all(p.vis[j] >= MIN_VIS for j in (11, 12, 23, 24))
+                xz = floor_position(p, cam)
+                on_mat = xz is None or mat_distance(self.mat, xz) <= self.vicinity_m
+                if hip_step <= CONTINUITY_PX and torso_visible and on_mat:
+                    self._pos = np.asarray(xz, float) if xz is not None else self._pos
+                    self._last_pick_t = t
+                    self._challenge_since = None
+                    self._hip2d = hips[tracked]
+                    return self._selection(name, people, tracked, self._pos.copy())
         sticky = self._pos is not None and any(np.linalg.norm(xz - self._pos) <= STICK_M for xz, _ in cands)
         if tracked is not None and not sticky and tracked not in [k for _, k in cands]:
             # tracked but not placeable: keep them (position unknown) rather than switch or lose the track;

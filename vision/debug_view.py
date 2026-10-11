@@ -8,6 +8,8 @@
 Top: camera feeds with MediaPipe 2D (green) and the 3D result projected back (magenta).
 Bottom: top-down view of the mat and a low-poly 3D person (v switches to a flat front view);
 orange = person's left, blue = right. Drag in the 3D view to orbit.
+The HUD shows knee angles and estimated foot loading when tracking supports them; the top view
+marks COM and estimated COP. Exercise reps, form cues and session events require vision.Engine.
 Keys: r record on/off, m markers on/off, q quit; 3D view: j/l orbit, i/k tilt, +/- zoom, 0 reset, v toggle,
 b re-measure the body, c body rules (anatomical constraints) on/off.
 """
@@ -130,6 +132,14 @@ def render_topdown(frame: FrameResult | None, mat: MatConfig, cams: dict[str, Ca
         draw_text(img, name, pt(p + [8, -8]), YELLOW)
     if frame is not None:
         draw_skeleton(img, TOP(frame.joints[:, [0, 2]]))
+        if frame.com is not None and np.isfinite(frame.com).all():
+            center = TOP([[frame.com[0], frame.com[2]]])[0]
+            cv2.circle(img, pt(center), 6, YELLOW, -1)
+            draw_text(img, "COM", pt(center + [8, -8]), YELLOW, 0.4)
+        if frame.cop is not None and np.isfinite(frame.cop).all():
+            pressure = TOP([frame.cop])[0]
+            cv2.drawMarker(img, pt(pressure), WHITE, cv2.MARKER_CROSS, 14, 2)
+            draw_text(img, "COP est.", pt(pressure + [8, 12]), WHITE, 0.4)
         for side, heel in (("l", 29), ("r", 30)):
             if (feet_locked or {}).get(side) and np.isfinite(frame.joints[heel]).all():
                 c = TOP([frame.joints[heel][[0, 2]]])[0]
@@ -175,10 +185,30 @@ class ViewMouse:
             self.view.handle_key(ord("+") if flags > 0 else ord("-"))
 
 
+def frame_metrics_hud(frame: FrameResult) -> list[str]:
+    """Short readout for the measurements already computed by the pipeline."""
+    lines = []
+    left, right = frame.angles.get("left_knee"), frame.angles.get("right_knee")
+    if left is not None or right is not None:
+        knee = lambda value: "--" if value is None else f"{value:.0f}"
+        lines.append(f"knee L/R: {knee(left)} / {knee(right)} deg")
+    else:
+        lines.append("joint angles: unavailable")
+    if frame.load_l_pct is not None:
+        lines.append(f"foot load est. L/R: {frame.load_l_pct:.0f} / {100 - frame.load_l_pct:.0f}%  conf {frame.load_conf:.2f}")
+    elif frame.com is not None:
+        lines.append("foot load estimate: unavailable")
+    if frame.phase != "idle" or frame.rep:
+        lines.append(f"phase: {frame.phase}   reps: {frame.rep}")
+    if frame.flags:
+        lines.append("flags: " + ", ".join(frame.flags[:3]))
+    return lines
+
+
 def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, poses: dict,
                  out: PipelineOutput | None, stats: dict | None, skew: dict | None, recording: str | None,
                  detector: MarkerDetector | None = None, alarms: dict[str, str | None] | None = None,
-                 view: AvatarView | None = None) -> np.ndarray:
+                 view: AvatarView | None = None, keys: str = "keys: r record   m markers   q quit") -> np.ndarray:
     frame = out.frame if out is not None else None
     panels = []
     for name in ("A", "B"):
@@ -205,6 +235,7 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
         hud.append(f"tracking: {frame.tracking}")
         if frame.body == "measuring" and frame.tracking != "lost":
             hud.append(f"stand straight to measure... {frame.body_progress * 100:.0f}%")
+        hud.extend(frame_metrics_hud(frame))
     if skew:
         hud.append(f"pair skew median {skew['median_ms']:.0f} ms  p95 {skew['p95_ms']:.0f} ms  unpaired {skew['unpaired_pct']:.0f}%")
     if out is not None and out.tri is not None and out.tri.ok.any():
@@ -219,7 +250,7 @@ def compose_view(cams: dict[str, CameraConfig], mat: MatConfig, images: dict, po
         hud.append(f"undid a left/right flip ({out.swapped})")
     if recording:
         hud.append(recording)
-    hud.append("keys: r record   m markers   q quit")
+    hud.append(keys)
     feet = out.feet_locked if out is not None else None
     if view is not None and view.show_3d:
         if out is not None and out.tracker == "model":  # already a fitted body: draw it as it is
@@ -265,7 +296,8 @@ def run_live(cams: dict[str, CameraConfig], mat: MatConfig, model: str, num_pose
         try:
             while True:
                 for pair in src.poll(0.005):
-                    last = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s)
+                    last = pipeline.process(mono_to_unix(pair.t), pair.a, pair.b, pair.skew_s,
+                                            camera_moved=any(monitor.status(n) == "moved" for n in cams))
                     if recorder is not None:
                         recorder.write(last)
                 now = time.monotonic()

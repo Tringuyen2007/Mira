@@ -26,7 +26,7 @@ def test_missing_joint_drops_only_its_parts():
 
 
 def test_front_view_shows_the_left_side_on_the_right_of_the_picture():
-    view = AvatarView(yaw_deg=0.0, pitch_deg=5.0, dist_m=3.5)  # from in front of the person (Mira's side)
+    view = AvatarView(yaw_deg=0.0, pitch_deg=5.0, dist_m=3.5, side_accents=True)  # from in front of the person (Mira's side)
     img = render_avatar(standing_skeleton(), MAT, view)
 
     b, r = img[..., 0].astype(int), img[..., 2].astype(int)

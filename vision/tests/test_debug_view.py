@@ -1,7 +1,7 @@
 import numpy as np
 
 from vision.config import MatConfig
-from vision.debug_view import FRONT, TOP, compose_view
+from vision.debug_view import FRONT, TOP, compose_view, frame_metrics_hud, render_topdown
 from vision.pipeline import Pipeline
 from vision.tests.synth import pose_from_points, standing_skeleton, target_cams
 
@@ -65,6 +65,8 @@ def test_compose_view_shows_the_3d_person_and_toggles_back_to_front_view():
     cams, X = target_cams(), standing_skeleton()
     out = Pipeline(cams).process(1.0, pose_from_points(cams["A"], X), pose_from_points(cams["B"], X))
     view = AvatarView()
+    assert not view.side_accents
+    assert view.handle_key(ord("a")) and view.side_accents
     img3d = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
     view.handle_key(ord("v"))
     img2d = compose_view(cams, MatConfig(), {}, out.raw, out, None, None, None, view=view)
@@ -172,3 +174,15 @@ def test_one_camera_view_says_stand_straight_while_measuring():
     out.frame = replace(out.frame, body="ready", body_progress=1.0)
     ready = compose_view(one, MatConfig(), {}, out.raw, out, None, None, None)
     assert (measuring != ready).any()  # the "stand straight to measure" line
+
+
+def test_debug_view_exposes_pipeline_measurements_and_estimated_load():
+    cams, joints = target_cams(), standing_skeleton()
+    out = Pipeline(cams, smoothing=False).process(
+        1.0, pose_from_points(cams["A"], joints), pose_from_points(cams["B"], joints))
+    lines = frame_metrics_hud(out.frame)
+    assert any("knee L/R:" in line for line in lines)
+    assert any("foot load est. L/R:" in line for line in lines)
+    shown = render_topdown(out.frame, MatConfig(), cams)
+    bare = render_topdown(None, MatConfig(), cams)
+    assert (shown != bare).any()

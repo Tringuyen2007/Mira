@@ -1,14 +1,12 @@
-"""Low-poly 3D person for the debug view, software-rendered with OpenCV.
+"""Soft form mannequin, software-rendered with OpenCV from the existing body rig.
 
-The body is rebuilt every frame from the 33 mat-frame joints: a faceted head, a box torso, a neck,
-six-sided tapered limbs, block hands and wedge feet. The person's left is tinted orange and right
-blue (the skeleton colours), so a left/right flip is obvious. Faces are flat shaded, back faces are
-culled and the rest are painted far to near. The floor grid, mat, markers and the body's shadow are
-drawn underneath so foot contact can be judged. Orbit with the mouse or the keys in `legend_lines`.
+Rounded sage limbs and torso, neutral oval head, and optional left/right accents.
+Geometry is visual only: tracked joints, body constraints and rep counting are unchanged.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -22,13 +20,12 @@ SIZE = (640, 360)
 HFOV_DEG = 60.0
 LEFT_TINT = (40, 140, 240)  # BGR orange: the person's left
 RIGHT_TINT = (235, 170, 40)  # BGR blue: the person's right
-BODY_TINT = (170, 170, 180)
-SKIN_TINT = (150, 175, 205)
-EDGE = (40, 40, 40)
+BODY_TINT = (195, 212, 199)
+SKIN_TINT = (199, 216, 226)
 LIGHT = np.array([-0.3, 1.0, 0.6]) / np.linalg.norm([-0.3, 1.0, 0.6])
-BG = (32, 32, 32)
+BG = (34, 37, 32)
 FLOOR_GRID = (60, 60, 60)
-MAT_FILL = (110, 60, 90)
+MAT_FILL = (60, 72, 51)
 SHADOW_Y = 0.001
 
 # name, joint a, joint b, radius at a, radius at b, sides, tint
@@ -76,57 +73,109 @@ def _prism(a, b, ra, rb, sides) -> list[np.ndarray]:
     return faces + [np.array(ring_a[::-1]), np.array(ring_b)]
 
 
-def _icosphere(c, r) -> list[np.ndarray]:
-    p = (1 + 5 ** 0.5) / 2
-    v = np.array([[-1, p, 0], [1, p, 0], [-1, -p, 0], [1, -p, 0], [0, -1, p], [0, 1, p],
-                  [0, -1, -p], [0, 1, -p], [p, 0, -1], [p, 0, 1], [-p, 0, -1], [-p, 0, 1]], float)
-    v = v / np.linalg.norm(v, axis=1, keepdims=True) * r + c
-    tris = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4), (11, 10, 2),
-            (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8), (3, 8, 9), (4, 9, 5),
-            (2, 4, 11), (6, 2, 10), (8, 6, 7), (9, 8, 1)]
-    return [v[list(t)] for t in tris]
+@lru_cache(maxsize=8)
+def _sphere_faces(lat=6, lon=10):
+    """Cached unit topology, with non-degenerate triangles at the poles."""
+    rings = []
+    for y in range(1, lat):
+        p = y * np.pi / lat
+        rings.append(np.array([[np.sin(p)*np.cos(t), np.cos(p), np.sin(p)*np.sin(t)]
+                               for t in np.arange(lon)*2*np.pi/lon]))
+    faces = []
+    for i in range(lon):
+        k = (i + 1) % lon
+        faces.append(np.array([[0, 1, 0], rings[0][i], rings[0][k]]))
+        for a, b in zip(rings, rings[1:]):
+            faces.append(np.array([a[i], b[i], b[k], a[k]]))
+        faces.append(np.array([rings[-1][i], [0, -1, 0], rings[-1][k]]))
+    return tuple(faces)
 
 
-def build_mesh(joints, feet_locked: dict[str, bool] | None = None) -> list[Part]:
-    """Low-poly body parts from (33, 3) mat-frame joints; parts with a missing joint are left out."""
+def _ellipsoid(center, radii, basis=None, lat=6, lon=10):
+    basis = np.eye(3) if basis is None else basis
+    return [(f * radii) @ basis.T + center for f in _sphere_faces(lat, lon)]
+
+
+def _axis_basis(a, b):
+    up = b - a
+    length = np.linalg.norm(up)
+    if length < 1e-6:
+        return None
+    up = up / length
+    helper = np.array([0., 1., 0.]) if abs(up[1]) < .9 else np.array([1., 0., 0.])
+    side = np.cross(up, helper)
+    side /= np.linalg.norm(side)
+    return np.column_stack((side, up, np.cross(side, up)))
+
+
+def build_mesh(joints, feet_locked: dict[str, bool] | None = None,
+               side_accents: bool = False) -> list[Part]:
+    """Rounded body from (33, 3) joints; omit only parts with missing endpoints."""
     J = np.asarray(joints, float)
     parts: list[Part] = []
     sl, sr, hl, hr = J[11], J[12], J[23], J[24]
     shoulders = (sl + sr) / 2 if _ok(sl, sr) else None
+    basis = np.eye(3)
     if _ok(sl, sr, hl, hr):
         hips = (hl + hr) / 2
-        fwd = np.cross(hl - hr, shoulders - hips)  # left x up = forward
-        if np.linalg.norm(fwd) > 1e-6:
-            fwd = fwd / np.linalg.norm(fwd)
-            corners = {"sl": (sl, 0.09), "sr": (sr, 0.09), "hl": (hl, 0.08), "hr": (hr, 0.08)}  # half depth, m
-            v = {k: p + fwd * dz for k, (p, dz) in corners.items()}  # front of the torso
-            b = {k: p - fwd * dz for k, (p, dz) in corners.items()}  # back
-            faces = [np.array([v["sl"], v["sr"], v["hr"], v["hl"]]), np.array([b["sl"], b["hl"], b["hr"], b["sr"]]),
-                     np.array([v["sl"], v["hl"], b["hl"], b["sl"]]), np.array([v["sr"], b["sr"], b["hr"], v["hr"]]),
-                     np.array([v["sl"], b["sl"], b["sr"], v["sr"]]), np.array([v["hl"], v["hr"], b["hr"], b["hl"]])]
+        up = shoulders - hips
+        forward = np.cross(sl - sr, up)
+        if np.linalg.norm(forward) > 1e-6:
+            up /= np.linalg.norm(up)
+            forward /= np.linalg.norm(forward)
+            side = np.cross(up, forward)
+            basis = np.column_stack((side, up, forward))
+            sw = np.linalg.norm(sl - sr) / 2
+            hw = np.linalg.norm(hl - hr) / 2 + .025
+            levels = [(0, hw, .09), (.18, hw*1.06, .10),
+                      (.48, sw*.78, .103), (.80, sw*1.02, .112), (1, sw*.88, .09)]
+            angles = np.arange(16)*2*np.pi/16
+            rings = [hips + (shoulders-hips)*t + np.cos(angles)[:, None]*w*side
+                     + np.sin(angles)[:, None]*d*forward for t, w, d in levels]
+            faces = [np.array([a[i], a[(i+1)%16], b[(i+1)%16], b[i]])
+                     for a, b in zip(rings, rings[1:]) for i in range(16)]
+            faces += [rings[0][::-1], rings[-1]]
             parts.append(Part("torso", faces, BODY_TINT))
+            parts.append(Part("pelvis", _ellipsoid(hips-.025*up, [hw+.018, .10, .10], basis), BODY_TINT))
     ears = [J[7], J[8]]
     head = (ears[0] + ears[1]) / 2 if _ok(*ears) else (J[0] if _ok(J[0]) else None)
     if head is not None:
-        r = float(np.clip(0.6 * np.linalg.norm(ears[0] - ears[1]), 0.08, 0.13)) if _ok(*ears) else 0.1
-        parts.append(Part("head", _icosphere(head, r), SKIN_TINT))
+        r = float(np.clip(.6*np.linalg.norm(ears[0]-ears[1]), .08, .13)) if _ok(*ears) else .1
+        parts.append(Part("head", _ellipsoid(head, [r, r*1.30, r*1.02], basis, 8, 12), SKIN_TINT))
         if shoulders is not None:
-            neck = _prism(shoulders, head - np.array([0.0, 0.7 * r, 0.0]), 0.05, 0.045, 6)
+            neck = _prism(shoulders, head-basis[:, 1]*r*.7, .039, .039, 12)
             if neck:
-                parts.append(Part("neck", neck, SKIN_TINT))
-    for name, a, b, ra, rb, sides, tint in LIMBS:
-        if _ok(J[a], J[b]):
-            faces = _prism(J[a], J[b], ra, rb, sides)
+                parts.append(Part("neck", neck, BODY_TINT))
+    for name, a, b, ra, rb, _, tint in LIMBS:
+        if not _ok(J[a], J[b]):
+            continue
+        tint = tint if side_accents else BODY_TINT
+        if name.startswith("foot"):
+            # The long axis follows heel-to-toe; the rig still owns foot contact.
+            fb = _axis_basis(J[a], J[b])
+            if fb is None:
+                continue
+            length = np.linalg.norm(J[b]-J[a])
+            faces = _ellipsoid((J[a]+J[b])/2, [.045, length/2+.018, .028], fb)
+            outline = WHITE if (feet_locked or {}).get(name[-1]) else None
+            parts.append(Part(name, faces, tint, outline))
+        else:
+            faces = _prism(J[a], J[b], ra, rb, 12)
             if faces:
-                side = name[-1]
-                outline = WHITE if name.startswith("foot") and (feet_locked or {}).get(side) else None
-                parts.append(Part(name, faces, tint, outline))
+                parts.append(Part(name, faces, tint))
+    for offset, side in [(0, "l"), (1, "r")]:
+        tint = (LEFT_TINT if side == "l" else RIGHT_TINT) if side_accents else BODY_TINT
+        for joint, radius in [(11, .052), (13, .04), (15, .03), (23, .075), (25, .055), (27, .035)]:
+            if _ok(J[joint+offset]):
+                parts.append(Part(f"joint_{joint}_{side}", _ellipsoid(J[joint+offset], [radius]*3), tint))
     for name, wrist, tips, tint in HANDS:
         pts = [J[k] for k in tips if _ok(J[k])]
         if _ok(J[wrist]) and pts:
-            faces = _prism(J[wrist], np.mean(pts, axis=0), 0.03, 0.025, 4)
-            if faces:
-                parts.append(Part(name, faces, tint))
+            end = np.mean(pts, axis=0)
+            hb = _axis_basis(J[wrist], end)
+            if hb is not None:
+                faces = _ellipsoid((J[wrist]+end)/2, [.028, np.linalg.norm(end-J[wrist])/2+.01, .022], hb)
+                parts.append(Part(name, faces, tint if side_accents else BODY_TINT))
     return parts
 
 
@@ -148,6 +197,7 @@ class AvatarView:
     dist_m: float = 4.6
     target: tuple = (0.0, 0.95, 0.0)
     show_3d: bool = True
+    side_accents: bool = False
     rig: BodyRig = field(default_factory=BodyRig)  # fixed body proportions for the drawn person
     _defaults: tuple = field(default=None, repr=False)
 
@@ -194,6 +244,8 @@ class AvatarView:
             self.yaw_deg, self.pitch_deg, self.dist_m = self._defaults
         elif c == "v":
             self.show_3d = not self.show_3d
+        elif c == "a":
+            self.side_accents = not self.side_accents
         elif c == "b":
             self.rig.reset()
         elif c == "c":
@@ -206,7 +258,7 @@ class AvatarView:
 
 def legend_lines() -> list[str]:
     return ["b: re-measure body   c: body rules on/off   v: 3D <-> front view",
-            "drag / j/l: orbit   i/k: tilt   +/-: zoom   0: reset view"]
+            "drag / j/l: orbit   i/k: tilt   +/-: zoom   0: reset view   a: side colors"]
 
 
 def _project(X, K, R, t):
@@ -245,7 +297,7 @@ def render_avatar(joints, mat: MatConfig, view: AvatarView, size=SIZE, feet_lock
     img = np.full((h, w, 3), BG, np.uint8)
     K, (R, t) = view.K(size), view.pose()
     _draw_floor(img, mat, K, R, t)
-    parts = build_mesh(joints, feet_locked) if joints is not None else []
+    parts = build_mesh(joints, feet_locked, view.side_accents) if joints is not None else []
     if parts:
         uv, z = _project(shadow_points(parts), K, R, t)
         ok = z > 0.1
@@ -254,28 +306,35 @@ def render_avatar(joints, mat: MatConfig, view: AvatarView, size=SIZE, feet_lock
             shade = img.copy()
             cv2.fillConvexPoly(shade, hull, (15, 15, 15), cv2.LINE_AA)
             cv2.addWeighted(shade, 0.55, img, 0.45, 0, img)
-        eye = view.eye()
+        # Batch normals and projection so the rounder mesh stays inexpensive live.
+        faces = [face for part in parts for face in part.faces]
+        centers = np.array([face.mean(axis=0) for face in faces])
+        origins = np.array([part.centre for part in parts for _ in part.faces])
+        normals = np.cross(np.array([f[1]-f[0] for f in faces]),
+                           np.array([f[2]-f[0] for f in faces]))
+        lengths = np.linalg.norm(normals, axis=1)
+        normals /= np.maximum(lengths[:, None], 1e-12)
+        normals[np.einsum("ij,ij->i", normals, centers-origins) < 0] *= -1
+        visible = (lengths > 1e-12) & (np.einsum("ij,ij->i", normals, view.eye()-centers) > 0)
+        colors = np.array([part.tint for part in parts for _ in part.faces])
+        colors = (colors * (.55+.45*np.maximum(0, normals @ LIGHT))[:, None]).astype(int)
+        offsets = np.concatenate(([0], np.cumsum([len(f) for f in faces])))
+        uv, depths = _project(np.vstack(faces), K, R, t)
+        pixels = np.round(uv).astype(np.int32)
         polys = []
+        for i in np.flatnonzero(visible):
+            lo, hi = offsets[i:i+2]
+            if (depths[lo:hi] > .1).all():
+                polys.append((float(depths[lo:hi].mean()), i, pixels[lo:hi]))
+        for _, i, poly in sorted(polys, key=lambda p: -p[0]):
+            cv2.fillConvexPoly(img, poly, tuple(map(int, colors[i])), cv2.LINE_AA)
+        # A single foot silhouette preserves the contact cue without wireframe facets.
         for part in parts:
-            for face in part.faces:
-                c = face.mean(axis=0)
-                n = np.cross(face[1] - face[0], face[2] - face[0])
-                if np.linalg.norm(n) < 1e-12:
-                    continue
-                n = n / np.linalg.norm(n)
-                if n @ (c - part.centre) < 0:  # make the normal point out of the part
-                    n = -n
-                if n @ (eye - c) <= 0:  # facing away from the viewer
-                    continue
-                fuv, fz = _project(face, K, R, t)
-                if (fz <= 0.1).any():
-                    continue
-                shade = 0.35 + 0.65 * max(0.0, float(n @ LIGHT))
-                color = tuple(int(min(255, ch * shade)) for ch in part.tint)
-                polys.append((float(fz.mean()), np.round(fuv).astype(np.int32), color, part.outline or EDGE))
-        for _, poly, color, edge in sorted(polys, key=lambda p: -p[0]):  # far to near
-            cv2.fillConvexPoly(img, poly, color, cv2.LINE_AA)
-            cv2.polylines(img, [poly], True, edge, 1, cv2.LINE_AA)
+            if part.outline is not None:
+                uv, z = _project(np.vstack(part.faces), K, R, t)
+                if (z > .1).all():
+                    hull = cv2.convexHull(np.round(uv).astype(np.int32))
+                    cv2.polylines(img, [hull], True, part.outline, 1, cv2.LINE_AA)
     for k, line in enumerate(hud or []):
         draw_text(img, line, (8, 20 + 18 * k), RED if line.startswith("REC") else WHITE, 0.45)
     for k, line in enumerate(legend_lines()):

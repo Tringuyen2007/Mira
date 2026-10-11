@@ -36,6 +36,8 @@ accurately once (a 3% error shifts the body ~6 cm in depth):
 python -m vision.cams --remove A              # drop camera A from the config (or assign only B)
 python -m vision.calib_extrinsics             # B and the markers: the whole calibration
 python -m vision.debug_view --height-cm 175   # your height, saved in config/person.yaml
+python -m vision.run_engine --exercise squat --reps 3 --height-cm 170  # guided live session with camera preview and rep count
+python -m vision.run_engine --exercise squat --reps 3 --height-cm 170 --record  # save pose data if a count looks wrong
 python -m vision.checks                       # one-camera checks (uses the saved height)
 python -m vision.mono_eval FILE...            # B-only replay of a two-camera recording vs triangulation
 python -m vision.stability_eval FILE... [--height-cm 170]  # how steady the one-camera body is (still, spikes, lag)
@@ -84,8 +86,9 @@ If exposure changes make fps drop, lock exposure in the Logitech app: OpenCV on 
 
 ### 3D view
 
-The debug view's bottom-right panel shows a low-poly 3D person rebuilt every frame from the joints
-(left side orange, right side blue, a shadow on the floor, anchored feet outlined white). Drag in it
+The debug and engine previews show the Soft form 3D mannequin rebuilt every frame from the joints
+(rounded sage body, neutral oval head, floor shadow, anchored feet outlined white). Press a for
+left-orange/right-blue diagnostic colors. Drag in it
 to orbit; keys: j/l orbit, i/k tilt, +/- zoom, 0 reset, v switch to the flat front view, b re-measure
 the body. Works on replays too.
 
@@ -168,6 +171,7 @@ for frame in replay("data/recordings/<file>.jsonl"):
     frame.tracking  # "3d" | "single_cam_A" | "single_cam_B" | "lost"
     frame.body  # "measuring" | "ready"
     frame.body_progress  # 0..1 while measuring
+    frame.flags  # includes "pose_held" when a brief one-camera occlusion reuses the last fitted body
 ```
 
 With one camera the body is measured first, from about 40 frames (1.3 s) of the person standing
@@ -176,3 +180,5 @@ straight; crouching or moving frames don't count. Until then `frame.body` is `"m
 form rules. Prompt the person to stand straight while it says `"measuring"` and a person is tracked;
 start counting when it turns `"ready"`. It stays `"ready"` through a short loss and goes back to
 `"measuring"` for a new person (after 5 s with nobody). Two-camera triangulation is always `"ready"`.
+Do not count reps or judge form on a frame with `"pose_held"` in `frame.flags`: its joints are the last
+reliable pose, held for at most 0.5 s while the lower-body detection is unreliable.

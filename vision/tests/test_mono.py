@@ -48,6 +48,38 @@ def test_one_camera_pipeline_fits_a_moving_body_with_the_right_scale():
     assert np.median(errs) < 0.04  # one camera: a few cm
 
 
+def test_one_camera_holds_an_occluded_implausible_depth_jump():
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    for k in range(60):
+        before = pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30))
+    assert before.tracker == "model"
+
+    # The lower body disappears while the detected torso suddenly shrinks as though the person
+    # moved two metres away in one frame. The person is still at the original position next frame.
+    false_pose = pose_from_points(cam, X + [0.0, 0.0, -2.0], t=60 / 30)
+    false_pose.vis[[27, 28, 29, 30, 31, 32]] = 0.1
+    bad = pipe.process(60 / 30, None, false_pose)
+    after = pipe.process(61 / 30, None, pose_from_points(cam, X, t=61 / 30))
+    assert "pose_held" in bad.frame.flags
+    assert "pose_held" not in after.frame.flags
+    for out in (bad, after):
+        assert np.linalg.norm(out.frame.joints[[23, 24]].mean(axis=0) - X[[23, 24]].mean(axis=0)) < 0.15
+
+
+def test_one_camera_does_not_hold_an_occluded_pose_forever():
+    cam, X = _cam_b(), standing_skeleton()
+    pipe = Pipeline({"B": cam}, mat=MatConfig(), height_m=stature(X - (X[23] + X[24]) / 2))
+    for k in range(60):
+        pipe.process(k / 30, None, pose_from_points(cam, X, t=k / 30))
+    held = []
+    for k in range(60, 80):
+        pose = pose_from_points(cam, X + [0.0, 0.0, -2.0], t=k / 30)
+        pose.vis[[27, 28, 29, 30, 31, 32]] = 0.1
+        held.append("pose_held" in pipe.process(k / 30, None, pose).frame.flags)
+    assert held[0] and not held[-1]
+
+
 def test_one_camera_without_feet_keeps_the_last_position():
     cam, X = _cam_b(), standing_skeleton()
     J1 = mono_joints(pose_from_points(cam, X), cam)
@@ -343,6 +375,18 @@ def test_one_camera_hold_frees_the_position_more_than_an_angle_and_moving_points
     assert np.allclose(still[T.ROOT], T.GATE_ROOT_MIN ** -T.GATE_POWER)  # the position held less
     moving = tr._hold((None, uv + T.GATE_FULL_PX, w))  # everything moved a full GATE_FULL_PX
     assert np.allclose(moving, 1.0)
+
+
+def test_one_camera_hold_keeps_unobserved_leg_angles_still():
+    import vision.tracker as T
+
+    tr = T.ModelTracker({"B": _cam_b()})
+    uv, visible = np.zeros((33, 2)), np.ones(33)
+    tr._hold((None, uv, visible))
+    hidden = visible.copy()
+    hidden[[26, 28, 30, 32]] = 0.0  # right knee, ankle, heel and toe disappear
+    hold = tr._hold((None, uv, hidden))
+    assert hold[T.LEG["r"][1]] == T.GATE_MIN_GAIN ** -T.GATE_POWER
 
 
 def test_one_camera_held_body_keeps_its_feet_on_the_floor():

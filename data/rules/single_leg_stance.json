@@ -1,0 +1,11 @@
+{
+  "exercise": "single_leg_stance",
+  "target_hold_s": 10.0,
+  "min_hold_s": 2.0,
+  "enter_s": 0.25,
+  "exit_s": 0.2,
+  "rules": [
+    {"id": "trunk_sway", "metric": "trunk_side_lean_abs", "op": "gt", "threshold": 15, "duration_s": 0.5, "cooldown_s": 2.0},
+    {"id": "pelvis_rotation", "metric": "pelvis_rotation_abs", "op": "gt", "threshold": 20, "duration_s": 0.5, "cooldown_s": 2.0}
+  ]
+}

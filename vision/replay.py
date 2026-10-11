@@ -12,7 +12,8 @@ from typing import Iterator
 
 import numpy as np
 
-from vision.config import CameraConfig, load_cameras, load_mat
+from vision.config import CameraConfig, MatConfig, load_cameras, load_mat
+from vision.measures import image_squat_metrics
 from vision.pipeline import Pipeline, PipelineOutput
 from vision.types import FrameResult, PoseResult
 
@@ -53,11 +54,13 @@ def iter_frames(path) -> Iterator[tuple[FrameResult, dict[str, PoseResult | None
 
 def replay_outputs(path, retriangulate: bool = False, cams: dict[str, CameraConfig] | None = None,
                    realtime: bool = True, speed: float = 1.0, smoothing: bool = True,
-                   anchor_feet: bool = True, tracker: str = "auto", height_m: float | None = None
+                   anchor_feet: bool = True, tracker: str = "auto", height_m: float | None = None,
+                   mat: MatConfig | None = None
                    ) -> Iterator[PipelineOutput]:
     pipeline = None
     if retriangulate:
-        pipeline = Pipeline(cams if cams is not None else load_cameras(), smoothing=smoothing, mat=load_mat(),
+        pipeline = Pipeline(cams if cams is not None else load_cameras(), smoothing=smoothing,
+                            mat=mat if mat is not None else load_mat(),
                             anchor_feet=anchor_feet, tracker=tracker, height_m=height_m)
     start_t = start_wall = None
     for frame, raw, skew, people in iter_records(path):
@@ -73,6 +76,8 @@ def replay_outputs(path, retriangulate: bool = False, cams: dict[str, CameraConf
         elif pipeline is not None:
             yield pipeline.process(frame.t, raw.get("A"), raw.get("B"), skew)
         else:
+            if frame.tracking.startswith("single_cam_") and not frame.image_metrics:
+                frame.image_metrics = image_squat_metrics(raw.get(frame.tracking[-1]))
             yield PipelineOutput(frame=frame, raw=raw, tri=None, skew_s=skew)
 
 

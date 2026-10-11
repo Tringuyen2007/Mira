@@ -13,6 +13,8 @@ from vision.frames import world_to_mat
 from vision.triangulate import Triangulation, triangulate_pair
 from vision.select import PersonSelector
 from vision.mono import mono_joints
+from vision.measures import image_squat_metrics, populate_angles
+from vision.physics import PhysicsEstimator
 from vision.tracker import ModelTracker
 from vision.types import LEFT_HIP, RIGHT_HIP, CameraPeople, FrameResult, PoseResult, swap_left_right
 
@@ -107,8 +109,14 @@ class Pipeline:
         self.min_vis, self.max_reproj_px = min_vis, max_reproj_px
         self._cleaner = Cleaner(cams)
         self._filter = OneEuroFilter() if smoothing else None
+        self._physics = PhysicsEstimator()
 
-    def process(self, t: float, a, b, skew_s: float | None = None) -> PipelineOutput:
+    def reset_physics(self) -> None:
+        """Drop temporal load history after a camera move or session boundary."""
+        self._physics.reset()
+
+    def process(self, t: float, a, b, skew_s: float | None = None,
+                camera_moved: bool = False) -> PipelineOutput:
         """t is unix seconds (the FrameResult clock).
 
         a, b: per camera a PoseResult (one person, as in old recordings), a CameraPeople or list of
@@ -179,7 +187,16 @@ class Pipeline:
             joints = self._filter(joints, t)
         ready = self._model is None or self._model.ready
         frame = FrameResult(t=t, joints=joints, conf=conf, tracking=tracking, body="ready" if ready else "measuring",
-                            body_progress=1.0 if ready else self._model.progress)
+                            body_progress=1.0 if ready else self._model.progress,
+                            flags=(["pose_held"] if self._model is not None and self._model.held else [])
+                                  + (["camera_moved"] if camera_moved else []))
+        populate_angles(frame)
+        if self._single is not None and ready and tracking != "lost" and "pose_held" not in frame.flags:
+            frame.image_metrics = image_squat_metrics({"A": a, "B": b}[self._single])
+        if camera_moved:
+            self.reset_physics()  # calibration no longer places the body reliably on the mat
+        else:
+            self._physics.apply(frame)
         return PipelineOutput(frame=frame, raw=raw, tri=tri, skew_s=skew_s, swapped=swapped,
                               people=people, ignored=ignored, dropped=dropped, feet_locked=feet_locked,
                               tracker=used, fit_ms=fit_ms)

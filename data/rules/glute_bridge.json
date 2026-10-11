@@ -1,0 +1,15 @@
+{
+  "exercise": "glute_bridge",
+  "metric": "hip_mean",
+  "start_below": 135,
+  "enter_above": 145,
+  "target_above": 160,
+  "finish_below": 135,
+  "min_rom_deg": 25,
+  "min_rep_s": 0.7,
+  "max_rep_s": 8.0,
+  "rules": [
+    {"id": "hip_asymmetry", "metric": "hip_difference", "op": "gt", "threshold": 18, "duration_s": 0.3, "cooldown_s": 2.0},
+    {"id": "incomplete_extension", "metric": "hip_mean", "op": "lt", "threshold": 170, "duration_s": 0.5, "cooldown_s": 2.0, "phase": "top"}
+  ]
+}

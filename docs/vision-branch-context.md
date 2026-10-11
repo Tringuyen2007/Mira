@@ -61,7 +61,15 @@ balance / on-mat / falls.
   floor, the same person is 1.77 m tall in `060807` and 1.45–1.47 m in `054226` / `055039`. One entered
   height can't match both. With the height each calibration implies, everything improves further
   (`055039` at 147 cm: moving p90 2.2 cm, 2D match 5.7 px). Likely zoom/pose calibration; `060807` sees
-  only the two near markers.
+  only the two near markers. The later `071424` session (170 cm entered) implies 1.69 m from standing
+  frames, but its saved calibration includes markers 0, 1 and 3, not marker 2.
+- **Latest motion stability (`071424`, 170 cm):** lower-body occlusion made MediaPipe's torso suddenly
+  shrink and sometimes made the fit jump more than a metre. The one-camera tracker now briefly holds its
+  last fit when all feet disappear or the torso shrinks while feet are unreliable, marks these frames with
+  `frame.flags = ["pose_held"]`, holds angles with no visible 2D evidence, and rejects distant recovery
+  poses. On this recording: jumps >8 cm 74 → 57; ankle p99 17.8 → 8.3 cm; largest jump 139 → 61 cm;
+  still p90 0.69 cm, 2D match 8.0 → 8.1 px, lag 1.40 → 1.70 frames. Remaining spikes during fast/occluded
+  motion are not solved; do not count reps or judge form on `pose_held` frames.
 - **Remaining limit:** camera B is low and far (was 0.83 m when this was measured). It looks down at the feet at only 12°,
   so feet-on-floor depth wobbles >6 cm in some frames. **Next physical step: raise B to ~1.6–2 m, tilt it
   down, re-run `calib_extrinsics` seeing a far marker.** Not done yet.

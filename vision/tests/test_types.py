@@ -25,10 +25,12 @@ def test_pose_result_round_trip():
 def test_frame_result_round_trip_with_nan():
     joints = np.zeros((33, 3))
     joints[5] = np.nan
-    f = FrameResult(t=100.0, joints=joints, conf=np.full(33, 0.5), tracking="3d", flags=["x"])
+    f = FrameResult(t=100.0, joints=joints, conf=np.full(33, 0.5), tracking="3d", flags=["x"],
+                    image_metrics={"knee_mean": 101.0})
     g = FrameResult.from_dict(json.loads(json.dumps(f.to_dict(), allow_nan=False)))
     np.testing.assert_array_equal(g.joints, joints)
     assert g.tracking == "3d" and g.flags == ["x"] and g.com is None and g.phase == "idle"
+    assert g.image_metrics == {"knee_mean": 101.0}
 
 
 def test_frame_result_body_state_round_trip_and_old_files_load_as_ready():

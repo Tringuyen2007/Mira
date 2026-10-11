@@ -78,6 +78,7 @@ class FrameResult:
     joints: np.ndarray  # (33, 3) metres, mat frame, NaN where unknown
     conf: np.ndarray  # (33,) 0..1
     angles: dict[str, float] = field(default_factory=dict)
+    image_metrics: dict[str, float] = field(default_factory=dict)  # selected camera's 2D exercise evidence
     com: tuple[float, float, float] | None = None
     cop: tuple[float, float] | None = None
     load_l_pct: float | None = None
@@ -98,6 +99,7 @@ class FrameResult:
             "joints": to_json_array(self.joints),
             "conf": to_json_array(self.conf),
             "angles": dict(self.angles),
+            "image_metrics": dict(self.image_metrics),
             "com": None if self.com is None else list(self.com),
             "cop": None if self.cop is None else list(self.cop),
             "load_l_pct": self.load_l_pct,
@@ -120,6 +122,7 @@ class FrameResult:
             joints=from_json_array(d["joints"]),
             conf=from_json_array(d["conf"]),
             angles=d.get("angles") or {},
+            image_metrics=d.get("image_metrics") or {},
             com=None if d.get("com") is None else tuple(d["com"]),
             cop=None if d.get("cop") is None else tuple(d["cop"]),
             load_l_pct=d.get("load_l_pct"),

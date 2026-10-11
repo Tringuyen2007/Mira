@@ -170,3 +170,35 @@ def test_floor_position_trusts_the_planted_foot_not_the_lifted_one():
     a = pose_from_points(cams["A"], X)
     xz = floor_position(a, cams["A"])
     np.testing.assert_allclose(xz, X[[28, 30], :][:, [0, 2]].mean(axis=0), atol=0.06)  # the right (planted) foot
+
+
+def test_one_camera_keeps_tracked_person_lying_on_mat():
+    from vision.select import plausible_height
+
+    cams = _cams()
+    sel = PersonSelector(cams, MAT)
+    _, standing = _person(cams, 0.0, 0.0)
+    cams["A"].R = None
+    assert sel.select(0.0, [], [standing]).b is standing
+
+    foot_y = standing.lm2d[[27, 28, 29, 30], 1].mean()
+    for k in range(1, 11):
+        folded = pose_from_points(cams["B"], standing_skeleton())
+        folded.lm2d[:, 1] = foot_y + (standing.lm2d[:, 1] - foot_y) * (1 - 0.08 * k)
+        assert sel.select(k / 30, [], [folded]).b is folded
+    lying = folded
+    assert not plausible_height(lying, cams["B"], floor_position(lying, cams["B"]))
+    for k in range(11, 90):
+        picked = sel.select(k / 30, [], [lying])
+        assert picked.b is lying
+        assert picked.position is not None
+
+
+def test_one_camera_does_not_acquire_lying_pose_without_a_track():
+    cams = _cams()
+    _, standing = _person(cams, 0.0, 0.0)
+    cams["A"].R = None
+    lying = pose_from_points(cams["B"], standing_skeleton())
+    foot_y = standing.lm2d[[27, 28, 29, 30], 1].mean()
+    lying.lm2d[:, 1] = foot_y + (standing.lm2d[:, 1] - foot_y) * 0.2
+    assert PersonSelector(cams, MAT).select(0.0, [], [lying]).b is None

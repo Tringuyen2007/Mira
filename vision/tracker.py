@@ -222,6 +222,15 @@ def forward(p: np.ndarray, shape: BodyShape) -> np.ndarray:
     return X
 
 
+def _recovery_local(prev: np.ndarray, fresh: np.ndarray, shape: BodyShape) -> bool:
+    """A one-camera restart may correct a pose, but not jump to a distant body explanation."""
+    if np.linalg.norm(fresh[ROOT] - prev[ROOT]) >= RECOVER_ROOT_M:
+        return False
+    core = [11, 12, 23, 24, 27, 28]
+    step = np.linalg.norm(forward(fresh, shape)[core] - forward(prev, shape)[core], axis=1)
+    return bool(np.max(step) < RECOVER_CORE_M)
+
+
 def _dependency() -> np.ndarray:
     """(33, N_PARAMS) bool: which parameters move which landmark (for the Jacobian's sparsity)."""
     D = np.zeros((33, N_PARAMS), bool)
@@ -254,6 +263,9 @@ _LIMBS = [list(range(12, 16)), list(range(16, 20)), list(range(20, 26)), list(ra
 FD_GROUPS = [[j] for j in range(12)] + [[limb[i] for limb in _LIMBS if i < len(limb)] for i in range(6)]
 ITERATIONS = 3
 RECOVER_PX = 20.0  # a fit whose median 2D residual is above this also tries a fresh start from triangulation
+RECOVER_ROOT_M = 0.25  # a fresh start must not teleport a continuously tracked person
+RECOVER_CORE_M = 0.25  # nor flip the trunk or legs to another one-camera explanation
+QUALITY_HOLD_S = 0.5  # brief occlusions may be held; never keep a stale body indefinitely
 SMOOTH_MIN_CUTOFF = 0.7  # Hz: One Euro on the pose numbers (0 = off)
 SMOOTH_BETA = 6.0  # two cameras: how much faster it follows when the pose changes quickly
 ROOT_MIN_CUTOFF = 3.0  # Hz: two cameras pin the body's position well, so it is smoothed less
@@ -314,6 +326,10 @@ class ModelTracker:
         self._smooth = OneEuroFilter(cutoff, beta) if SMOOTH_MIN_CUTOFF else None
         self._gate_uv = self._gate_w = None  # one camera: the previous frame's 2D points, for the gate
         self._gate_t: float | None = None  # time of the last gated frame
+        self._torso_width_px: float | None = None  # recent torso size while the feet are visible
+        self._last_fit: np.ndarray | None = None
+        self._quality_hold_since: float | None = None
+        self.held = False  # last output reused because this frame's one-camera pose was unreliable
 
     @property
     def ready(self) -> bool:
@@ -436,6 +452,7 @@ class ModelTracker:
         produced_at = self.world_scale  # the scale the pipeline built this frame's one-camera joints at
         if self._last_seen is not None and t - self._last_seen > FORGET_S:
             self.reset()
+        self.held = False
         if tracking == "lost" or joints is None:
             return None
         self._last_seen = t
@@ -461,6 +478,30 @@ class ModelTracker:
                             self.shape = self.shape.scaled(self.world_scale)
             if self.shape is None:
                 return None
+        if self.single:
+            v = views.get(next(iter(self.cams)))
+            if v is not None and v.detected and np.isfinite(v.lm2d[[11, 12, 23, 24]]).all():
+                width = float(np.median([np.linalg.norm(v.lm2d[a] - v.lm2d[b])
+                                         for a, b in ((11, 12), (23, 24))]))
+                foot_vis = float(np.median(v.vis[[27, 28, 29, 30]]))
+                # When feet disappear and the torso abruptly shrinks, the apparent depth is not
+                # trustworthy. Hold the last fitted body until the image supports a fresh placement.
+                feet_lost = bool(np.max(v.vis[[27, 28, 29, 30]]) < 0.2)
+                torso_collapsed = (self._torso_width_px is not None and foot_vis < 0.5
+                                   and width < 0.9 * self._torso_width_px)
+                if self._last_fit is not None and (feet_lost or torso_collapsed):
+                    if self._quality_hold_since is None:
+                        self._quality_hold_since = t
+                    if t - self._quality_hold_since < QUALITY_HOLD_S:
+                        self._gate_uv = self._gate_w = None
+                        self.last_ms = 0.0
+                        self.held = True
+                        return self._last_fit.copy()
+                else:
+                    self._quality_hold_since = None
+                if foot_vis >= 0.5:
+                    self._torso_width_px = (width if self._torso_width_px is None else
+                                            0.95 * self._torso_width_px + 0.05 * width)
         obs = []
         for n, cam in self.cams.items():
             v = views.get(n)
@@ -499,7 +540,8 @@ class ModelTracker:
             fresh = params_from_joints(np.asarray(joints, float), self.shape)
             if fresh is not None:
                 x2, _ = self._solve(fresh, obs, fresh, anc, S, world)
-                if self._median_residual(x2, obs) < self._median_residual(x, obs):
+                if (self._median_residual(x2, obs) < self._median_residual(x, obs)
+                        and (not self.single or _recovery_local(prev, x2, self.shape))):
                     x = x2
                     self._smooth.reset() if self._smooth is not None else None  # a recovered pose snaps into place
                     self.recoveries += 1
@@ -510,7 +552,9 @@ class ModelTracker:
         self.last_cost = float(cost)
         # smooth the pose numbers (not the joints): steady when still, quick when moving, bones exact
         if self.single:  # the gate was part of the solve; adaptive smoothing after it
-            return forward(self._smooth(x, t) if (self._smooth is not None and SINGLE_SMOOTH_TOO) else x, self.shape)
+            fitted = forward(self._smooth(x, t) if (self._smooth is not None and SINGLE_SMOOTH_TOO) else x, self.shape)
+            self._last_fit = fitted.copy()
+            return fitted
         return forward(self._smooth(x, t) if self._smooth is not None else x, self.shape)
 
     def _hold(self, ob) -> np.ndarray | None:
@@ -529,7 +573,7 @@ class ModelTracker:
             return None
         ok = (w > 0) & (prev_w > 0)
         motion = np.where(ok, np.linalg.norm(uv - prev_uv, axis=1), np.nan)
-        gain = np.ones(N_PARAMS)
+        gain = np.full(N_PARAMS, GATE_MIN_GAIN)  # no visible motion evidence means keep the prior pose
         for j in range(N_PARAMS):
             m = motion[DEPENDS[:, j]]
             m = m[np.isfinite(m)]

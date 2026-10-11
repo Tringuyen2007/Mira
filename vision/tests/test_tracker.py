@@ -4,7 +4,7 @@ import numpy as np
 
 from vision.pipeline import Pipeline
 from vision.tests.synth import pose_from_points, standing_skeleton, target_cams
-from vision.tracker import ModelTracker, forward, measure, params_from_joints
+from vision.tracker import ModelTracker, _recovery_local, forward, measure, params_from_joints
 
 
 def _views(cams, X, rng=None, noise=0.0):
@@ -48,6 +48,21 @@ def test_fit_recovers_from_a_wrong_pose():
     for k in range(12, 16):
         out = tr.update(k / 30, X, "3d", _views(cams, X))
     assert tr.recoveries >= 1 and np.median(np.linalg.norm(out - X, axis=1)) < 0.01
+
+
+def test_one_camera_recovery_must_keep_the_body_near_its_previous_pose():
+    X = standing_skeleton()
+    shape = measure([X] * 12)
+    prev = params_from_joints(X, shape)
+    near = prev.copy()
+    near[0] += 0.1
+    assert _recovery_local(prev, near, shape)
+    teleported = prev.copy()
+    teleported[2] += 1.0
+    assert not _recovery_local(prev, teleported, shape)
+    flipped_trunk = prev.copy()
+    flipped_trunk[6:9] = [0.0, np.pi, 0.0]
+    assert not _recovery_local(prev, flipped_trunk, shape)
 
 
 def test_pipeline_default_is_unchanged_and_model_takes_over_after_measuring():
