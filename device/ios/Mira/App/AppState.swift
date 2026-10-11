@@ -303,6 +303,58 @@ final class AppState {
         } catch { /* keep the cached `me`; Home shows the offline banner from the socket state */ }
     }
 
+    // MARK: Sessions (Plan 2)
+
+    /// The session this phone started over REST; covers the gap before /ws/events
+    /// stamps `liveSession.currentSessionID`.
+    private(set) var startedSessionID: String?
+
+    private func requireClient() throws -> APIClient {
+        guard let apiClient else { throw APIError.invalidAddress }
+        return apiClient
+    }
+
+    /// POST /sessions; the exercise defaults to the first prescription, else "squat".
+    @discardableResult
+    func startSession(exerciseID: String?) async throws -> SessionStarted {
+        let exercise = exerciseID ?? me?.prescriptions.first?.exerciseId ?? "squat"
+        let started = try await requireClient().createSession(SessionRequest(patientId: patientID, exerciseId: exercise))
+        startedSessionID = started.sessionId
+        return started
+    }
+
+    func stopSession(_ id: String) async throws {
+        _ = try await requireClient().stopSession(id: id)
+        if startedSessionID == id { startedSessionID = nil }
+    }
+
+    func loadSession(_ id: String) async throws -> SessionDetail {
+        try await requireClient().session(id: id)
+    }
+
+    /// The most recent ended session for this patient, if any.
+    func latestEndedSessionID() async throws -> String? {
+        guard let patientID else { return nil }
+        let list = try await requireClient().sessions(patientID: patientID, limit: 10)
+        return list.sessions.filter { $0.endedAt != nil }.max { $0.startedAt < $1.startedAt }?.id
+    }
+
+    func checkin(_ id: String, pain: Int, effort: Int, note: String) async throws {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = try await requireClient().checkin(sessionID: id, CheckinRequest(painPost: pain, effort: effort, note: trimmed.isEmpty ? nil : trimmed))
+    }
+
+    func share(_ id: String) async throws {
+        _ = try await requireClient().shareSession(id: id)
+    }
+
+    /// An absolute URL for a server-relative path such as `/audio/xyz.mp3`.
+    func serverURL(for path: String) -> URL? {
+        if let absolute = URL(string: path), absolute.scheme != nil { return absolute }
+        guard let address = try? ServerAddress(serverAddress) else { return nil }
+        return URL(string: path, relativeTo: address.url)?.absoluteURL
+    }
+
     func disconnect() {
         connectionEnabled = false
         defaults.set(false, forKey: "connectionEnabled")

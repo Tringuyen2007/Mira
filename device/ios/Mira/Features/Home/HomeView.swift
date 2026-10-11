@@ -5,9 +5,16 @@ struct HomeView: View {
     @Environment(\.miraDesignPreview) private var preview
     @State private var showingSetup = false
     @State private var flow: FullScreenFlow?
-    private enum FullScreenFlow: String, Identifiable {
-        case live, summary
-        var id: String { rawValue }
+    @State private var actionMessage: String?
+    @State private var isWorking = false
+    private enum FullScreenFlow: Identifiable {
+        case live, summary(sessionID: String)
+        var id: String {
+            switch self {
+            case .live: return "live"
+            case .summary(let sessionID): return "summary-\(sessionID)"
+            }
+        }
     }
     var body: some View {
         MiraPage(top: 0) {
@@ -70,7 +77,8 @@ struct HomeView: View {
                     }
                 }
             }
-            MiraButton(title: preview ? "Start today’s session" : "Open live session") { flow = .live }
+            MiraButton(title: preview || state.isLinked ? "Start today’s session" : "Open live session") { start() }
+                .disabled(isWorking)
             if preview {
                 HStack(spacing: 14) {
                     FigmaIcon(screen: "home", slot: "imgIconThumbsUp", size: 36)
@@ -80,8 +88,11 @@ struct HomeView: View {
                 HStack {
                     Button("Set up your space") { showingSetup = true }
                     Spacer()
-                    Button("Session summary") { flow = .summary }
+                    Button("Session summary") { openSummary() }.disabled(isWorking)
                 }.font(MiraUI.font(15, "Medium"))
+                if let actionMessage {
+                    Text(actionMessage).font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
+                }
                 if state.connectionEnabled && !state.isPaired {
                     Text("Mira isn’t paired with this phone yet.").font(MiraUI.font(15)).foregroundStyle(MiraUI.soft)
                 } else if state.connectionEnabled && state.liveSession.connectionState != .connected {
@@ -97,10 +108,41 @@ struct HomeView: View {
             NavigationStack {
                 Group {
                     switch destination {
-                    case .live: LiveView()
-                    case .summary: SummaryView()
+                    case .live: LiveView(onEnded: { sid in flow = .summary(sessionID: sid) })
+                    case .summary(let sessionID): SummaryView(sessionID: sessionID)
                     }
                 }.toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { flow = nil } } }
+            }
+        }
+    }
+    private func start() {
+        guard !preview, state.isLinked else { flow = .live; return }
+        guard !isWorking else { return }
+        isWorking = true; actionMessage = nil
+        Task {
+            defer { isWorking = false }
+            do {
+                try await state.startSession(exerciseID: nil)
+                flow = .live
+            } catch {
+                actionMessage = "Mira couldn’t start your session. \(error.localizedDescription)"
+            }
+        }
+    }
+    private func openSummary() {
+        if let sid = state.liveSession.currentSessionID ?? state.startedSessionID {
+            flow = .summary(sessionID: sid); return
+        }
+        guard state.isLinked else { actionMessage = "No sessions yet"; return }
+        guard !isWorking else { return }
+        isWorking = true; actionMessage = nil
+        Task {
+            defer { isWorking = false }
+            do {
+                if let sid = try await state.latestEndedSessionID() { flow = .summary(sessionID: sid) }
+                else { actionMessage = "No sessions yet" }
+            } catch {
+                actionMessage = "Mira couldn’t load your sessions. \(error.localizedDescription)"
             }
         }
     }

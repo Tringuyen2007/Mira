@@ -9,7 +9,23 @@ struct LiveView: View {
     @State private var pain = 6.0
     @State private var commandError: String?
     @State private var isSending = false
-    init(initialScreen: Screen = .live) { _screen = State(initialValue: initialScreen) }
+    @State private var pulse = false
+    private let onEnded: (String) -> Void
+    init(initialScreen: Screen = .live, onEnded: @escaping (String) -> Void = { _ in }) {
+        _screen = State(initialValue: initialScreen)
+        self.onEnded = onEnded
+    }
+    private var sessionID: String? { state.liveSession.currentSessionID ?? state.startedSessionID }
+    private var exerciseTitle: String {
+        let live = state.liveSession.live
+        return live?.exerciseName ?? live?.exerciseId ?? state.me?.prescriptions.first?.exerciseName ?? "Live session"
+    }
+    private var setLine: String {
+        guard let live = state.liveSession.live else { return "Waiting for Mira" }
+        if let set = live.set, let target = live.setsTarget { return "Set \(set) of \(target)" }
+        return live.phase
+    }
+    private var hasFlags: Bool { !(state.liveSession.live?.flags.isEmpty ?? true) }
     private var online: Bool { preview || state.liveSession.eventSocket.state == .connected }
     private var notPaired: Bool { state.liveSession.connectionState == .notPaired || state.liveSession.connectionState == .rejected }
     private var displayed: Screen {
@@ -43,8 +59,8 @@ struct LiveView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(preview ? "Mini squats" : state.liveSession.live?.exerciseId ?? "Live session").font(MiraUI.font(24, "SemiBold"))
-                Text(preview ? "Set 2 of 3" : state.liveSession.live?.phase ?? "Waiting for Mira").font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
+                Text(preview ? "Mini squats" : exerciseTitle).font(MiraUI.font(24, "SemiBold"))
+                Text(preview ? "Set 2 of 3" : setLine).font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -77,11 +93,16 @@ struct LiveView: View {
             } else {
                 MiraCard {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Your movement view").font(MiraUI.font(20, "SemiBold"))
-                        Text(state.liveSession.pose == nil ? "Waiting for skeleton data from Mira." : "Skeleton data received. The movement renderer still needs the server’s coordinate contract.")
+                        Text("3D movement view").font(MiraUI.font(20, "SemiBold"))
+                        Text("Coming soon — Mira will show your skeleton here once the camera engine is connected.")
                             .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft)
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .opacity(pulse ? 0.7 : 1)
+                .animation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true), value: pulse)
+                .overlay { RoundedRectangle(cornerRadius: 28).stroke(MiraUI.alert, lineWidth: hasFlags ? 2.5 : 0) }
+                .onAppear { pulse = true }
+                .accessibilityElement(children: .combine)
             }
             HStack(spacing: 12) {
                 metric("Reps", preview ? "6" : state.liveSession.live.map { String($0.rep) } ?? "—", preview ? "of 10" : state.liveSession.live?.repsTarget.map { "of \($0)" } ?? "Waiting for Mira")
@@ -122,10 +143,14 @@ struct LiveView: View {
         VStack(spacing: 24) {
             MiraIntro(eyebrow: preview ? "MIRA HAS PAUSED" : "TELL MIRA", title: "How much does\nit hurt?", detail: "Move the dot to how you feel.\nThere’s no wrong answer.", size: 38)
             RatingCard(value: $pain, title: "Pain", detail: pain < 4 ? "Mild" : pain < 7 ? "Moderate" : "Severe", minimum: "No pain", maximum: "Worst pain")
-            Text(preview ? "Mira will tell Dr. Lee how you’re feeling." : "Your pain report was requested. Sending a pain score and notifying your care team still need server support.")
+            Text(preview ? "Mira will tell Dr. Lee how you’re feeling." : "Mira tells your care team how you’re feeling.")
                 .font(MiraUI.font(17)).foregroundStyle(MiraUI.soft).padding(20).background(MiraUI.mist, in: RoundedRectangle(cornerRadius: 20))
-            MiraButton(title: "Keep going gently") { screen = .live }.disabled(!preview)
-            MiraButton(title: "Stop for today", secondary: true) { screen = .stop }
+            MiraButton(title: "Keep going gently") {
+                if preview { screen = .live } else { sendPain(then: .live) }
+            }.disabled(!preview && (!online || isSending))
+            MiraButton(title: "Stop for today", secondary: true) {
+                if preview { screen = .stop } else { sendPain(then: .stop) }
+            }.disabled(!preview && isSending)
         }
     }
     private var stopScreen: some View {
@@ -142,8 +167,8 @@ struct LiveView: View {
             }
             MiraButton(title: "Keep going") { screen = .live }
             MiraButton(title: "End session", secondary: true) {
-                if preview { dismiss() } else { send(.stop) }
-            }.disabled(!online || isSending)
+                if preview { dismiss() } else { endSession() }
+            }.disabled(isSending || (!online && sessionID == nil))
         }
     }
     private func metric(_ label: String, _ value: String, _ detail: String) -> some View {
@@ -168,7 +193,40 @@ struct LiveView: View {
         }.buttonStyle(.plain)
     }
     private func reportPain() {
-        if preview { screen = .pain } else { send(.pain, then: .pain) }
+        commandError = nil
+        screen = .pain
+    }
+    private func sendPain(then destination: Screen) {
+        guard !isSending else { return }
+        isSending = true; commandError = nil
+        Task {
+            defer { isSending = false }
+            do {
+                try await state.liveSession.send(CommandMessage.pain(level: Int(pain)))
+                screen = destination
+            } catch {
+                commandError = "Mira couldn’t send your pain level. Please try again when Mira is available."
+                // Stopping must stay possible even when the pain report can't be delivered.
+                if destination == .stop { screen = .stop }
+            }
+        }
+    }
+    private func endSession() {
+        guard !isSending else { return }
+        isSending = true; commandError = nil
+        Task {
+            defer { isSending = false }
+            do {
+                if let sid = sessionID {
+                    try await state.stopSession(sid)
+                    onEnded(sid)
+                } else {
+                    try await state.liveSession.send(.stop)
+                }
+            } catch {
+                commandError = "Mira couldn’t end your session. Please try again when Mira is available."
+            }
+        }
     }
     private func send(_ command: CommandName, then destination: Screen? = nil) {
         guard !isSending else { return }
