@@ -58,3 +58,28 @@ def test_on_track_uses_progress_memory_else_steady() -> None:
 
 def test_severity_orders_buckets() -> None:
     assert triage(sig(open_alert_kind="hr")).severity > triage(sig(flagged_reps_last=4)).severity > triage(sig()).severity
+
+
+def test_compensation_real_insight_evidence_uses_affected_side() -> None:
+    """Insight's _compensation builder (server/agents/insight.py) writes affected_load_pct as an oldest-first
+    list and never a `side` key; the patient's affected_side (Task 8) supplies the leg label."""
+    mem = [{"kind": "compensation",
+            "message": "Affected-leg load fell 47% → 36% over 6 session days while squat depth rose 80° → 92°. "
+                       "Possible compensation.",
+            "evidence": {"affected_load_pct": [47.0, 36.0], "p95_knee": [80.0, 92.0], "pain_post": [2, 3],
+                        "depth_change": 12.0, "load_change": -11.0},
+            "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=mem, affected_side="right"))
+    assert (t.bucket, t.kind) == ("needs_you", "compensation")
+    assert t.evidence == "Right leg 47% → 36%"
+
+
+def test_asymmetry_real_insight_evidence_uses_affected_side() -> None:
+    """Insight's _asymmetry builder writes avg_asymmetry as a list, no `from`/`to` scalar keys."""
+    mem = [{"kind": "asymmetry_worse",
+            "message": "Left-right load asymmetry in squat rose from 3 to 7 points over 5 session days.",
+            "evidence": {"avg_asymmetry": [3.0, 7.0], "session_days": 5, "days": 14},
+            "time": "2026-10-11T09:00:00Z"}]
+    t = triage(sig(memory=mem, affected_side="left"))
+    assert (t.bucket, t.kind) == ("needs_you", "asymmetry")
+    assert t.evidence == "Left leg asymmetry 3% → 7%"

@@ -19,6 +19,9 @@ side label) and `asymmetry_worse` evidence with `avg_asymmetry` (also a list); `
 `load_from`/`load_to`/`side` for compensation and `gain_deg` for depth_gain. This module accepts both shapes for
 compensation/asymmetry (explicit scalar keys first, then the list-based Insight keys as a fallback) since a
 later task may enrich evidence with the patient's affected side before calling `triage()`.
+
+`Signals.affected_side` (Task 8) is that enrichment: it is used as the leg label whenever the memory event's
+`evidence` dict has no `side` key of its own (real Insight evidence never does), e.g. "Right leg 47% → 36%".
 """
 
 from __future__ import annotations
@@ -72,6 +75,7 @@ class Signals:
     missed_sessions: int                   # consecutive expected sessions missed (0 if none)
     last_session_at: datetime | None
     live_now: bool
+    affected_side: str | None = None       # fallback leg label when a memory event's evidence has no "side"
 
 
 @dataclass(frozen=True)
@@ -95,8 +99,8 @@ def _first_last(values: Any) -> tuple[Any, Any] | tuple[None, None]:
     return (present[0], present[-1]) if len(present) >= 2 else (None, None)
 
 
-def _compensation_evidence(ev: dict[str, Any]) -> str:
-    load_from, load_to, side = ev.get("load_from"), ev.get("load_to"), ev.get("side")
+def _compensation_evidence(ev: dict[str, Any], affected_side: str | None = None) -> str:
+    load_from, load_to, side = ev.get("load_from"), ev.get("load_to"), ev.get("side") or affected_side
     if load_from is None or load_to is None:
         load_from, load_to = _first_last(ev.get("affected_load_pct"))
     if load_from is None or load_to is None:
@@ -105,13 +109,15 @@ def _compensation_evidence(ev: dict[str, Any]) -> str:
     return f"{label} {_fmt_num(load_from)}% → {_fmt_num(load_to)}%"
 
 
-def _asymmetry_evidence(ev: dict[str, Any]) -> str:
+def _asymmetry_evidence(ev: dict[str, Any], affected_side: str | None = None) -> str:
     frm, to = ev.get("from"), ev.get("to")
     if frm is None or to is None:
         frm, to = _first_last(ev.get("avg_asymmetry"))
     if frm is None or to is None:
         return ""
-    return f"Asymmetry {_fmt_num(frm)}% → {_fmt_num(to)}%"
+    side = ev.get("side") or affected_side
+    label = f"{side.capitalize()} leg a" if isinstance(side, str) and side else "A"
+    return f"{label}symmetry {_fmt_num(frm)}% → {_fmt_num(to)}%"
 
 
 def _progress_evidence(ev: dict[str, Any]) -> str:
@@ -152,7 +158,7 @@ def triage(s: Signals) -> Triage:
     if worsening is not None:
         kind = "compensation" if worsening.get("kind") == "compensation" else "asymmetry"
         evidence_fn = _compensation_evidence if kind == "compensation" else _asymmetry_evidence
-        evidence = evidence_fn(worsening.get("evidence") or {})
+        evidence = evidence_fn(worsening.get("evidence") or {}, s.affected_side)
         return _result("needs_you", worsening.get("message", ""), evidence, kind)
 
     if s.missed_sessions >= MISSED_NEEDS_YOU_MIN:

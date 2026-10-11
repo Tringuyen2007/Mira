@@ -28,6 +28,7 @@ from server.ai.session_voice import SessionVoice
 from server.api import alerts, calibration, demo, health, lcd_link, patients, prescriptions
 from server.api import notifications as notifications_api
 from server.api import copilot as copilot_api
+from server.api import dashboard
 from server.api import insight as insight_api
 from server.api import proposals
 from server.api import sessions as sessions_api
@@ -337,7 +338,7 @@ def create_app() -> FastAPI:
     app.include_router(demo.router)
     for module in (sessions_api, patients, prescriptions, calibration, alerts, notifications_api, insight_api):
         app.include_router(module.router, dependencies=[Depends(require_token)])
-    for module in (copilot_api, proposals):
+    for module in (copilot_api, proposals, dashboard):
         app.include_router(module.router, dependencies=[Depends(require_token)])
     app.include_router(webhooks.router)
     app.include_router(lcd_link.router)  # its own secret key, no API token

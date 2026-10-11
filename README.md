@@ -238,6 +238,8 @@ token (prompt, local config) is the dashboard's choice; never commit it.
 | Sessions, replay | `GET /sessions/{id}`; `GET /sessions/{id}/frames?downsample=300` (knee curve) or `downsample=0` (full frames, page with `t0=<next_t0>`) (`rest_get_session`, `rest_get_session_frames_*`) |
 | Alerts | `GET /alerts?open=true`, `POST /alerts/{id}/resolve {resolved_by, note?}` (`rest_get_alerts`, `rest_post_alert_resolve`) |
 | Plan proposals | `GET /proposals?status=pending&patient_id=`, `POST /proposals/{id}/approve {therapist_id}`, `/edit {therapist_id, change}`, `/dismiss {therapist_id, reason?}` (409 if already decided) (`rest_get_proposals`, `rest_post_proposal_approve`, `rest_error_409_proposal`) |
+| Caseload | `GET /caseload?therapist_id=` — triaged caseload (needs_you/watch/on_track, with a one-line reason and evidence) plus today's session count and the live session, if any (`rest_get_caseload`) |
+| Therapist Memory | `GET /patients/{id}/memory?days=21` — unacknowledged and acknowledged `memory_events`, newest first (`rest_get_patient_memory`) |
 | Prescriptions | `GET /prescriptions/{patient_id}`, `PUT /prescriptions/{patient_id}` (`rest_get_prescriptions`, `rest_put_prescriptions`) |
 | Copilot | `POST /copilot/ask {question, patient_id?}` (`rest_post_copilot_ask`) |
 | Notifications | `GET /notifications?unread=&limit=&since_id=&therapist_id=`, `GET /notifications/count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `POST /notifications/{id}/ack {therapist_id}` (see "Dashboard notifications") |
