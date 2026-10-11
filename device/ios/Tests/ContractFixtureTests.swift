@@ -97,7 +97,7 @@ final class ContractFixtureTests: XCTestCase {
         let cases: [(String, SocketEvent)] = [
             ("ws_events_client_command", .command(CommandMessage(name: .pause))),
             ("ws_events_client_hr", .hr(HeartRateMessage(t: 1791662259.706, bpm: 97))),
-            ("ws_events_client_wrist", .wrist(WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15]))),
+            ("ws_events_client_wrist", .wrist(WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15], rotationDeg: 41.5))),
             ("ws_events_client_watch_button", .watchButton(WatchButtonMessage(name: "ready"))),
             ("ws_events_client_device_health", .deviceHealth(DeviceHealthMessage(t: 1791662259.706, batteryPct: 81, app: "watch"))),
         ]
@@ -223,11 +223,10 @@ final class ContractFixtureTests: XCTestCase {
         XCTAssertEqual(sync.dtMs, 20)
         XCTAssertEqual(sync.accelMag.count, 6)
 
-        // `ws_events_client_wrist` (unextended) must stay byte-identical to the server's
-        // pre-existing sample; the contract's extended (rotation_deg) example lives in its
-        // own fixture so that byte-equality check keeps passing.
-        let plainWrist = try decode(WristMessage.self, "ws_events_client_wrist")
-        XCTAssertNil(plainWrist.rotationDeg)
+        // The server's `ws_events_client_wrist` sample now carries the watch's rotation_deg; an older
+        // phone/watch that sends no angle is still valid, so that case is built here.
+        let plainWrist = WristMessage(t: 1791662259.706, quat: [0.99, 0.01, 0.05, 0.02], accel: [0.02, -9.79, 0.15])
+        XCTAssertEqual(try decode(WristMessage.self, "ws_events_client_wrist").rotationDeg, 41.5)
         let wrist = try decode(WristMessage.self, "ws_events_client_wrist_rotation")
         XCTAssertEqual(wrist.rotationDeg, 41.5)
 

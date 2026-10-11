@@ -1,1 +1,8 @@
-{"type": "sync_progress", "progress": 0.6, "locked": false, "seq": 1400, "t": 1791662250.0, "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"}
+{
+  "type": "sync_progress",
+  "progress": 0.6,
+  "locked": false,
+  "seq": 1400,
+  "t": 1791662250.0,
+  "session_id": "219b6491-aff5-461e-9e5e-39ef73bde60f"
+}
