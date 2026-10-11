@@ -48,6 +48,9 @@ async def start_session(body: SessionIn | None = None,
             active = {rx["exercise_id"] for rx in await queries.prescriptions(state.db, body.patient_id)}
             if body.exercise_id not in active:
                 raise HTTPException(status_code=422, detail=f"{body.exercise_id!r} is not in your plan")
+        current = state.sessions.current
+        if current is not None and current.patient_id != body.patient_id:
+            raise HTTPException(status_code=409, detail="another patient's session is running")
     registry = state.sessions
     if registry.current is not None:
         await registry.stop(registry.current.session_id)

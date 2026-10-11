@@ -47,7 +47,8 @@ from server.notify import webhooks
 from server.notify.notifications import NotificationService
 from server.notify.notifications import on_alert_step as notify_on_alert_step
 from server.notify.retell_client import RetellNotifier
-from server.security import Principal, TunnelFilterMiddleware, require_principal, require_token, ws_scope, ws_token_ok
+from server.security import (Principal, TokenCheckUnavailable, TunnelFilterMiddleware, require_principal,
+                             require_token, ws_scope, ws_token_ok)
 from server.state import AppState, SessionRegistry, get_state, set_state
 
 log = get_logger("main")
@@ -304,7 +305,14 @@ def _parse_since_id(raw: str | None) -> int | None:
 
 
 async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allow_device: bool = False) -> None:
-    principal = await ws_scope(ws)
+    try:
+        principal = await ws_scope(ws)
+    except TokenCheckUnavailable:
+        # The server can't tell yet whether this token is valid (no database, or a database hiccup): tell the
+        # phone to try again later, never that its token was rejected (1008 would stop LiveSocket's retries).
+        await ws.accept()
+        await ws.close(code=1013)
+        return
     if principal is None or (principal.scope == "device" and not allow_device):
         await ws.close(code=1008)
         return
@@ -330,10 +338,13 @@ async def _serve_ws(ws: WebSocket, channel: str, on_message: Any = None, *, allo
 
 
 def _patient_accepts(patient_id: str) -> Callable[[dict[str, Any]], bool]:
-    """Per-client hub filter: a phone sees frames and events only while the live session is its patient's."""
-    def accept(_msg: dict[str, Any]) -> bool:
+    """Per-client hub filter: a phone sees frames and events only while the live session is its patient's, and
+    never an event explicitly tagged for a different patient (e.g. another patient's proposal_created/
+    proposal_decided, which carry no live session to gate them)."""
+    def accept(msg: dict[str, Any]) -> bool:
         current = get_state().sessions.current
-        return current is not None and current.patient_id == patient_id
+        return (current is not None and current.patient_id == patient_id
+                and msg.get("patient_id") in (None, patient_id))
 
     return accept
 

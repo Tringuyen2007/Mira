@@ -79,6 +79,14 @@ def test_device_token_is_401_on_rest(client: TestClient) -> None:
     assert client.get("/stats", headers={"Authorization": f"Bearer {DEVICE_TOKEN}"}).status_code == 401
 
 
+def test_patient_token_without_database_is_503_not_401(make_client: Callable[..., TestClient]) -> None:
+    """A pt_ token the server has no database to check must be a 503 ("come back later"), never a false 401
+    ("this token is invalid")."""
+    client = make_client()
+    r = client.get("/me", headers={"Authorization": f"Bearer {security.new_patient_token()}"})
+    assert r.status_code == 503
+
+
 def test_ws_scope_returns_principals(client: TestClient, dsn: str) -> None:
     token = security.new_patient_token()
     _insert_device(dsn, token)

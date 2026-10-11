@@ -22,9 +22,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from server import exercises
 from server.config import cfg
 from server.logging_setup import get_logger
-from server import exercises  # noqa: E402
 
 if TYPE_CHECKING:
     from server.hub import Hub

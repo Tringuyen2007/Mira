@@ -15,6 +15,15 @@ from server.tests.dbutil import fresh_database, prepare, ro_dsn
 from server.tests.test_pairing import CONTACT, PROFILE
 
 
+@pytest.fixture(autouse=True)
+def _clear_pairing_attempts() -> Iterator[None]:
+    from server.api import pair as pair_api
+
+    pair_api._attempts.clear()
+    yield
+    pair_api._attempts.clear()
+
+
 @pytest.fixture(scope="module")
 def dsn() -> Iterator[str]:
     with fresh_database() as url:
@@ -64,6 +73,25 @@ def test_patient_starts_stops_reads_own_session(client: TestClient, phone: dict[
     assert client.post(f"/sessions/{sid}/stop", headers=phone).json()["stopped"] is True
     assert client.post("/sessions/11111111-1111-1111-1111-111111111111/stop", headers=phone).status_code == 403
     assert client.post(f"/sessions/{uuid.uuid4()}/stop", headers=phone).status_code == 404
+
+
+def test_patient_cannot_stop_another_patients_session(client: TestClient, phone: dict[str, str]) -> None:
+    """A patient's phone POSTing /sessions while another patient's session is live must not stop it (409),
+    but the patient's own running session is still replaced normally."""
+    from server.state import get_state
+
+    r = client.post("/sessions", json={"patient_id": "bob", "exercise_id": "squat"}, headers=AUTH)
+    assert r.status_code == 200 and r.json()["patient_id"] == "bob"
+    try:
+        r = client.post("/sessions", json={"exercise_id": "squat"}, headers=phone)
+        assert r.status_code == 409
+        assert get_state().sessions.current.patient_id == "bob"  # Bob's session is untouched
+    finally:
+        client.post(f"/sessions/{get_state().sessions.current.session_id}/stop", headers=AUTH)
+    r = client.post("/sessions", json={"exercise_id": "squat"}, headers=phone)
+    assert r.status_code == 200 and r.json()["patient_id"] == "maya"
+    r2 = client.post("/sessions", json={"exercise_id": "squat"}, headers=phone)
+    assert r2.status_code == 200 and r2.json()["patient_id"] == "maya"  # own session replaced normally
 
 
 def test_admin_unchanged(client: TestClient) -> None:

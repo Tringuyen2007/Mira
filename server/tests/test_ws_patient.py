@@ -15,6 +15,15 @@ from server.tests.dbutil import fresh_database, prepare, ro_dsn
 from server.tests.test_pairing import CONTACT, PROFILE
 
 
+@pytest.fixture(autouse=True)
+def _clear_pairing_attempts() -> Iterator[None]:
+    from server.api import pair as pair_api
+
+    pair_api._attempts.clear()
+    yield
+    pair_api._attempts.clear()
+
+
 @pytest.fixture(scope="module")
 def dsn() -> Iterator[str]:
     with fresh_database() as url:
@@ -83,3 +92,34 @@ def test_patient_commands_and_forbidden_messages(client: TestClient, token: str,
         ws.send_json({"type": "fall", "stage": "confirmed"})
         _drain(ws, 0.5)
     assert [m["type"] for m in seen] == ["command", "hr"]
+
+
+def test_ws_token_check_db_error_closes_1013_not_1008(client: TestClient, token: str,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DB hiccup while checking a patient token must look like "try again later" (1013), not a rejected
+    credential (1008): the iOS LiveSocket maps 1008 to .rejected and never retries."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from server.db import queries
+    from server.db.pool import DBError
+
+    async def boom(*args: object, **kwargs: object) -> None:
+        raise DBError("connection lost")
+
+    monkeypatch.setattr(queries, "patient_device", boom)
+    security.invalidate_token_cache()
+    # The server accepts the handshake, then closes with 1013 ("try again later"): unlike an invalid token
+    # (closed before accept, so the handshake itself fails), the disconnect here surfaces on the first receive.
+    with client.websocket_connect(f"/ws/live?token={token}") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == 1013
+
+
+def test_proposal_for_another_patient_never_reaches_the_phone(client: TestClient, token: str) -> None:
+    from server.state import get_state
+
+    with client.websocket_connect(f"/ws/events?token={token}") as ws:
+        get_state().hub.emit("proposal_created", {"patient_id": "bob", "proposal": {"id": 1}})
+        msgs = _drain(ws, 1.0)
+        assert all(m.get("type") != "proposal_created" for m in msgs), msgs

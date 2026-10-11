@@ -66,10 +66,26 @@ def mask(token: str) -> str:
 # token hash → (Principal, expires_at, last_touched). Positive results only; a revoked token is refused as soon as
 # the entry expires (≤ 60 s) or invalidate_token_cache() runs (DELETE /me, device revocation).
 _cache: dict[str, tuple[Principal, float, float]] = {}
+CACHE_PRUNE_AT = 1000  # once the cache grows past this many keys, drop its expired entries
 
 
 def invalidate_token_cache() -> None:
     _cache.clear()
+
+
+def _prune_cache(now: float) -> None:
+    """Drop expired entries once the cache has grown large (a long-running server with many phones)."""
+    if len(_cache) <= CACHE_PRUNE_AT:
+        return
+    expired = [digest for digest, (_, expires, _) in _cache.items() if expires <= now]
+    for digest in expired:
+        del _cache[digest]
+
+
+class TokenCheckUnavailable(Exception):
+    """A patient token couldn't be checked because the database is unreachable or not configured. Distinct
+    from "invalid token": the caller should ask the client to retry (WS: close 1013), never treat this as a
+    rejected credential (WS: close 1008) or the phone's `LiveSocket` gives up instead of backing off."""
 
 
 async def _patient_principal(token: str) -> Principal | None:
@@ -87,11 +103,14 @@ async def _patient_principal(token: str) -> Principal | None:
         return principal
     db = get_state().db
     if db is None:
-        return None
-    row = await queries.patient_device(db, digest)  # DBError propagates → 503, never a false 401
+        from server.api.db_dep import NO_DB_DETAIL  # local import: db_dep imports from server.state, not security
+
+        raise TokenCheckUnavailable(NO_DB_DETAIL)
+    row = await queries.patient_device(db, digest)  # DBError propagates → unavailable, never a false 401
     if row is None or row["revoked_at"] is not None:
         return None
     principal = Principal("patient", row["patient_id"])
+    _prune_cache(now)
     _cache[digest] = (principal, now + TOKEN_CACHE_S, now)
     writes.fire(writes.touch_patient_device(db, digest))
     return principal
@@ -117,8 +136,12 @@ def _bearer(request: Request) -> str:
 
 async def require_principal(request: Request) -> Principal:
     """FastAPI dependency for routes patients may call: the full token or a patient token, else 401. The LCD's
-    device token is never accepted on REST."""
-    principal = await resolve_token(_bearer(request))
+    device token is never accepted on REST. A patient token the server can't check right now (no database, or
+    a database failure propagating as DBError) is a 503, never a false 401."""
+    try:
+        principal = await resolve_token(_bearer(request))
+    except TokenCheckUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if principal is None or principal.scope == "device":
         raise HTTPException(status_code=401, detail="unauthorized", headers={"WWW-Authenticate": "Bearer"})
     return principal
@@ -142,13 +165,14 @@ async def ws_token_ok(ws: WebSocket) -> bool:
 
 async def ws_scope(ws: WebSocket) -> Principal | None:
     """The principal behind `?token=`: full, the LCD device token, a patient's phone, or None. Device scope is
-    only honoured on the channels that opt in (see server.main). A database failure while checking a patient
-    token returns None (the phone reconnects with backoff)."""
+    only honoured on the channels that opt in (see server.main). Raises TokenCheckUnavailable when a patient
+    token can't be checked right now (no database, or a database failure) — the caller (server.main._serve_ws)
+    must tell the phone to retry with backoff (close 1013), never reject the token outright (close 1008)."""
     try:
         return await resolve_token(ws.query_params.get("token", ""))
     except DBError as exc:
         log.warning("ws token check failed (database)", extra={"error": str(exc)})
-        return None
+        raise TokenCheckUnavailable(str(exc)) from exc
 
 
 @lru_cache(maxsize=1)
